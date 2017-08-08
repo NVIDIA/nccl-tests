@@ -1,0 +1,78 @@
+#
+# Copyright (c) 2015-2017, NVIDIA CORPORATION. All rights reserved.
+#
+# See LICENCE.txt for license information
+#
+
+CUDA_HOME ?= /usr/local/cuda
+PREFIX ?= /usr/local
+VERBOSE ?= 0
+DEBUG ?= 0
+
+CUDA_LIB ?= $(CUDA_HOME)/lib64
+CUDA_INC ?= $(CUDA_HOME)/include
+NVCC = $(CUDA_HOME)/bin/nvcc
+
+# Better define NVCC_GENCODE in your environment to the minimal set
+# of archs to reduce compile time.
+NVCC_GENCODE ?= -gencode=arch=compute_30,code=sm_30 \
+		-gencode=arch=compute_35,code=sm_35 \
+                -gencode=arch=compute_50,code=sm_50 \
+                -gencode=arch=compute_52,code=sm_52 \
+                -gencode=arch=compute_60,code=sm_60 \
+                -gencode=arch=compute_61,code=sm_61 \
+                -gencode=arch=compute_61,code=compute_61
+
+NVCUFLAGS  := -ccbin $(CXX) $(NVCC_GENCODE) -std=c++11
+
+LDFLAGS    := -L${CUDA_LIB} -lcudart -lrt
+NVLDFLAGS  := -L${CUDA_LIB} -lcudart -lrt
+
+ifeq ($(DEBUG), 0)
+NVCUFLAGS += -O3
+CXXFLAGS  += -O3
+else
+NVCUFLAGS += -O0 -G -g
+CXXFLAGS  += -O0 -g -ggdb3
+endif
+
+ifeq ($(VERBOSE), 0)
+.SILENT:
+endif
+
+.PHONY: build clean
+
+BUILDDIR ?= ../build
+ifneq ($(NCCLDIR), "")
+NVCUFLAGS += -I$(NCCLDIR)/include/
+NVLDFLAGS   += -L$(NCCLDIR)/lib
+endif
+
+ifeq ($(MPI), 1)
+NVCUFLAGS += -DMPI_SUPPORT -I$(MPI_HOME)/include
+NVLDFLAGS += -L$(MPI_HOME)/lib -lmpi
+endif
+LIBRARIES += curand nccl nvToolsExt
+NVLDFLAGS   += $(LIBRARIES:%=-l%)
+
+DST_DIR := $(BUILDDIR)
+SRC_FILES := $(wildcard *.cu)
+OBJ_FILES := $(SRC_FILES:%.cu=${DST_DIR}/%.o)
+BIN_FILES_LIST := all_reduce all_gather broadcast reduce_scatter reduce
+BIN_FILES := $(BIN_FILES_LIST:%=${DST_DIR}/%_perf)
+
+build: ${BIN_FILES}
+
+clean:
+	rm -rf ${DST_DIR}
+
+${DST_DIR}/%.o: %.cu
+	@printf "Compiling  %-35s > %s\n" $< $@
+	@mkdir -p ${DST_DIR}
+	$(NVCC) -o $@ $(NVCUFLAGS) -c $<
+
+${DST_DIR}/%_perf:${DST_DIR}/%.o ${DST_DIR}/common.o
+	@printf "Linking  %-35s > %s\n" $< $@
+	@mkdir -p ${DST_DIR}
+	$(NVCC) -o $@ $(NVCUFLAGS) $^ ${NVLDFLAGS}
+
