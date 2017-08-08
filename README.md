@@ -34,7 +34,10 @@ Run with MPI on 40 processes (potentially on multiple nodes) with 4 GPUs each, d
 $ mpirun -np 40 ./build/all_reduce_perf -b 8 -e 128M -f 2 -g 4 -c 0
 ```
 
-All tests support the same arguments :
+### Arguments
+
+All tests support the same set of arguments :
+
 * Number of GPUs
   * `-t,--nthreads <num threads>` number of threads per process. Default : 1.
   * `-g,--ngpus <gpus per thread>` number of gpus per process. Default : 1.
