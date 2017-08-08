@@ -40,23 +40,24 @@ All tests support the same set of arguments :
 
 * Number of GPUs
   * `-t,--nthreads <num threads>` number of threads per process. Default : 1.
-  * `-g,--ngpus <gpus per thread>` number of gpus per process. Default : 1.
+  * `-g,--ngpus <gpus per thread>` number of gpus per thread. Default : 1.
 * Sizes to scan
   * `-b,--minbytes <min size in bytes>` minimum size to start with. Default : 32M.
   * `-e,--maxbytes <max size in bytes>` maximum size to end at. Default : 32M.
   * Increments can be either fixes of a multiplication factor. Only one of those should be used
-  * `-i,--stepbytes <increment size>` fixed increment between sizes. Default : (max-min)/10.
-  * `-f,--stepfactor <increment factor>` multiplication factor between sizes. Default : disabled.
+    * `-i,--stepbytes <increment size>` fixed increment between sizes. Default : (max-min)/10.
+    * `-f,--stepfactor <increment factor>` multiplication factor between sizes. Default : disabled.
+* NCCL operations arguments
+  * `-o,--op <sum/prod/min/max/all>` Specify which reduction operation to perform. Only relevant for reduction operations like Allreduce, Reduce or ReduceScatter. Default : Sum.
+  * `-d,--datatype <nccltype/all>` Specify which datatype to use. Default : Float.
+  * `-r,--root <root/all>` Specify which root to use. Only for operations with a root like broadcast or reduce. Default : 0.
 * Performance 
   * `-n,--iters <iteration count>` number of iterations. Default : 20.
   * `-w,--warmup_iters <warmup iteration count>` number of warmup iterations (not timed). Default : 5.
-* `-s,--swap_args <0/1>` when used with multiple threads, have threads manage different GPUs for each iteration. Default : 0.
-* `-p,--parallel_init <0/1>` use threads to initialize NCCL in parallel.
-* `-c,--check <0/1>` check correctness of results. This can be quite slow on large numbers of GPUs. Default : 1.
-* NCCL operations arguments
-  * `-o,--op <sum/prod/min/max/all>` Specify which reduction operation to perform. Only relevant for reduction operations. Default : Sum.
-  * `-d,--datatype <nccltype/all>` Specify which datatype to use. Default : Float.
-  * `-r,--root <root/all>` Specify which root to use. Only for operations with a root like broadcast or reduce.
+* Test operation
+  * `-s,--swap_args <0/1>` when used with multiple threads, have threads manage different GPUs for each iteration. Default : 0.
+  * `-p,--parallel_init <0/1>` use threads to initialize NCCL in parallel. Default : 0.
+  * `-c,--check <0/1>` check correctness of results. This can be quite slow on large numbers of GPUs. Default : 1.
   * `-z,--blocking <0/1>` Make NCCL collective blocking, i.e. have CPUs wait and sync after each collective. Default : 0.
 
 ## Copyright
