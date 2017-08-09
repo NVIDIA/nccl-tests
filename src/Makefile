@@ -43,9 +43,9 @@ endif
 .PHONY: build clean
 
 BUILDDIR ?= ../build
-ifneq ($(NCCLDIR), "")
-NVCUFLAGS += -I$(NCCLDIR)/include/
-NVLDFLAGS   += -L$(NCCLDIR)/lib
+ifneq ($(NCCL_HOME), "")
+NVCUFLAGS += -I$(NCCL_HOME)/include/
+NVLDFLAGS   += -L$(NCCL_HOME)/lib
 endif
 
 ifeq ($(MPI), 1)
