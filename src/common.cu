@@ -915,6 +915,7 @@ int main(int argc, char* argv[]) {
        NCCLCHECK(ncclGroupEnd());
      }
 
+     PRINT("# NCCL Tests compiled with NCCL %d.%d\n", NCCL_MAJOR, NCCL_MINOR);
      PRINT("# Using devices\n");
      for (int p=0; p<nProcs; p++) {
        if (p == proc) {
