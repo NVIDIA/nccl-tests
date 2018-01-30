@@ -38,11 +38,11 @@ An allreduce operation, for each element of the N arrays (input i_X and output o
 
 **Note : this is independent of the algorithm used (ring, tree, or other) as long as they use point-to-point operations (send/receive).**
 
-A ring would do that in an order which follows the ring :
+A ring would do that operation in an order which follows the ring :
 
 `i_0 + i_1 + ... + i_{n-1} -> o_{n-1} -> o_0 -> o_1 -> .. -> o_{n-2}`
 
-A tree would do this hierchically :
+A tree would do it hierarchically :
 
 `(((((i_{n-1} + i_{n-2}) + (i_{n-3} + i_{n-4})) + ... + (i_1 + i_0))))) -> o_0 -> (o_{n/2} -> (o_{3n/4} ...))`
 
