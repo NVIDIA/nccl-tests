@@ -54,7 +54,7 @@ Considering that each rank has a bandwidth to the outside world of _B_, the time
  `t = (S*2*(n-1)) / (n*B)`
 
 Indeed, we have _S_ elements, 2*(n-1) operations per element, and _n_ links of bandwidth _B_ to perform them.
-Reordering the elements, we find that
+Reordering the equation, we find that
 
  `t = (S/B) * (2*(n-1)/n)`
 
