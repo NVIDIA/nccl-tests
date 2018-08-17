@@ -78,6 +78,8 @@ And the Bus Bandwidth is therefore computed as :
 
  `B = S/t * (n-1)/n = algbw * (n-1)/n`
 
+Note that here, S is the size in bytes of the total array, which for NCCL is equal to `recvcount*sizeof(datatype)*n` as the `recvcount` argument is the count per rank.
+
 ### AllGather
 
 The AllGather operation requires only to perform the assignation part of the allReduce operation :
@@ -93,6 +95,8 @@ The perfect allGather time with a rank bandwidth of B would therefore be :
 And the Bus Bandwidth is therefore computed as :
 
  `B = S/t * (n-1)/n = algbw * (n-1)/n`
+
+Note that here, S is the size in bytes of the total array, which for NCCL is equal to `sendcount*sizeof(datatype)*n` as the `sendcount` argument is the count per rank.
 
 ### Broadcast
 
