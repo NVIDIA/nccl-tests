@@ -1,6 +1,6 @@
 # NCCL Tests
 
-These tests check both the performance and the correctness of NCCL operations. They can be compiled against [NCCL 1](http://github.com/nvidia/nccl) and [NCCL 2](http://developer.nvidia.com/nccl).
+These tests check both the performance and the correctness of NCCL operations. They can be compiled against [NCCL](http://github.com/nvidia/nccl)
 
 ## Build
 
@@ -59,12 +59,11 @@ All tests support the same set of arguments :
   * `-n,--iters <iteration count>` number of iterations. Default : 20.
   * `-w,--warmup_iters <warmup iteration count>` number of warmup iterations (not timed). Default : 5.
 * Test operation
-  * `-s,--swap_args <0/1>` when used with multiple threads, have threads manage different GPUs for each iteration. Default : 0.
   * `-p,--parallel_init <0/1>` use threads to initialize NCCL in parallel. Default : 0.
   * `-c,--check <0/1>` check correctness of results. This can be quite slow on large numbers of GPUs. Default : 1.
   * `-z,--blocking <0/1>` Make NCCL collective blocking, i.e. have CPUs wait and sync after each collective. Default : 0.
 
 ## Copyright
 
-NCCL tests are provided under the BSD licence. All source code and accompanying documentation is copyright (c) 2016-2017, NVIDIA CORPORATION. All rights reserved.
+NCCL tests are provided under the BSD licence. All source code and accompanying documentation is copyright (c) 2016-2019, NVIDIA CORPORATION. All rights reserved.
 

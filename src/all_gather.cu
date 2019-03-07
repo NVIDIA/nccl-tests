@@ -1,79 +1,53 @@
 /*************************************************************************
- * Copyright (c) 2016-2017, NVIDIA CORPORATION. All rights reserved.
+ * Copyright (c) 2016-2019, NVIDIA CORPORATION. All rights reserved.
  *
- * See LICENCE.txt for license information
+ * See LICENSE.txt for license information
  ************************************************************************/
 
 #include "cuda_runtime.h"
 #include "common.h"
 
-
 void print_header() {
-  PRINT("# %10s  %12s  %6s  %6s        out-of-place                    in-place\n", "", "", "", "");
-  PRINT("# %10s  %12s  %6s  %7s  %5s  %5s  %7s  %7s  %5s  %5s  %7s\n", "bytes", "N", "type", 
-      "time", "algbw", "busbw", "res", "time", "algbw", "busbw", "res");
+  PRINT("# %10s  %12s  %6s            out-of-place                       in-place          \n", "", "", "");
+  PRINT("# %10s  %12s  %6s  %7s  %6s  %6s  %5s  %7s  %6s  %6s  %5s\n", "size", "count", "type",
+        "time", "algbw", "busbw", "error", "time", "algbw", "busbw", "error");
+  PRINT("# %10s  %12s  %6s  %7s  %6s  %6s  %5s  %7s  %6s  %6s  %5s\n", "(B)", "(elements)", "",
+        "(us)", "(GB/s)", "(GB/s)", "", "(us)", "(GB/s)", "(GB/s)", "");
 }
 
 void print_line_header (size_t size, size_t count, const char *typeName, const char *opName, int root) {
   PRINT("%12li  %12li  %6s", size, count, typeName);
 }
 
-void getCollByteCount(size_t *sendcount, size_t *recvcount, size_t *paramcount, size_t *sendInplaceOffset, size_t *recvInplaceOffset, size_t *procSharedCount, int *sameExpected, size_t count, int nranks) {
-    *sendcount = count/nranks;
-    *recvcount = (count/nranks)*nranks;
-    *sameExpected = 1;
-    *procSharedCount = 0;
-    *sendInplaceOffset = count/nranks;
-    *recvInplaceOffset = 0;
-    *paramcount = *sendcount;
+void AllGatherGetCollByteCount(size_t *sendcount, size_t *recvcount, size_t *paramcount, size_t *sendInplaceOffset, size_t *recvInplaceOffset, size_t count, int nranks) {
+  *sendcount = count/nranks;
+  *recvcount = (count/nranks)*nranks;
+  *sendInplaceOffset = count/nranks;
+  *recvInplaceOffset = 0;
+  *paramcount = *sendcount;
 }
 
-void InitRecvResult(struct threadArgs_t* args, ncclDataType_t type, ncclRedOp_t op, int root, int in_place, int is_first) {
-  size_t nBytes = args->nbytes;
-  size_t count = nBytes / wordSize(type);
-  int proc = args->proc;
-  int nThreads = args->nThreads;
-  int t = args->thread;
-  int nGpus = args->nGpus;
+testResult_t AllGatherInitData(struct threadArgs* args, ncclDataType_t type, ncclRedOp_t op, int root, int rep, int in_place) {
+  size_t sendcount = args->sendBytes / wordSize(type);
+  size_t recvcount = args->expectedBytes / wordSize(type);
+  int nranks = args->nProcs*args->nThreads*args->nGpus;
 
-  while (args->sync[args->sync_idx] != t) pthread_yield();
-
-  for (int i=0; i<nGpus; i++) {
-    int device;
+  for (int i=0; i<args->nGpus; i++) {
+    int gpuid = args->localRank*args->nThreads*args->nGpus + args->thread*args->nGpus + i;
+    CUDACHECK(cudaSetDevice(gpuid));
     int rank = ((args->proc*args->nThreads + args->thread)*args->nGpus + i);
-    NCCLCHECK(ncclCommCuDevice(args->comms[i], &device));
-    CUDACHECK(cudaSetDevice(device));
-
-    void* data = in_place ? (void *)((uintptr_t)args->recvbuffs[i] + args->sendInplaceOffset*rank) : args->sendbuffs[i];
-
-    CUDACHECK(cudaMemcpy((void *)((uintptr_t)args->expectedHost[0] + ((proc*nThreads + t)*nGpus + i)*nBytes), 
-                data, 
-                nBytes, cudaMemcpyDeviceToHost));
-
-    if (in_place == 0) {
-      CUDACHECK(cudaMemset(args->recvbuffs[i], 0, args->expectedBytes));
+    CUDACHECK(cudaMemset(args->recvbuffs[i], 0, args->expectedBytes));
+    void* data = in_place ? ((char*)args->recvbuffs[i])+rank*args->sendBytes : args->sendbuffs[i];
+    TESTCHECK(InitData(data, sendcount, type, rep, rank));
+    for (int j=0; j<nranks; j++) {
+      TESTCHECK(InitData(((char*)args->expected[i])+args->sendBytes*j, sendcount, type, rep, j));
     }
     CUDACHECK(cudaDeviceSynchronize());
   }
-
-  args->sync[args->sync_idx] = t + 1;
-
-  if (t+1 == nThreads) {
-#ifdef MPI_SUPPORT
-    // Last thread does the MPI allgather
-    MPI_Allgather(MPI_IN_PLACE, nBytes*nThreads*nGpus, MPI_BYTE, 
-        args->expectedHost[0], 
-        nBytes*nThreads*nGpus, MPI_BYTE, MPI_COMM_WORLD);
-#endif
-    args->sync[args->sync_idx] = 0;
-  } else {
-    while (args->sync[args->sync_idx]) pthread_yield();
-  }
-
-  args->sync_idx=!args->sync_idx;
+  return testSuccess;
 }
 
-void GetBw(size_t count, int typesize, double sec, double* algBw, double* busBw, int nranks) {
+void AllGatherGetBw(size_t count, int typesize, double sec, double* algBw, double* busBw, int nranks) {
   double baseBw = (double)(count * typesize * (nranks - 1)) / 1.0E9 / sec;
 
   *algBw = baseBw;
@@ -81,26 +55,49 @@ void GetBw(size_t count, int typesize, double sec, double* algBw, double* busBw,
   *busBw = baseBw * factor;
 }
 
-void RunColl(void* sendbuff, void* recvbuff, size_t count, ncclDataType_t type, ncclRedOp_t op, int root, ncclComm_t comm, cudaStream_t stream) {
+testResult_t AllGatherRunColl(void* sendbuff, void* recvbuff, size_t count, ncclDataType_t type, ncclRedOp_t op, int root, ncclComm_t comm, cudaStream_t stream) {
   NCCLCHECK(ncclAllGather(sendbuff, recvbuff, count, type, comm, stream));
+  return testSuccess;
 }
 
-void RunTest(struct threadArgs_t* args, int root, ncclDataType_t type, const char* typeName, ncclRedOp_t op, const char* opName) {
+struct testColl allGatherTest = {
+  "AllGather",
+  AllGatherGetCollByteCount,
+  AllGatherInitData,
+  AllGatherGetBw,
+  AllGatherRunColl
+};
+
+void AllGatherGetBuffSize(size_t *sendcount, size_t *recvcount, size_t count, int nranks) {
+  size_t paramcount, sendInplaceOffset, recvInplaceOffset;
+  AllGatherGetCollByteCount(sendcount, recvcount, &paramcount, &sendInplaceOffset, &recvInplaceOffset, count, nranks);
+}
+
+testResult_t AllGatherRunTest(struct threadArgs* args, int root, ncclDataType_t type, const char* typeName, ncclRedOp_t op, const char* opName) {
+  args->collTest = &allGatherTest;
   ncclDataType_t *run_types;
   const char **run_typenames;
   int type_count;
 
-  if ((int)type != -1) { 
+  if ((int)type != -1) {
     type_count = 1;
     run_types = &type;
     run_typenames = &typeName;
-  } else { 
+  } else {
     type_count = ncclNumTypes;
     run_types = test_types;
     run_typenames = test_typenames;
   }
 
-  for (int i=0; i<type_count; i++) { 
-     TimeTest(args, run_types[i], run_typenames[i], (ncclRedOp_t)0, NULL, 0, 1);
-  }   
+  for (int i=0; i<type_count; i++) {
+    TESTCHECK(TimeTest(args, run_types[i], run_typenames[i], (ncclRedOp_t)0, "", -1));
+  }
+  return testSuccess;
 }
+
+struct testEngine allGatherEngine = {
+  AllGatherGetBuffSize,
+  AllGatherRunTest
+};
+
+#pragma weak ncclTestEngine=allGatherEngine
