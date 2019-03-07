@@ -1,6 +1,6 @@
 # NCCL Tests
 
-These tests check both the performance and the correctness of NCCL operations. They can be compiled against [NCCL 1](http://github.com/nvidia/nccl) and [NCCL 2](http://developer.nvidia.com/nccl).
+These tests check both the performance and the correctness of NCCL operations. They can be compiled against [NCCL](http://github.com/nvidia/nccl)
 
 ## Build
 
@@ -20,7 +20,7 @@ $ make MPI=1 MPI_HOME=/path/to/mpi CUDA_HOME=/path/to/cuda NCCL_HOME=/path/to/nc
 
 ## Usage
 
-NCCL tests can run on multiple processes, multiple threads, and multiple CUDA devices per thread. The number of process is managed by MPI and is therefore not passed to the tests as argument. The total number of ranks (=CUDA devices) will be equal to (number of processes)\*(number of threads)\*(number of gpus per thread).
+NCCL tests can run on multiple processes, multiple threads, and multiple CUDA devices per thread. The number of process is managed by MPI and is therefore not passed to the tests as argument. The total number of ranks (=CUDA devices) will be equal to (number of processes)\*(number of threads)\*(number of GPUs per thread).
 
 ### Quick examples
 
@@ -44,7 +44,7 @@ All tests support the same set of arguments :
 
 * Number of GPUs
   * `-t,--nthreads <num threads>` number of threads per process. Default : 1.
-  * `-g,--ngpus <gpus per thread>` number of gpus per thread. Default : 1.
+  * `-g,--ngpus <GPUs per thread>` number of gpus per thread. Default : 1.
 * Sizes to scan
   * `-b,--minbytes <min size in bytes>` minimum size to start with. Default : 32M.
   * `-e,--maxbytes <max size in bytes>` maximum size to end at. Default : 32M.
@@ -55,16 +55,16 @@ All tests support the same set of arguments :
   * `-o,--op <sum/prod/min/max/all>` Specify which reduction operation to perform. Only relevant for reduction operations like Allreduce, Reduce or ReduceScatter. Default : Sum.
   * `-d,--datatype <nccltype/all>` Specify which datatype to use. Default : Float.
   * `-r,--root <root/all>` Specify which root to use. Only for operations with a root like broadcast or reduce. Default : 0.
-* Performance 
+* Performance
   * `-n,--iters <iteration count>` number of iterations. Default : 20.
   * `-w,--warmup_iters <warmup iteration count>` number of warmup iterations (not timed). Default : 5.
+  * `-m,--agg_iters <aggregation count>` number of operations to aggregate together in each iteration. Default : 1.
 * Test operation
-  * `-s,--swap_args <0/1>` when used with multiple threads, have threads manage different GPUs for each iteration. Default : 0.
   * `-p,--parallel_init <0/1>` use threads to initialize NCCL in parallel. Default : 0.
   * `-c,--check <0/1>` check correctness of results. This can be quite slow on large numbers of GPUs. Default : 1.
   * `-z,--blocking <0/1>` Make NCCL collective blocking, i.e. have CPUs wait and sync after each collective. Default : 0.
 
 ## Copyright
 
-NCCL tests are provided under the BSD licence. All source code and accompanying documentation is copyright (c) 2016-2017, NVIDIA CORPORATION. All rights reserved.
+NCCL tests are provided under the BSD license. All source code and accompanying documentation is copyright (c) 2016-2019, NVIDIA CORPORATION. All rights reserved.
 

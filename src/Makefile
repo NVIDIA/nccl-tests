@@ -1,7 +1,7 @@
 #
-# Copyright (c) 2015-2017, NVIDIA CORPORATION. All rights reserved.
+# Copyright (c) 2015-2019, NVIDIA CORPORATION. All rights reserved.
 #
-# See LICENCE.txt for license information
+# See LICENSE.txt for license information
 #
 
 CUDA_HOME ?= /usr/local/cuda
@@ -18,10 +18,10 @@ NVCC = $(CUDA_HOME)/bin/nvcc
 NVCC_GENCODE ?= -gencode=arch=compute_30,code=sm_30 \
 		-gencode=arch=compute_35,code=sm_35 \
                 -gencode=arch=compute_50,code=sm_50 \
-                -gencode=arch=compute_52,code=sm_52 \
-                -gencode=arch=compute_60,code=sm_60 \
+		-gencode=arch=compute_60,code=sm_60 \
                 -gencode=arch=compute_61,code=sm_61 \
-                -gencode=arch=compute_61,code=compute_61
+		-gencode=arch=compute_70,code=compute_70 \
+		-gencode=arch=compute_70,code=sm_70
 
 NVCUFLAGS  := -ccbin $(CXX) $(NVCC_GENCODE) -std=c++11
 
@@ -29,14 +29,16 @@ LDFLAGS    := -L${CUDA_LIB} -lcudart -lrt
 NVLDFLAGS  := -L${CUDA_LIB} -lcudart -lrt
 
 ifeq ($(DEBUG), 0)
-NVCUFLAGS += -O3
-CXXFLAGS  += -O3
+NVCUFLAGS += -O3 -g
+CXXFLAGS  += -O3 -g
 else
 NVCUFLAGS += -O0 -G -g
 CXXFLAGS  += -O0 -g -ggdb3
 endif
 
-ifeq ($(VERBOSE), 0)
+ifneq ($(VERBOSE), 0)
+NVCUFLAGS += -Xcompiler -Wall,-Wextra,-Wno-unused-parameter
+else
 .SILENT:
 endif
 
@@ -45,7 +47,7 @@ endif
 BUILDDIR ?= ../build
 ifneq ($(NCCL_HOME), "")
 NVCUFLAGS += -I$(NCCL_HOME)/include/
-NVLDFLAGS   += -L$(NCCL_HOME)/lib
+NVLDFLAGS += -L$(NCCL_HOME)/lib
 endif
 
 ifeq ($(MPI), 1)
@@ -53,7 +55,7 @@ NVCUFLAGS += -DMPI_SUPPORT -I$(MPI_HOME)/include
 NVLDFLAGS += -L$(MPI_HOME)/lib -lmpi
 endif
 LIBRARIES += curand nccl nvToolsExt
-NVLDFLAGS   += $(LIBRARIES:%=-l%)
+NVLDFLAGS += $(LIBRARIES:%=-l%)
 
 DST_DIR := $(BUILDDIR)
 SRC_FILES := $(wildcard *.cu)
@@ -66,7 +68,7 @@ build: ${BIN_FILES}
 clean:
 	rm -rf ${DST_DIR}
 
-${DST_DIR}/%.o: %.cu
+${DST_DIR}/%.o: %.cu common.h
 	@printf "Compiling  %-35s > %s\n" $< $@
 	@mkdir -p ${DST_DIR}
 	$(NVCC) -o $@ $(NVCUFLAGS) -c $<
