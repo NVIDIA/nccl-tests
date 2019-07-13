@@ -18,8 +18,8 @@ const char *test_typenames[ncclNumTypes] = {"int8", "uint8", "int32", "uint32", 
 ncclDataType_t test_types[ncclNumTypes] = {ncclChar, ncclInt, ncclHalf, ncclFloat, ncclDouble, ncclInt64, ncclUint64};
 const char *test_typenames[ncclNumTypes] = {"char", "int", "half", "float", "double", "int64", "uint64"};
 #endif
-ncclRedOp_t test_ops[ncclNumOps] = {ncclSum, ncclProd, ncclMax, ncclMin};
-const char *test_opnames[ncclNumOps] = {"sum", "prod", "max", "min"};
+ncclRedOp_t test_ops[ncclNumOps] = {ncclSum, ncclProd, ncclMax, ncclMin, ncclBitAnd, ncclBitOr, ncclBitXor};
+const char *test_opnames[ncclNumOps] = {"sum", "prod", "max", "min", "band", "bor", "bxor"};
 
 thread_local int is_main_thread = 0;
 
@@ -184,6 +184,12 @@ template<typename T>
 __device__ T ncclOpMax(T a, T b) { return a>b ? a : b; }
 template<typename T>
 __device__ T ncclOpMin(T a, T b) { return a<b ? a : b; }
+template<typename T>
+__device__ T ncclOpBitAnd(T a, T b) { return a&b; }
+template<typename T>
+__device__ T ncclOpBitOr(T a, T b) { return a|b; }
+template<typename T>
+__device__ T ncclOpBitXor(T a, T b) { return a^b; }
 
 // Definitions for half
 template<>
@@ -194,6 +200,45 @@ template<>
 __device__ half ncclOpMax(half a, half b) { return __half2float(a)>__half2float(b) ? a : b; }
 template<>
 __device__ half ncclOpMin(half a, half b) { return __half2float(a)<__half2float(b) ? a : b; }
+
+// Definitions for bit op with floating number
+template<typename T>
+union bitConverter;
+
+template<>
+union bitConverter<half> {
+  half storage;
+  int16_t a;
+};
+template<>
+union bitConverter<float> {
+  float storage;
+  int a;
+};
+template<>
+union bitConverter<double> {
+  double storage;
+  int64_t a;
+};
+
+#define BIT_OPS(dtype, name, op)                       \
+template<>                                             \
+__device__ dtype ncclOpBit##name(dtype a, dtype b) {   \
+  union bitConverter<dtype> ca, cb, cr;                \
+  ca.storage = a;                                      \
+  cb.storage = b;                                      \
+  cr.a = ca.a op cb.a;                                 \
+  return cr.storage;                                   \
+}
+
+#define BIT_OP_TYPE(name, op)  \
+  BIT_OPS(half, name, op)      \
+  BIT_OPS(float, name, op)     \
+  BIT_OPS(double, name, op)
+
+BIT_OP_TYPE(And, &)
+BIT_OP_TYPE(Or, |)
+BIT_OP_TYPE(Xor, ^)
 
 template<typename T, T (*Op)(T, T)>
 __global__ void InitDataReduceKernel(T* data, const size_t N, const size_t offset, const int rep, const int nranks) {
@@ -207,7 +252,8 @@ __global__ void InitDataReduceKernel(T* data, const size_t N, const size_t offse
 }
 
 #define KERN(type, op) (void*)InitDataReduceKernel<type, op<type>>
-#define OPS(type) KERN(type, ncclOpSum), KERN(type, ncclOpProd), KERN(type, ncclOpMax), KERN(type, ncclOpMin)
+#define OPS(type) KERN(type, ncclOpSum), KERN(type, ncclOpProd), KERN(type, ncclOpMax), KERN(type, ncclOpMin), \
+                  KERN(type, ncclOpBitAnd), KERN(type, ncclOpBitOr), KERN(type, ncclOpBitXor)
 
 static void* const redInitDataKerns[ncclNumOps*ncclNumTypes] = {
   OPS(int8_t), OPS(uint8_t), OPS(int32_t), OPS(uint32_t), OPS(int64_t), OPS(uint64_t), OPS(half), OPS(float), OPS(double)
@@ -658,7 +704,7 @@ int main(int argc, char* argv[]) {
             "[-w,--warmup_iters <warmup iteration count>] \n\t"
             "[-p,--parallel_init <0/1>] \n\t"
             "[-c,--check <0/1>] \n\t"
-            "[-o,--op <sum/prod/min/max/all>] \n\t"
+            "[-o,--op <sum/prod/min/max/band/bor/bxor/all>] \n\t"
             "[-d,--datatype <nccltype/all>] \n\t"
             "[-r,--root <root>] \n\t"
             "[-z,--blocking <0/1>] \n\t"

@@ -52,7 +52,7 @@ All tests support the same set of arguments :
     * `-i,--stepbytes <increment size>` fixed increment between sizes. Default : (max-min)/10.
     * `-f,--stepfactor <increment factor>` multiplication factor between sizes. Default : disabled.
 * NCCL operations arguments
-  * `-o,--op <sum/prod/min/max/all>` Specify which reduction operation to perform. Only relevant for reduction operations like Allreduce, Reduce or ReduceScatter. Default : Sum.
+  * `-o,--op <sum/prod/min/max/band/bor/bxor/all>` Specify which reduction operation to perform. Only relevant for reduction operations like Allreduce, Reduce or ReduceScatter. Default : Sum.
   * `-d,--datatype <nccltype/all>` Specify which datatype to use. Default : Float.
   * `-r,--root <root/all>` Specify which root to use. Only for operations with a root like broadcast or reduce. Default : 0.
 * Performance
