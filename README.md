@@ -1,6 +1,6 @@
 # NCCL Tests
 
-These tests check both the performance and the correctness of NCCL operations. They can be compiled against [NCCL](http://github.com/nvidia/nccl)
+These tests check both the performance and the correctness of [NCCL](http://github.com/nvidia/nccl) operations.
 
 ## Build
 
