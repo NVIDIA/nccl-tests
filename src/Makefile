@@ -52,7 +52,7 @@ endif
 
 ifeq ($(MPI), 1)
 NVCUFLAGS += -DMPI_SUPPORT -I$(MPI_HOME)/include
-NVLDFLAGS += -L$(MPI_HOME)/lib -lmpi
+NVLDFLAGS += -L$(MPI_HOME)/lib -L$(MPI_HOME)/lib64 -lmpi
 endif
 LIBRARIES += curand nccl nvToolsExt
 NVLDFLAGS += $(LIBRARIES:%=-l%)
