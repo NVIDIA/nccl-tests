@@ -302,7 +302,8 @@ testResult_t CheckData(struct threadArgs* args, ncclDataType_t type, ncclRedOp_t
          printf("%d:%d ", j, dataHost[j]);
        }
        printf("\n");
-       free(temp);
+       free(expectedHost);
+       free(dataHost);
     }
 #endif
   }
@@ -351,6 +352,7 @@ testResult_t testStreamSynchronize(int ngpus, cudaStream_t* streams, ncclComm_t*
    // We might want to let other threads (including NCCL threads) use the CPU.
    if (idle) pthread_yield();
   }
+  free(done);
   return testSuccess;
 }
 
