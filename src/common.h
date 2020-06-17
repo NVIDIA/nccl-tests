@@ -17,25 +17,25 @@
 #include "nccl1_compat.h"
 
 #define CUDACHECK(cmd) do {                         \
-  cudaError_t e = cmd;                              \
-  if( e != cudaSuccess ) {                          \
+  cudaError_t err = cmd;                            \
+  if( err != cudaSuccess ) {                        \
     char hostname[1024];                            \
     getHostName(hostname, 1024);                    \
     printf("%s: Test CUDA failure %s:%d '%s'\n",    \
          hostname,                                  \
-        __FILE__,__LINE__,cudaGetErrorString(e));   \
+        __FILE__,__LINE__,cudaGetErrorString(err)); \
     return testCudaError;                           \
   }                                                 \
 } while(0)
 
 #define NCCLCHECK(cmd) do {                         \
-  ncclResult_t r = cmd;                             \
-  if (r!= ncclSuccess) {                            \
+  ncclResult_t res = cmd;                           \
+  if (res != ncclSuccess) {                         \
     char hostname[1024];                            \
     getHostName(hostname, 1024);                    \
     printf("%s: Test NCCL failure %s:%d '%s'\n",    \
          hostname,                                  \
-        __FILE__,__LINE__,ncclGetErrorString(r));   \
+        __FILE__,__LINE__,ncclGetErrorString(res)); \
     return testNcclError;                           \
   }                                                 \
 } while(0)
@@ -123,6 +123,8 @@ struct threadArgs {
   int* errors;
   double* bw;
   int* bw_count;
+
+  int reportErrors;
 
   struct testColl* collTest;
 };
