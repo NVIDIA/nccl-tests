@@ -559,7 +559,7 @@ testResult_t threadLaunch(struct testThread* thread) {
 testResult_t AllocateBuffs(void **sendbuff, size_t sendBytes, void **recvbuff, size_t recvBytes, void **expected, size_t nbytes, int nranks) {
     CUDACHECK(cudaMalloc(sendbuff, nbytes));
     CUDACHECK(cudaMalloc(recvbuff, nbytes));
-    CUDACHECK(cudaMalloc(expected, recvBytes));
+    if (datacheck) CUDACHECK(cudaMalloc(expected, recvBytes));
     return testSuccess;
 }
 
@@ -764,7 +764,7 @@ testResult_t run() {
 
   for (int i=0; i<nGpus*nThreads; i++) {
     CUDACHECK(cudaSetDevice(localRank*nThreads*nGpus+i));
-    AllocateBuffs(sendbuffs+i, sendBytes, recvbuffs+i, recvBytes, expected+i, (size_t)maxBytes, nProcs*nThreads*nGpus);
+    TESTCHECK(AllocateBuffs(sendbuffs+i, sendBytes, recvbuffs+i, recvBytes, expected+i, (size_t)maxBytes, nProcs*nThreads*nGpus));
     CUDACHECK(cudaStreamCreateWithFlags(streams+i, cudaStreamNonBlocking));
   }
 
@@ -868,7 +868,7 @@ testResult_t run() {
   for (int i=0; i<nGpus*nThreads; i++) {
     CUDACHECK(cudaFree(sendbuffs[i]));
     CUDACHECK(cudaFree(recvbuffs[i]));
-    CUDACHECK(cudaFree(expected[i]));
+    if (datacheck) CUDACHECK(cudaFree(expected[i]));
   }
   CUDACHECK(cudaFreeHost(delta));
 
