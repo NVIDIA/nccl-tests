@@ -11,7 +11,7 @@
 #include <algorithm>
 #include <curand.h>
 #ifdef MPI_SUPPORT
-#include "mpi.h"
+#include "mpich/mpi.h"
 #endif
 #include <pthread.h>
 #include "nccl1_compat.h"
