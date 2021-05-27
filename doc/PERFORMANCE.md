@@ -46,7 +46,7 @@ A tree would do it hierarchically :
 
 `(((((i_{n-1} + i_{n-2}) + (i_{n-3} + i_{n-4})) + ... + (i_1 + i_0))))) -> o_0 -> (o_{n/2} -> (o_{3n/4} ...))`
 
-In all cases, we need n-1 additions and n assignations for each element. Since every step is on a different rank except potentially one (the last input and the first output),
+In all cases, we need n-1 additions and n assignments for each element. Since every step is on a different rank except potentially one (the last input and the first output),
 we need 2(n-1) data transfers (x number of elements) to perform an allReduce operation.
 
 Considering that each rank has a bandwidth to the outside world of _B_, the time to perform an allReduce operation of _S_ elements is at best :
@@ -82,7 +82,7 @@ Note that here, S is the size in bytes of the total array, which for NCCL is equ
 
 ### AllGather
 
-The AllGather operation requires only to perform the assignation part of the allReduce operation :
+The AllGather operation requires only to perform the assignment part of the allReduce operation :
 
  `o_0 = o_1 = o_2 = ... = o_{n-1} = i_K`
 
