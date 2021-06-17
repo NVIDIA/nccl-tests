@@ -92,7 +92,7 @@ testResult_t BroadcastRunTest(struct threadArgs* args, int root, ncclDataType_t 
     run_types = &type;
     run_typenames = &typeName;
   } else {
-    type_count = ncclNumTypes;
+    type_count = test_typenum;
     run_types = test_types;
     run_typenames = test_typenames;
   }

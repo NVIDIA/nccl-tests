@@ -83,7 +83,7 @@ testResult_t ReduceRunTest(struct threadArgs* args, int root, ncclDataType_t typ
     run_types = &type;
     run_typenames = &typeName;
   } else {
-    type_count = ncclNumTypes;
+    type_count = test_typenum;
     run_types = test_types;
     run_typenames = test_typenames;
   }
@@ -93,7 +93,7 @@ testResult_t ReduceRunTest(struct threadArgs* args, int root, ncclDataType_t typ
     run_ops = &op;
     run_opnames = &opName;
   } else {
-    op_count = ncclNumOps;
+    op_count = test_opnum;
     run_ops = test_ops;
     run_opnames = test_opnames;
   }

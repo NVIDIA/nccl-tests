@@ -84,7 +84,7 @@ testResult_t ReduceScatterRunTest(struct threadArgs* args, int root, ncclDataTyp
     run_types = &type;
     run_typenames = &typeName;
   } else {
-    type_count = ncclNumTypes;
+    type_count = test_typenum;
     run_types = test_types;
     run_typenames = test_typenames;
   }
@@ -94,7 +94,7 @@ testResult_t ReduceScatterRunTest(struct threadArgs* args, int root, ncclDataTyp
     run_opnames = &opName;
     op_count = 1;
   } else {
-    op_count = sizeof(test_ops)/sizeof(test_ops[0]);
+    op_count = test_opnum;
     run_ops = test_ops;
     run_opnames = test_opnames;
   }
