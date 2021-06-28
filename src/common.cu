@@ -65,6 +65,7 @@ static int nccltype = ncclFloat;
 static int ncclroot = 0;
 static int parallel_init = 0;
 static int blocking_coll = 0;
+static int cudaGraphLaunches = 0;
 
 double parsesize(char *value) {
     long long int units;
@@ -481,6 +482,15 @@ testResult_t BenchTime(struct threadArgs* args, ncclDataType_t type, ncclRedOp_t
 
   Barrier(args);
 
+  cudaGraph_t graphs[args->nGpus];
+  cudaGraphExec_t graphExec[args->nGpus];
+  if (cudaGraphLaunches >= 1) {
+    // Begin cuda graph capture
+    for (int i=0; i<args->nGpus; i++) {
+      CUDACHECK(cudaStreamBeginCapture(args->streams[i], args->nThreads > 1 ? cudaStreamCaptureModeThreadLocal : cudaStreamCaptureModeGlobal));
+    }
+  }
+
   // Performance Benchmark
   auto start = std::chrono::high_resolution_clock::now();
   for (int iter = 0; iter < iters; iter++) {
@@ -490,11 +500,40 @@ testResult_t BenchTime(struct threadArgs* args, ncclDataType_t type, ncclRedOp_t
     }
     if (agg_iters>1) NCCLCHECK(ncclGroupEnd());
   }
+
+  if (cudaGraphLaunches >= 1) {
+    // End cuda graph capture
+    for (int i=0; i<args->nGpus; i++) {
+      CUDACHECK(cudaStreamEndCapture(args->streams[i], graphs+i));
+    }
+    // Instantiate cuda graph
+    for (int i=0; i<args->nGpus; i++) {
+      CUDACHECK(cudaGraphInstantiate(graphExec+i, graphs[i], NULL, NULL, 0));
+    }
+    // Resync CPU, restart timing, launch cuda graph
+    Barrier(args);
+    start = std::chrono::high_resolution_clock::now();
+    for (int l=0; l<cudaGraphLaunches; l++) {
+      for (int i=0; i<args->nGpus; i++) {
+        CUDACHECK(cudaGraphLaunch(graphExec[i], args->streams[i]));
+      }
+    }
+  }
+
   TESTCHECK(completeColl(args));
 
   auto delta = std::chrono::high_resolution_clock::now() - start;
   double deltaSec = std::chrono::duration_cast<std::chrono::duration<double>>(delta).count();
   deltaSec = deltaSec/(iters*agg_iters);
+  if (cudaGraphLaunches >= 1) deltaSec = deltaSec/cudaGraphLaunches;
+
+  if (cudaGraphLaunches >= 1) {
+    //destroy cuda graph
+    for (int i=0; i<args->nGpus; i++) {
+      CUDACHECK(cudaGraphExecDestroy(graphExec[i]));
+      CUDACHECK(cudaGraphDestroy(graphs[i]));
+    }
+  }
 
   double algBw, busBw;
   args->collTest->getBw(count, wordSize(type), deltaSec, &algBw, &busBw, args->nProcs*args->nThreads*args->nGpus);
@@ -508,9 +547,40 @@ testResult_t BenchTime(struct threadArgs* args, ncclDataType_t type, ncclRedOp_t
       // Initialize sendbuffs, recvbuffs and expected
       TESTCHECK(args->collTest->initData(args, type, op, root, rep, in_place));
 
+      if (cudaGraphLaunches >= 1) {
+        // Begin cuda graph capture for data check
+        for (int i=0; i<args->nGpus; i++) {
+          CUDACHECK(cudaStreamBeginCapture(args->streams[i], cudaStreamCaptureModeThreadLocal));
+        }
+      }
+
       //test validation in single itertion, should ideally be included into the multi-iteration run
       TESTCHECK(startColl(args, type, op, root, in_place, 0));
+
+      if (cudaGraphLaunches >= 1) {
+        // End cuda graph capture
+        for (int i=0; i<args->nGpus; i++) {
+          CUDACHECK(cudaStreamEndCapture(args->streams[i], graphs+i));
+        }
+        // Instantiate cuda graph
+        for (int i=0; i<args->nGpus; i++) {
+          CUDACHECK(cudaGraphInstantiate(graphExec+i, graphs[i], NULL, NULL, 0));
+        }
+        // Launch cuda graph
+        for (int i=0; i<args->nGpus; i++) {
+          CUDACHECK(cudaGraphLaunch(graphExec[i], args->streams[i]));
+        }
+      }
+
       TESTCHECK(completeColl(args));
+
+      if (cudaGraphLaunches >= 1) {
+        //destroy cuda graph
+        for (int i=0; i<args->nGpus; i++) {
+          CUDACHECK(cudaGraphExecDestroy(graphExec[i]));
+          CUDACHECK(cudaGraphDestroy(graphs[i]));
+        }
+      }
 
       TESTCHECK(CheckData(args, type, op, root, in_place, &maxDelta));
 
@@ -674,12 +744,13 @@ int main(int argc, char* argv[]) {
     {"datatype", required_argument, 0, 'd'},
     {"root", required_argument, 0, 'r'},
     {"blocking", required_argument, 0, 'z'},
+    {"cudagraph", required_argument, 0, 'G'},
     {"help", no_argument, 0, 'h'}
   };
 
   while(1) {
     int c;
-    c = getopt_long(argc, argv, "t:g:b:e:i:f:n:m:w:p:c:o:d:r:z:h", longopts, &longindex);
+    c = getopt_long(argc, argv, "t:g:b:e:i:f:n:m:w:p:c:o:d:r:z:hG:", longopts, &longindex);
 
     if (c == -1)
       break;
@@ -734,6 +805,13 @@ int main(int argc, char* argv[]) {
       case 'z':
         blocking_coll = strtol(optarg, NULL, 0);
         break;
+      case 'G':
+#if (NCCL_MAJOR > 2 || (NCCL_MAJOR >= 2 && NCCL_MINOR >= 9)) && CUDART_VERSION >= 11030
+        cudaGraphLaunches = strtol(optarg, NULL, 0);
+#else
+        printf("Option -G (CUDA graph) not supported before NCCL 2.9 + CUDA 11.3. Ignoring\n");
+#endif
+        break;
       case 'h':
 	printf("USAGE: %s \n\t"
             "[-t,--nthreads <num threads>] \n\t"
@@ -755,6 +833,7 @@ int main(int argc, char* argv[]) {
             "[-d,--datatype <nccltype/all>] \n\t"
             "[-r,--root <root>] \n\t"
             "[-z,--blocking <0/1>] \n\t"
+            "[-G,--cudagraph <num graph launches>] \n\t"
             "[-h,--help]\n",
 	    basename(argv[0]));
 	return 0;
@@ -780,6 +859,7 @@ int main(int argc, char* argv[]) {
             "[-d,--datatype <nccltype/all>] \n\t"
             "[-r,--root <root>] \n\t"
             "[-z,--blocking <0/1>] \n\t"
+            "[-G,--cudagraph <num graph launches>] \n\t"
             "[-h,--help]\n",
 	    basename(argv[0]));
 	return 0;
