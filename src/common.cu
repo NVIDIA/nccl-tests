@@ -66,6 +66,10 @@ static int ncclroot = 0;
 static int parallel_init = 0;
 static int blocking_coll = 0;
 static int cudaGraphLaunches = 0;
+#ifdef MPI_SUPPORT
+// Report average iteration time: (0=RANK0,1=AVG,2=MIN,3=MAX)
+static int average = 1;
+#endif
 
 #define NUM_BLOCKS 32
 
@@ -533,6 +537,23 @@ testResult_t BenchTime(struct threadArgs* args, ncclDataType_t type, ncclRedOp_t
   double deltaSec = std::chrono::duration_cast<std::chrono::duration<double>>(delta).count();
   deltaSec = deltaSec/(iters*agg_iters);
   if (cudaGraphLaunches >= 1) deltaSec = deltaSec/cudaGraphLaunches;
+#ifdef MPI_SUPPORT
+  switch (average) {
+  case 1:
+    // Calculate the average time across all ranks
+    MPI_Allreduce(MPI_IN_PLACE, &deltaSec, 1, MPI_DOUBLE, MPI_SUM, MPI_COMM_WORLD);
+    deltaSec = deltaSec/(args->nProcs*args->nThreads*args->nGpus);
+    break;
+  case 2:
+    // Obtain the minimum time across all ranks
+    MPI_Allreduce(MPI_IN_PLACE, &deltaSec, 1, MPI_DOUBLE, MPI_MIN, MPI_COMM_WORLD);
+    break;
+  case 3:
+    // Obtain the maximum time across all ranks
+    MPI_Allreduce(MPI_IN_PLACE, &deltaSec, 1, MPI_DOUBLE, MPI_MAX, MPI_COMM_WORLD);
+    break;
+  }
+#endif
 
   if (cudaGraphLaunches >= 1) {
     //destroy cuda graph
@@ -752,12 +773,13 @@ int main(int argc, char* argv[]) {
     {"root", required_argument, 0, 'r'},
     {"blocking", required_argument, 0, 'z'},
     {"cudagraph", required_argument, 0, 'G'},
+    {"average", required_argument, 0, 'a'},
     {"help", no_argument, 0, 'h'}
   };
 
   while(1) {
     int c;
-    c = getopt_long(argc, argv, "t:g:b:e:i:f:n:m:w:p:c:o:d:r:z:hG:", longopts, &longindex);
+    c = getopt_long(argc, argv, "t:g:b:e:i:f:n:m:w:p:c:o:d:r:z:hG:a:", longopts, &longindex);
 
     if (c == -1)
       break;
@@ -819,6 +841,11 @@ int main(int argc, char* argv[]) {
         printf("Option -G (CUDA graph) not supported before NCCL 2.9 + CUDA 11.3. Ignoring\n");
 #endif
         break;
+#ifdef MPI_SUPPORT
+      case 'a':
+        average = (int)strtol(optarg, NULL, 0);
+        break;
+#endif
       default:
         if (c != 'h') printf("invalid option '%c'\n", c);
         printf("USAGE: %s \n\t"
@@ -842,6 +869,9 @@ int main(int argc, char* argv[]) {
             "[-r,--root <root>] \n\t"
             "[-z,--blocking <0/1>] \n\t"
             "[-G,--cudagraph <num graph launches>] \n\t"
+#ifdef MPI_SUPPORT
+            "[-a,--average <0/1/2/3> report average iteration time <0=RANK0/1=AVG/2=MIN/3=MAX>] \n\t"
+#endif
             "[-h,--help]\n",
 	    basename(argv[0]));
 	return 0;
