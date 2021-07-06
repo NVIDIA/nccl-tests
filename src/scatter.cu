@@ -1,5 +1,5 @@
 /*************************************************************************
- * Copyright (c) 2015-2016, NVIDIA CORPORATION. All rights reserved.
+ * Copyright (c) 2016-2021, NVIDIA CORPORATION. All rights reserved.
  *
  * See LICENSE.txt for license information
  ************************************************************************/
@@ -19,15 +19,15 @@ void print_line_header (size_t size, size_t count, const char *typeName, const c
   PRINT("%12li  %12li  %8s  %6i", size, count, typeName, root);
 }
 
-void BroadcastGetCollByteCount(size_t *sendcount, size_t *recvcount, size_t *paramcount, size_t *sendInplaceOffset, size_t *recvInplaceOffset, size_t count, int nranks) {
-  *sendcount = count;
-  *recvcount = count;
+void ScatterGetCollByteCount(size_t *sendcount, size_t *recvcount, size_t *paramcount, size_t *sendInplaceOffset, size_t *recvInplaceOffset, size_t count, int nranks) {
+  *sendcount = (count/nranks)*nranks;
+  *recvcount = count/nranks;
   *sendInplaceOffset = 0;
-  *recvInplaceOffset = 0;
-  *paramcount = *sendcount;
+  *recvInplaceOffset = count/nranks;
+  *paramcount = count/nranks;
 }
 
-testResult_t BroadcastInitData(struct threadArgs* args, ncclDataType_t type, ncclRedOp_t op, int root, int rep, int in_place) {
+testResult_t ScatterInitData(struct threadArgs* args, ncclDataType_t type, ncclRedOp_t op, int root, int rep, int in_place) {
   size_t sendcount = args->sendBytes / wordSize(type);
   size_t recvcount = args->expectedBytes / wordSize(type);
 
@@ -38,50 +38,55 @@ testResult_t BroadcastInitData(struct threadArgs* args, ncclDataType_t type, ncc
     CUDACHECK(cudaMemset(args->recvbuffs[i], 0, args->expectedBytes));
     void* data = in_place ? args->recvbuffs[i] : args->sendbuffs[i];
     if (rank == root) TESTCHECK(InitData(data, sendcount, type, rep, rank));
-    TESTCHECK(InitData(args->expected[i], recvcount, type, rep, root));
+    TESTCHECK(InitData(args->expected[i], recvcount, type, rep+rank*recvcount, root));
     CUDACHECK(cudaDeviceSynchronize());
   }
   return testSuccess;
 }
 
-void BroadcastGetBw(size_t count, int typesize, double sec, double* algBw, double* busBw, int nranks) {
-  double baseBw = (double)(count * typesize) / 1.0E9 / sec;
+void ScatterGetBw(size_t count, int typesize, double sec, double* algBw, double* busBw, int nranks) {
+  double baseBw = (double)(count * nranks * typesize) / 1.0E9 / sec;
 
   *algBw = baseBw;
-  double factor = 1;
+  double factor = ((double)(nranks-1))/((double)(nranks));
   *busBw = baseBw * factor;
 }
 
-testResult_t BroadcastRunColl(void* sendbuff, void* recvbuff, size_t count, ncclDataType_t type, ncclRedOp_t op, int root, ncclComm_t comm, cudaStream_t stream) {
+testResult_t ScatterRunColl(void* sendbuff, void* recvbuff, size_t count, ncclDataType_t type, ncclRedOp_t op, int root, ncclComm_t comm, cudaStream_t stream) {
+  int nRanks;
+  NCCLCHECK(ncclCommCount(comm, &nRanks));
   int rank;
   NCCLCHECK(ncclCommUserRank(comm, &rank));
-#if NCCL_MAJOR >= 2 && NCCL_MINOR >= 2
-  NCCLCHECK(ncclBroadcast(sendbuff, recvbuff, count, type, root, comm, stream));
-#else
+  size_t rankOffset = count * wordSize(type);
+  if (count == 0) return testSuccess;
+
+  NCCLCHECK(ncclGroupStart());
   if (rank == root) {
-      NCCLCHECK(ncclBcast(sendbuff, count, type, root, comm, stream));
-  } else {
-      NCCLCHECK(ncclBcast(recvbuff, count, type, root, comm, stream));
+    for (int r=0; r<nRanks; r++) {
+      NCCLCHECK(ncclSend(((char*)sendbuff)+r*rankOffset, count, type, r, comm, stream));
+    }
   }
-#endif
+  NCCLCHECK(ncclRecv(recvbuff, count, type, root, comm, stream));
+  NCCLCHECK(ncclGroupEnd());
+
   return testSuccess;
 }
 
-struct testColl broadcastTest = {
-  "Broadcast",
-  BroadcastGetCollByteCount,
-  BroadcastInitData,
-  BroadcastGetBw,
-  BroadcastRunColl
+struct testColl scatterTest = {
+  "Scatter",
+  ScatterGetCollByteCount,
+  ScatterInitData,
+  ScatterGetBw,
+  ScatterRunColl
 };
 
-void BroadcastGetBuffSize(size_t *sendcount, size_t *recvcount, size_t count, int nranks) {
+void ScatterGetBuffSize(size_t *sendcount, size_t *recvcount, size_t count, int nranks) {
   size_t paramcount, sendInplaceOffset, recvInplaceOffset;
-  BroadcastGetCollByteCount(sendcount, recvcount, &paramcount, &sendInplaceOffset, &recvInplaceOffset, count, nranks);
+  ScatterGetCollByteCount(sendcount, recvcount, &paramcount, &sendInplaceOffset, &recvInplaceOffset, count, nranks);
 }
 
-testResult_t BroadcastRunTest(struct threadArgs* args, int root, ncclDataType_t type, const char* typeName, ncclRedOp_t op, const char* opName) {
-  args->collTest = &broadcastTest;
+testResult_t ScatterRunTest(struct threadArgs* args, int root, ncclDataType_t type, const char* typeName, ncclRedOp_t op, const char* opName) {
+  args->collTest = &scatterTest;
   ncclDataType_t *run_types;
   const char **run_typenames;
   int type_count;
@@ -112,9 +117,9 @@ testResult_t BroadcastRunTest(struct threadArgs* args, int root, ncclDataType_t 
   return testSuccess;
 }
 
-struct testEngine broadcastEngine = {
-  BroadcastGetBuffSize,
-  BroadcastRunTest
+struct testEngine scatterEngine = {
+  ScatterGetBuffSize,
+  ScatterRunTest
 };
 
-#pragma weak ncclTestEngine=broadcastEngine
+#pragma weak ncclTestEngine=scatterEngine

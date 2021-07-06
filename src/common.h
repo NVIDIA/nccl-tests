@@ -54,8 +54,8 @@ typedef enum {
   if (r!= testSuccess) {                            \
     char hostname[1024];                            \
     getHostName(hostname, 1024);                    \
-    printf(" .. %s: Test failure %s:%d\n",          \
-         hostname,                                  \
+    printf(" .. %s pid %d: Test failure %s:%d\n",   \
+         hostname, getpid(),                        \
         __FILE__,__LINE__);                         \
     return r;                                       \
   }                                                 \
@@ -78,6 +78,7 @@ extern struct testColl allGatherTest;
 extern struct testColl reduceScatterTest;
 extern struct testColl broadcastTest;
 extern struct testColl reduceTest;
+extern struct testColl alltoAllTest;
 
 struct testEngine {
   void (*getBuffSize)(size_t *sendcount, size_t *recvcount, size_t count, int nranks);
@@ -213,6 +214,9 @@ static size_t wordSize(ncclDataType_t type) {
 #endif
       return 1;
     case ncclHalf:
+#if defined(__CUDA_BF16_TYPES_EXIST__)
+    case ncclBfloat16:
+#endif
     //case ncclFloat16:
       return 2;
     case ncclInt:
@@ -232,10 +236,13 @@ static size_t wordSize(ncclDataType_t type) {
   }
 }
 
+extern int test_ncclVersion; // init'd with ncclGetVersion()
 extern ncclDataType_t test_types[ncclNumTypes];
 extern const char *test_typenames[ncclNumTypes];
 extern ncclRedOp_t test_ops[ncclNumOps];
 extern const char *test_opnames[ncclNumOps];
+extern int test_opnum;
+extern int test_typenum;
 
 static int ncclstringtotype(char *str) {
     for (int t=0; t<ncclNumTypes; t++) {
@@ -251,7 +258,7 @@ static int ncclstringtotype(char *str) {
 }
 
 static int ncclstringtoop (char *str) {
-    for (int o=0; o<ncclNumOps; o++) {
+    for (int o=0; o<test_opnum; o++) {
       if (strcmp(str, test_opnames[o]) == 0) {
         return o;
       }

@@ -1,5 +1,5 @@
 /*************************************************************************
- * Copyright (c) 2016-2019, NVIDIA CORPORATION. All rights reserved.
+ * Copyright (c) 2016-2021, NVIDIA CORPORATION. All rights reserved.
  *
  * See LICENSE.txt for license information
  ************************************************************************/
@@ -8,18 +8,18 @@
 #include "common.h"
 
 void print_header() {
-  PRINT("# %10s  %12s  %8s  %6s            out-of-place                       in-place          \n", "", "", "", "");
-  PRINT("# %10s  %12s  %8s  %6s  %7s  %6s  %6s  %5s  %7s  %6s  %6s  %5s\n", "size", "count", "type", "redop",
+  PRINT("# %10s  %12s  %8s            out-of-place                       in-place          \n", "", "", "");
+  PRINT("# %10s  %12s  %8s  %7s  %6s  %6s  %5s  %7s  %6s  %6s  %5s\n", "size", "count", "type",
         "time", "algbw", "busbw", "error", "time", "algbw", "busbw", "error");
-  PRINT("# %10s  %12s  %8s  %6s  %7s  %6s  %6s  %5s  %7s  %6s  %6s  %5s\n", "(B)", "(elements)", "", "",
+  PRINT("# %10s  %12s  %8s  %7s  %6s  %6s  %5s  %7s  %6s  %6s  %5s\n", "(B)", "(elements)", "",
         "(us)", "(GB/s)", "(GB/s)", "", "(us)", "(GB/s)", "(GB/s)", "");
 }
 
 void print_line_header (size_t size, size_t count, const char *typeName, const char *opName, int root) {
-  PRINT("%12li  %12li  %8s  %6s", size, count, typeName, opName);
+  PRINT("%12li  %12li  %8s", size, count, typeName);
 }
 
-void AllReduceGetCollByteCount(size_t *sendcount, size_t *recvcount, size_t *paramcount, size_t *sendInplaceOffset, size_t *recvInplaceOffset, size_t count, int nranks) {
+void SendRecvGetCollByteCount(size_t *sendcount, size_t *recvcount, size_t *paramcount, size_t *sendInplaceOffset, size_t *recvInplaceOffset, size_t count, int nranks) {
   *sendcount = count;
   *recvcount = count;
   *sendInplaceOffset = 0;
@@ -27,7 +27,7 @@ void AllReduceGetCollByteCount(size_t *sendcount, size_t *recvcount, size_t *par
   *paramcount = *sendcount;
 }
 
-testResult_t AllReduceInitData(struct threadArgs* args, ncclDataType_t type, ncclRedOp_t op, int root, int rep, int in_place) {
+testResult_t SendRecvInitData(struct threadArgs* args, ncclDataType_t type, ncclRedOp_t op, int root, int rep, int in_place) {
   size_t sendcount = args->sendBytes / wordSize(type);
   size_t recvcount = args->expectedBytes / wordSize(type);
   int nranks = args->nProcs*args->nThreads*args->nGpus;
@@ -39,40 +39,53 @@ testResult_t AllReduceInitData(struct threadArgs* args, ncclDataType_t type, ncc
     CUDACHECK(cudaMemset(args->recvbuffs[i], 0, args->expectedBytes));
     void* data = in_place ? args->recvbuffs[i] : args->sendbuffs[i];
     TESTCHECK(InitData(data, sendcount, type, rep, rank));
-    TESTCHECK(InitDataReduce(args->expected[i], recvcount, 0, type, op, rep, nranks));
+    int peer = (rank-1+nranks)%nranks;
+    TESTCHECK(InitData(args->expected[i], recvcount, type, rep, peer));
     CUDACHECK(cudaDeviceSynchronize());
   }
+  // We don't support in-place sendrecv
+  args->reportErrors = in_place ? 0 : 1;
   return testSuccess;
 }
 
-void AllReduceGetBw(size_t count, int typesize, double sec, double* algBw, double* busBw, int nranks) {
+void SendRecvGetBw(size_t count, int typesize, double sec, double* algBw, double* busBw, int nranks) {
   double baseBw = (double)(count * typesize) / 1.0E9 / sec;
 
   *algBw = baseBw;
-  double factor = ((double)(2*(nranks - 1)))/((double)nranks);
+  double factor = 1;
   *busBw = baseBw * factor;
 }
 
-testResult_t AllReduceRunColl(void* sendbuff, void* recvbuff, size_t count, ncclDataType_t type, ncclRedOp_t op, int root, ncclComm_t comm, cudaStream_t stream) {
-  NCCLCHECK(ncclAllReduce(sendbuff, recvbuff, count, type, op, comm, stream));
+testResult_t SendRecvRunColl(void* sendbuff, void* recvbuff, size_t count, ncclDataType_t type, ncclRedOp_t op, int root, ncclComm_t comm, cudaStream_t stream) {
+  int nRanks;
+  NCCLCHECK(ncclCommCount(comm, &nRanks));
+  int rank;
+  NCCLCHECK(ncclCommUserRank(comm, &rank));
+  int recvPeer = (rank-1+nRanks) % nRanks;
+  int sendPeer = (rank+1) % nRanks;
+
+  NCCLCHECK(ncclGroupStart());
+  NCCLCHECK(ncclSend(sendbuff, count, type, sendPeer, comm, stream));
+  NCCLCHECK(ncclRecv(recvbuff, count, type, recvPeer, comm, stream));
+  NCCLCHECK(ncclGroupEnd());
   return testSuccess;
 }
 
-struct testColl allReduceTest = {
-  "AllReduce",
-  AllReduceGetCollByteCount,
-  AllReduceInitData,
-  AllReduceGetBw,
-  AllReduceRunColl
+struct testColl sendRecvTest = {
+  "SendRecv",
+  SendRecvGetCollByteCount,
+  SendRecvInitData,
+  SendRecvGetBw,
+  SendRecvRunColl
 };
 
-void AllReduceGetBuffSize(size_t *sendcount, size_t *recvcount, size_t count, int nranks) {
+void SendRecvGetBuffSize(size_t *sendcount, size_t *recvcount, size_t count, int nranks) {
   size_t paramcount, sendInplaceOffset, recvInplaceOffset;
-  AllReduceGetCollByteCount(sendcount, recvcount, &paramcount, &sendInplaceOffset, &recvInplaceOffset, count, nranks);
+  SendRecvGetCollByteCount(sendcount, recvcount, &paramcount, &sendInplaceOffset, &recvInplaceOffset, count, nranks);
 }
 
-testResult_t AllReduceRunTest(struct threadArgs* args, int root, ncclDataType_t type, const char* typeName, ncclRedOp_t op, const char* opName) {
-  args->collTest = &allReduceTest;
+testResult_t SendRecvRunTest(struct threadArgs* args, int root, ncclDataType_t type, const char* typeName, ncclRedOp_t op, const char* opName) {
+  args->collTest = &sendRecvTest;
   ncclDataType_t *run_types;
   ncclRedOp_t *run_ops;
   const char **run_typenames, **run_opnames;
@@ -106,9 +119,9 @@ testResult_t AllReduceRunTest(struct threadArgs* args, int root, ncclDataType_t 
   return testSuccess;
 }
 
-struct testEngine allReduceEngine = {
-  AllReduceGetBuffSize,
-  AllReduceRunTest
+struct testEngine sendRecvEngine = {
+  SendRecvGetBuffSize,
+  SendRecvRunTest
 };
 
-#pragma weak ncclTestEngine=allReduceEngine
+#pragma weak ncclTestEngine=sendRecvEngine

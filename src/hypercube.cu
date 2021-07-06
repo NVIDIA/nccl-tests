@@ -1,11 +1,13 @@
 /*************************************************************************
- * Copyright (c) 2016-2019, NVIDIA CORPORATION. All rights reserved.
+ * Copyright (c) 2016-2021, NVIDIA CORPORATION. All rights reserved.
  *
  * See LICENSE.txt for license information
  ************************************************************************/
 
 #include "cuda_runtime.h"
 #include "common.h"
+
+#define ALIGN 4
 
 void print_header() {
   PRINT("# %10s  %12s  %8s            out-of-place                       in-place          \n", "", "", "");
@@ -19,15 +21,16 @@ void print_line_header (size_t size, size_t count, const char *typeName, const c
   PRINT("%12li  %12li  %8s", size, count, typeName);
 }
 
-void AllGatherGetCollByteCount(size_t *sendcount, size_t *recvcount, size_t *paramcount, size_t *sendInplaceOffset, size_t *recvInplaceOffset, size_t count, int nranks) {
-  *sendcount = count/nranks;
-  *recvcount = (count/nranks)*nranks;
-  *sendInplaceOffset = count/nranks;
+void HyperCubeGetCollByteCount(size_t *sendcount, size_t *recvcount, size_t *paramcount, size_t *sendInplaceOffset, size_t *recvInplaceOffset, size_t count, int nranks) {
+  size_t base = (count/(ALIGN*nranks))*ALIGN;
+  *sendcount = base;
+  *recvcount = base*nranks;
+  *sendInplaceOffset = base;
   *recvInplaceOffset = 0;
-  *paramcount = *sendcount;
+  *paramcount = base;
 }
 
-testResult_t AllGatherInitData(struct threadArgs* args, ncclDataType_t type, ncclRedOp_t op, int root, int rep, int in_place) {
+testResult_t HyperCubeInitData(struct threadArgs* args, ncclDataType_t type, ncclRedOp_t op, int root, int rep, int in_place) {
   size_t sendcount = args->sendBytes / wordSize(type);
   size_t recvcount = args->expectedBytes / wordSize(type);
   int nranks = args->nProcs*args->nThreads*args->nGpus;
@@ -47,34 +50,52 @@ testResult_t AllGatherInitData(struct threadArgs* args, ncclDataType_t type, ncc
   return testSuccess;
 }
 
-void AllGatherGetBw(size_t count, int typesize, double sec, double* algBw, double* busBw, int nranks) {
-  double baseBw = (double)(count * typesize * nranks) / 1.0E9 / sec;
+void HyperCubeGetBw(size_t count, int typesize, double sec, double* algBw, double* busBw, int nranks) {
+  double baseBw = (double)(count * typesize * (nranks - 1)) / 1.0E9 / sec;
 
   *algBw = baseBw;
-  double factor = ((double)(nranks - 1))/((double)nranks);
+  double factor = 1;
   *busBw = baseBw * factor;
 }
 
-testResult_t AllGatherRunColl(void* sendbuff, void* recvbuff, size_t count, ncclDataType_t type, ncclRedOp_t op, int root, ncclComm_t comm, cudaStream_t stream) {
-  NCCLCHECK(ncclAllGather(sendbuff, recvbuff, count, type, comm, stream));
+testResult_t HyperCubeRunColl(void* sendbuff, void* recvbuff, size_t count, ncclDataType_t type, ncclRedOp_t op, int root, ncclComm_t comm, cudaStream_t stream) {
+  char* sbuff = (char*)sendbuff;
+  char* rbuff = (char*)recvbuff;
+  int nRanks;
+  NCCLCHECK(ncclCommCount(comm, &nRanks));
+  int rank;
+  NCCLCHECK(ncclCommUserRank(comm, &rank));
+  size_t rankSize = count * wordSize(type);
+
+  if (rbuff+rank*rankSize != sbuff) CUDACHECK(cudaMemcpyAsync(rbuff+rank*rankSize, sbuff, rankSize, cudaMemcpyDeviceToDevice, stream));
+
+  // Hypercube AllGather
+  for (int mask=1; mask<nRanks; mask<<=1) {
+    NCCLCHECK(ncclGroupStart());
+    int s = rank & ~(mask-1);
+    int r = s ^ mask;
+    NCCLCHECK(ncclSend(rbuff+s*rankSize, count*mask, type, rank^mask, comm, stream));
+    NCCLCHECK(ncclRecv(rbuff+r*rankSize, count*mask, type, rank^mask, comm, stream));
+    NCCLCHECK(ncclGroupEnd());
+  }
   return testSuccess;
 }
 
-struct testColl allGatherTest = {
-  "AllGather",
-  AllGatherGetCollByteCount,
-  AllGatherInitData,
-  AllGatherGetBw,
-  AllGatherRunColl
+struct testColl hyperCubeTest = {
+  "HyperCube",
+  HyperCubeGetCollByteCount,
+  HyperCubeInitData,
+  HyperCubeGetBw,
+  HyperCubeRunColl
 };
 
-void AllGatherGetBuffSize(size_t *sendcount, size_t *recvcount, size_t count, int nranks) {
+void HyperCubeGetBuffSize(size_t *sendcount, size_t *recvcount, size_t count, int nranks) {
   size_t paramcount, sendInplaceOffset, recvInplaceOffset;
-  AllGatherGetCollByteCount(sendcount, recvcount, &paramcount, &sendInplaceOffset, &recvInplaceOffset, count, nranks);
+  HyperCubeGetCollByteCount(sendcount, recvcount, &paramcount, &sendInplaceOffset, &recvInplaceOffset, count, nranks);
 }
 
-testResult_t AllGatherRunTest(struct threadArgs* args, int root, ncclDataType_t type, const char* typeName, ncclRedOp_t op, const char* opName) {
-  args->collTest = &allGatherTest;
+testResult_t HyperCubeRunTest(struct threadArgs* args, int root, ncclDataType_t type, const char* typeName, ncclRedOp_t op, const char* opName) {
+  args->collTest = &hyperCubeTest;
   ncclDataType_t *run_types;
   const char **run_typenames;
   int type_count;
@@ -95,9 +116,9 @@ testResult_t AllGatherRunTest(struct threadArgs* args, int root, ncclDataType_t 
   return testSuccess;
 }
 
-struct testEngine allGatherEngine = {
-  AllGatherGetBuffSize,
-  AllGatherRunTest
+struct testEngine hyperCubeEngine = {
+  HyperCubeGetBuffSize,
+  HyperCubeRunTest
 };
 
-#pragma weak ncclTestEngine=allGatherEngine
+#pragma weak ncclTestEngine=hyperCubeEngine
