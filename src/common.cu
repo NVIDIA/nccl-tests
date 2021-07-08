@@ -356,12 +356,9 @@ testResult_t InitData(void* data, const size_t count, ncclDataType_t type, const
   return testSuccess;
 }
 
-void Barrier(struct threadArgs* args)
-{
+void Barrier(struct threadArgs* args) {
   while (args->barrier[args->barrier_idx] != args->thread) pthread_yield();
-
   args->barrier[args->barrier_idx] = args->thread + 1;
-
   if (args->thread+1 == args->nThreads) {
 #ifdef MPI_SUPPORT
     MPI_Barrier(MPI_COMM_WORLD);
@@ -370,7 +367,35 @@ void Barrier(struct threadArgs* args)
   } else {
     while (args->barrier[args->barrier_idx]) pthread_yield();
   }
+  args->barrier_idx=!args->barrier_idx;
+}
 
+// Inter-thread/process barrier+allreduce
+void Allreduce(struct threadArgs* args, double* value, int average) {
+  while (args->barrier[args->barrier_idx] != args->thread) pthread_yield();
+  double val = *value;
+  if (args->thread > 0) {
+    double val2 = args->reduce[args->barrier_idx];
+    if (average == 1) val += val2;
+    if (average == 2) val = std::min(val, val2);
+    if (average == 3) val = std::max(val, val2);
+  }
+  if (average || args->thread == 0) args->reduce[args->barrier_idx] = val;
+  args->barrier[args->barrier_idx] = args->thread + 1;
+  if (args->thread+1 == args->nThreads) {
+#ifdef MPI_SUPPORT
+    if (average != 0) {
+      MPI_Op op = average == 1 ? MPI_SUM : average == 2 ? MPI_MIN : MPI_MAX;
+      MPI_Allreduce(MPI_IN_PLACE, (void*)&args->reduce[args->barrier_idx], 1, MPI_DOUBLE, op, MPI_COMM_WORLD);
+    }
+#endif
+    if (average == 1) args->reduce[args->barrier_idx] /= args->nProcs*args->nThreads;
+    args->reduce[1-args->barrier_idx] = 0;
+    args->barrier[args->barrier_idx] = 0;
+  } else {
+    while (args->barrier[args->barrier_idx]) pthread_yield();
+  }
+  *value = args->reduce[args->barrier_idx];
   args->barrier_idx=!args->barrier_idx;
 }
 
@@ -383,7 +408,7 @@ testResult_t CheckData(struct threadArgs* args, ncclDataType_t type, ncclRedOp_t
     NCCLCHECK(ncclCommCuDevice(args->comms[i], &device));
     CUDACHECK(cudaSetDevice(device));
     void *data = in_place ? ((void *)((uintptr_t)args->recvbuffs[i] + args->recvInplaceOffset*rank)) : args->recvbuffs[i];
-    TESTCHECK(CheckDelta(data , args->expected[i], count, type, args->delta));
+    TESTCHECK(CheckDelta(data , args->expected[i], count, type, args->deltaHost));
     maxDelta = std::max(*(args->deltaHost), maxDelta);
 
 #ifdef DEBUG_PRINT
@@ -555,23 +580,7 @@ testResult_t BenchTime(struct threadArgs* args, ncclDataType_t type, ncclRedOp_t
   double deltaSec = std::chrono::duration_cast<std::chrono::duration<double>>(delta).count();
   deltaSec = deltaSec/(iters*agg_iters);
   if (cudaGraphLaunches >= 1) deltaSec = deltaSec/cudaGraphLaunches;
-#ifdef MPI_SUPPORT
-  switch (average) {
-  case 1:
-    // Calculate the average time across all ranks
-    MPI_Allreduce(MPI_IN_PLACE, &deltaSec, 1, MPI_DOUBLE, MPI_SUM, MPI_COMM_WORLD);
-    deltaSec = deltaSec/(args->nProcs*args->nThreads*args->nGpus);
-    break;
-  case 2:
-    // Obtain the minimum time across all ranks
-    MPI_Allreduce(MPI_IN_PLACE, &deltaSec, 1, MPI_DOUBLE, MPI_MIN, MPI_COMM_WORLD);
-    break;
-  case 3:
-    // Obtain the maximum time across all ranks
-    MPI_Allreduce(MPI_IN_PLACE, &deltaSec, 1, MPI_DOUBLE, MPI_MAX, MPI_COMM_WORLD);
-    break;
-  }
-#endif
+  Allreduce(args, &deltaSec, average);
 
   if (cudaGraphLaunches >= 1) {
     //destroy cuda graph
@@ -631,21 +640,12 @@ testResult_t BenchTime(struct threadArgs* args, ncclDataType_t type, ncclRedOp_t
       TESTCHECK(CheckData(args, type, op, root, in_place, &maxDelta));
 
       //aggregate delta from all threads and procs
-      Barrier(args);
-      if (args->thread == 0) {
-        for (int i=1; i<args->nThreads; i++) {
-          maxDelta += args->deltaThreads[i];
-        }
-#ifdef MPI_SUPPORT
-        MPI_Allreduce(MPI_IN_PLACE, &maxDelta, 1, MPI_DOUBLE, MPI_MAX, MPI_COMM_WORLD);
-#endif
-      }
-      Barrier(args);
+      Allreduce(args, &maxDelta, 3);
   }
 
   double timeUsec = deltaSec*1.0E6;
   char timeStr[100];
-  if (timeUsec > 10000.0) {
+  if (timeUsec >= 10000.0) {
     sprintf(timeStr, "%7.0f", timeUsec);
   } else if (timeUsec >= 100.0) {
     sprintf(timeStr, "%7.1f", timeUsec);
@@ -875,6 +875,7 @@ int main(int argc, char* argv[]) {
         average = (int)strtol(optarg, NULL, 0);
         break;
 #endif
+      case 'h':
       default:
         if (c != 'h') printf("invalid option '%c'\n", c);
         printf("USAGE: %s \n\t"
@@ -1033,6 +1034,7 @@ testResult_t run() {
 
   int* sync = (int*)calloc(2, sizeof(int));
   int* barrier = (int*)calloc(2, sizeof(int));
+  double* reduce = (double*)calloc(2, sizeof(double));
 
   struct testThread threads[nThreads];
   memset(threads, 0, sizeof(struct testThread)*nThreads);
@@ -1058,11 +1060,10 @@ testResult_t run() {
 
     threads[t].args.barrier = (volatile int*)barrier;
     threads[t].args.barrier_idx = 0;
+    threads[t].args.reduce = (volatile double*)reduce;
     threads[t].args.sync = (volatile int*)sync;
     threads[t].args.sync_idx = 0;
-    threads[t].args.deltaThreads = delta;
     threads[t].args.deltaHost = (delta + t*NUM_BLOCKS);
-    threads[t].args.delta = delta;
     threads[t].args.errors=errors+t;
     threads[t].args.bw=bw+t;
     threads[t].args.bw_count=bw_count+t;

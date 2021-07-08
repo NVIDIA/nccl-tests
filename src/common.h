@@ -8,6 +8,7 @@
 
 #include "nccl.h"
 #include <stdio.h>
+#include <cstdint>
 #include <algorithm>
 #include <curand.h>
 #ifdef MPI_SUPPORT
@@ -116,11 +117,10 @@ struct threadArgs {
   int sync_idx;
   volatile int* barrier;
   int barrier_idx;
+  volatile double* reduce;
   int syncRank;
   int syncNranks;
-  double* deltaThreads;
   double* deltaHost;
-  double* delta;
   int* errors;
   double* bw;
   int* bw_count;
