@@ -66,10 +66,8 @@ static int ncclroot = 0;
 static int parallel_init = 0;
 static int blocking_coll = 0;
 static int cudaGraphLaunches = 0;
-#ifdef MPI_SUPPORT
 // Report average iteration time: (0=RANK0,1=AVG,2=MIN,3=MAX)
 static int average = 1;
-#endif
 
 #define NUM_BLOCKS 32
 
@@ -870,11 +868,9 @@ int main(int argc, char* argv[]) {
         printf("Option -G (CUDA graph) not supported before NCCL 2.9 + CUDA 11.3. Ignoring\n");
 #endif
         break;
-#ifdef MPI_SUPPORT
       case 'a':
         average = (int)strtol(optarg, NULL, 0);
         break;
-#endif
       case 'h':
       default:
         if (c != 'h') printf("invalid option '%c'\n", c);
@@ -899,9 +895,7 @@ int main(int argc, char* argv[]) {
             "[-r,--root <root>] \n\t"
             "[-z,--blocking <0/1>] \n\t"
             "[-G,--cudagraph <num graph launches>] \n\t"
-#ifdef MPI_SUPPORT
             "[-a,--average <0/1/2/3> report average iteration time <0=RANK0/1=AVG/2=MIN/3=MAX>] \n\t"
-#endif
             "[-h,--help]\n",
 	    basename(argv[0]));
 	return 0;
