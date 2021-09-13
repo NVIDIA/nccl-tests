@@ -237,12 +237,13 @@ static size_t wordSize(ncclDataType_t type) {
 }
 
 extern int test_ncclVersion; // init'd with ncclGetVersion()
-extern ncclDataType_t test_types[ncclNumTypes];
-extern const char *test_typenames[ncclNumTypes];
-extern ncclRedOp_t test_ops[ncclNumOps];
-extern const char *test_opnames[ncclNumOps];
+constexpr int test_opNumMax = (int)ncclNumOps + (NCCL_VERSION_CODE >= NCCL_VERSION(2,11,0) ? 1 : 0);
 extern int test_opnum;
 extern int test_typenum;
+extern ncclDataType_t test_types[ncclNumTypes];
+extern const char *test_typenames[ncclNumTypes];
+extern ncclRedOp_t test_ops[];
+extern const char *test_opnames[];
 
 static int ncclstringtotype(char *str) {
     for (int t=0; t<ncclNumTypes; t++) {
