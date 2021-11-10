@@ -10,7 +10,6 @@
 #include <stdio.h>
 #include <cstdint>
 #include <algorithm>
-#include <curand.h>
 #ifdef MPI_SUPPORT
 #include "mpi.h"
 #endif
@@ -46,7 +45,6 @@ typedef enum {
   testInternalError = 1,
   testCudaError = 2,
   testNcclError = 3,
-  testCuRandError = 4
 } testResult_t;
 
 // Relay errors up and trace

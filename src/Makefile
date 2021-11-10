@@ -12,6 +12,7 @@ DEBUG ?= 0
 CUDA_LIB ?= $(CUDA_HOME)/lib64
 CUDA_INC ?= $(CUDA_HOME)/include
 NVCC = $(CUDA_HOME)/bin/nvcc
+CUDARTLIB ?= cudart
 
 CUDA_VERSION = $(strip $(shell which $(NVCC) >/dev/null && $(NVCC) --version | grep release | sed 's/.*release //' | sed 's/\,.*//'))
 CUDA_MAJOR = $(shell echo $(CUDA_VERSION) | cut -d "." -f 1)
@@ -36,7 +37,7 @@ endif
 NVCUFLAGS  := -ccbin $(CXX) $(NVCC_GENCODE) -std=c++11
 
 LDFLAGS    := -L${CUDA_LIB} -lcudart -lrt
-NVLDFLAGS  := -L${CUDA_LIB} -lcudart -lrt
+NVLDFLAGS  := -L${CUDA_LIB} -l${CUDARTLIB} -lrt
 
 ifeq ($(DEBUG), 0)
 NVCUFLAGS += -O3 -g
@@ -68,7 +69,7 @@ ifeq ($(MPI_IBM),1)
 NVCUFLAGS += -DMPI_SUPPORT
 NVLDFLAGS += -lmpi_ibm
 endif
-LIBRARIES += curand nccl nvToolsExt
+LIBRARIES += nccl
 NVLDFLAGS += $(LIBRARIES:%=-l%)
 
 DST_DIR := $(BUILDDIR)
