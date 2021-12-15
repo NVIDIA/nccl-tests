@@ -91,6 +91,7 @@ testResult_t SendRecvRunTest(struct threadArgs* args, int root, ncclDataType_t t
   const char **run_typenames, **run_opnames;
   int type_count, op_count;
   int begin_root, end_root;
+  int step = 0;
 
   if ((int)type != -1) {
     type_count = 1;
@@ -114,13 +115,14 @@ testResult_t SendRecvRunTest(struct threadArgs* args, int root, ncclDataType_t t
   if (root >= 0) {
     begin_root = end_root = root;
   } else {
+    step = -root;
     begin_root = step;
     end_root = args->nProcs*args->nThreads*args->nGpus-1;
   }
 
   for (int i=0; i<type_count; i++) {
     for (int j=0; j<op_count; j++) {
-      for (int rr=begin_root; rr<=end_root; rr++) {
+      for (int rr=begin_root; rr<=end_root; rr+=step) {
         TESTCHECK(TimeTest(args, run_types[i], run_typenames[i], run_ops[j], run_opnames[j], rr));
       }
     }

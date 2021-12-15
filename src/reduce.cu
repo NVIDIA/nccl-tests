@@ -77,6 +77,7 @@ testResult_t ReduceRunTest(struct threadArgs* args, int root, ncclDataType_t typ
   const char **run_typenames, **run_opnames;
   int type_count, op_count;
   int begin_root, end_root;
+  int step = 0;
 
   if ((int)type != -1) {
     type_count = 1;
@@ -98,16 +99,17 @@ testResult_t ReduceRunTest(struct threadArgs* args, int root, ncclDataType_t typ
     run_opnames = test_opnames;
   }
 
-  if (root != -1) {
+  if (root >= 0) {
     begin_root = end_root = root;
   } else {
+    step = -root;
     begin_root = 0;
     end_root = args->nProcs*args->nThreads*args->nGpus-1;
   }
 
   for (int i=0; i<type_count; i++) {
     for (int j=0; j<op_count; j++) {
-      for (int k=begin_root; k<=end_root; k++) {
+      for (int k=begin_root; k<=end_root; k+=step) {
         TESTCHECK(TimeTest(args, run_types[i], run_typenames[i], run_ops[j], run_opnames[j], k));
       }
     }
