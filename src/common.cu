@@ -65,6 +65,8 @@ static int nccltype = ncclFloat;
 static int ncclroot = 0;
 static int parallel_init = 0;
 static int blocking_coll = 0;
+static int slow_rank = -1;
+static int slow_rank_usec = 100000;
 static int cudaGraphLaunches = 0;
 // Report average iteration time: (0=RANK0,1=AVG,2=MIN,3=MAX)
 static int average = 1;
@@ -529,6 +531,10 @@ testResult_t startColl(struct threadArgs* args, ncclDataType_t type, ncclRedOp_t
     char* sendBuff = ((char*)args->sendbuffs[i]) + shift;
     ncclRedOp_t op;
 
+    if (slow_rank == rank) {
+      usleep(slow_rank_usec);
+    }
+
     if(opIndex < ncclNumOps) {
       op = opIndex;
     }
@@ -882,13 +888,15 @@ int main(int argc, char* argv[]) {
     {"blocking", required_argument, 0, 'z'},
     {"cudagraph", required_argument, 0, 'G'},
     {"average", required_argument, 0, 'a'},
+    {"slowrank", required_argument, 0, 'S'},
+    {"slowrank_delay", required_argument, 0, 'D'},
     {"help", no_argument, 0, 'h'},
     {}
   };
 
   while(1) {
     int c;
-    c = getopt_long(argc, argv, "t:g:b:e:i:f:n:m:w:p:c:o:d:r:z:hG:a:", longopts, &longindex);
+    c = getopt_long(argc, argv, "t:g:b:e:i:f:n:m:w:p:c:o:d:r:z:hG:a:S:D:", longopts, &longindex);
 
     if (c == -1)
       break;
@@ -953,6 +961,12 @@ int main(int argc, char* argv[]) {
       case 'z':
         blocking_coll = strtol(optarg, NULL, 0);
         break;
+      case 'S':
+        slow_rank= (int)strtol(optarg, NULL, 0);
+        break;
+      case 'D':
+        slow_rank_usec= strtol(optarg, NULL, 0);
+        break;
       case 'G':
 #if (NCCL_MAJOR > 2 || (NCCL_MAJOR >= 2 && NCCL_MINOR >= 9)) && CUDART_VERSION >= 11030
         cudaGraphLaunches = strtol(optarg, NULL, 0);
@@ -990,6 +1004,8 @@ int main(int argc, char* argv[]) {
             "[-z,--blocking <0/1>] \n\t"
             "[-G,--cudagraph <num graph launches>] \n\t"
             "[-a,--average <0/1/2/3> report average iteration time <0=RANK0/1=AVG/2=MIN/3=MAX>] \n\t"
+            "[-S slowrank <rank>] slow rank (default is disabled) \n\t"
+            "[-D slowrank_delay <usec>] slow rank delay usec \n\t"
             "[-h,--help]\n",
 	    basename(argv[0]));
 	return 0;
