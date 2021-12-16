@@ -47,6 +47,9 @@ int test_ncclVersion = 0; // init'd with ncclGetVersion()
   int test_opnum = 4;
 #endif
 
+// Communication timeout, default is 30min
+double comm_timeout = 1800;
+
 thread_local int is_main_thread = 0;
 
 // Command line parameter defaults
@@ -471,8 +474,11 @@ testResult_t CheckData(struct threadArgs* args, ncclDataType_t type, ncclRedOp_t
 testResult_t testStreamSynchronize(int ngpus, cudaStream_t* streams, ncclComm_t* comms) {
   cudaError_t cudaErr;
   int remaining = ngpus;
+  auto start = std::chrono::high_resolution_clock::time_point::min();
+  int checkTimeout = 0;
   int* done = (int*)malloc(sizeof(int)*ngpus);
   memset(done, 0, sizeof(int)*ngpus);
+
   while (remaining) {
    int idle = 1;
    for (int i=0; i<ngpus; i++) {
@@ -505,7 +511,25 @@ testResult_t testStreamSynchronize(int ngpus, cudaStream_t* streams, ncclComm_t*
    }
 
    // We might want to let other threads (including NCCL threads) use the CPU.
-   if (idle) pthread_yield();
+   if (idle) {
+       if (checkTimeout) {
+           auto delta = std::chrono::high_resolution_clock::now() - start;
+           double deltaSec = std::chrono::duration_cast<std::chrono::duration<double>>(delta).count();
+           if (deltaSec > comm_timeout) {
+               char hostname[1024];
+               getHostName(hostname, 1024);
+	       printf("COMMUNICATION TIMEOUT\n");
+               printf("%s: Test NCCL failure %s:%d communication dedline exceeded %.0f sec, timeout %.0f sec\n",
+                      hostname,  __FILE__,__LINE__, deltaSec, comm_timeout);
+               return testNcclError;
+           }
+
+       } else {
+           start = std::chrono::high_resolution_clock::now();
+           checkTimeout = 1;
+       }
+       pthread_yield();
+   }
   }
   free(done);
   return testSuccess;
@@ -1030,6 +1054,9 @@ testResult_t run() {
   char hostname[1024];
   getHostName(hostname, 1024);
 
+  char* str = getenv("NCCL_TESTS_COMM_TIMEOUT");
+  comm_timeout = str ? atof(str) : comm_timeout;
+
 #ifdef MPI_SUPPORT
   MPI_Comm_size(MPI_COMM_WORLD, &nProcs);
   MPI_Comm_rank(MPI_COMM_WORLD, &proc);
@@ -1211,7 +1238,7 @@ testResult_t run() {
   }
   CUDACHECK(cudaFreeHost(delta));
 
-  char* str = getenv("NCCL_TESTS_MIN_BW");
+  str = getenv("NCCL_TESTS_MIN_BW");
   double check_avg_bw = str ? atof(str) : -1;
   bw[0] /= bw_count[0];
 
