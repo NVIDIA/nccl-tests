@@ -55,6 +55,7 @@ thread_local int is_main_thread = 0;
 // Command line parameter defaults
 static int nThreads = 1;
 static int nGpus = 1;
+static int nGpusVisible;
 static size_t minBytes = 32*1024*1024;
 static size_t maxBytes = 32*1024*1024;
 static size_t stepBytes = 1*1024*1024;
@@ -223,7 +224,7 @@ testResult_t CheckData(struct threadArgs* args, ncclDataType_t type, ncclRedOp_t
     int device;
     int rank = ((args->proc*args->nThreads + args->thread)*args->nGpus + i);
     NCCLCHECK(ncclCommCuDevice(args->comms[i], &device));
-    CUDACHECK(cudaSetDevice(device));
+    CUDACHECK(cudaSetDevice(device % nGpusVisible));
     void *data = in_place ? ((void *)((uintptr_t)args->recvbuffs[i] + args->recvInplaceOffset*rank)) : args->recvbuffs[i];
 
     TESTCHECK(CheckDelta(data, args->expected[i], count, 0, type, op, 0, nranks, wrongPerGpu+i));
@@ -587,7 +588,7 @@ testResult_t threadRunTests(struct threadArgs* args) {
   // will be done on the current GPU (by default : 0) and if the GPUs are in
   // exclusive mode those operations will fail.
   int gpuid = args->localRank*args->nThreads*args->nGpus + args->thread*args->nGpus;
-  CUDACHECK(cudaSetDevice(gpuid));
+  CUDACHECK(cudaSetDevice(gpuid % nGpusVisible));
   TESTCHECK(ncclTestEngine.runTest(args, ncclroot, (ncclDataType_t)nccltype, test_typenames[nccltype], (ncclRedOp_t)ncclop, test_opnames[ncclop]));
   return testSuccess;
 }
@@ -604,7 +605,7 @@ testResult_t threadInit(struct threadArgs* args) {
   for (int i=0; i<args->nGpus; i++) {
     int rank = args->proc*args->nThreads*args->nGpus + args->thread*args->nGpus + i;
     int gpuid = args->localRank*args->nThreads*args->nGpus + args->thread*args->nGpus + i;
-    CUDACHECK(cudaSetDevice(gpuid));
+    CUDACHECK(cudaSetDevice(gpuid % nGpusVisible));
     NCCLCHECK(ncclCommInitRank(args->comms+i, nranks, args->ncclId, rank));
   }
   NCCLCHECK(ncclGroupEnd());
@@ -685,6 +686,8 @@ int main(int argc, char* argv[]) {
     {}
   };
 
+  CUDACHECK(cudaGetDeviceCount(&nGpusVisible));
+
   while(1) {
     int c;
     c = getopt_long(argc, argv, "t:g:b:e:i:f:n:m:w:p:c:o:d:r:z:hG:a:", longopts, &longindex);
@@ -698,6 +701,10 @@ int main(int argc, char* argv[]) {
         break;
       case 'g':
         nGpus = strtol(optarg, NULL, 0);
+        if (nGpus > nGpusVisible) {
+          fprintf(stderr, "invalid number of GPUs specified (%d), only for %d GPUs exist\n", nGpus, nGpusVisible);
+          return -1;
+        }
         break;
       case 'b':
         parsed = parsesize(optarg);
@@ -843,7 +850,7 @@ testResult_t run() {
     int cudaDev = localRank*nThreads*nGpus+i;
     int rank = proc*nThreads*nGpus+i;
     cudaDeviceProp prop;
-    CUDACHECK(cudaGetDeviceProperties(&prop, cudaDev));
+    CUDACHECK(cudaGetDeviceProperties(&prop, cudaDev % nGpus));
     len += snprintf(line+len, MAX_LINE-len, "#   Rank %2d Pid %6d on %10s device %2d [0x%02x] %s\n",
                     rank, getpid(), hostname, cudaDev, prop.pciBusID, prop.name);
     maxMem = std::min(maxMem, prop.totalGlobalMem);
@@ -887,7 +894,7 @@ testResult_t run() {
   ncclTestEngine.getBuffSize(&sendBytes, &recvBytes, (size_t)maxBytes, (size_t)nProcs*nGpus*nThreads);
 
   for (int i=0; i<nGpus*nThreads; i++) {
-    CUDACHECK(cudaSetDevice(localRank*nThreads*nGpus+i));
+    CUDACHECK(cudaSetDevice((localRank*nThreads*nGpus+i) % nGpusVisible));
     TESTCHECK(AllocateBuffs(sendbuffs+i, sendBytes, recvbuffs+i, recvBytes, expected+i, (size_t)maxBytes));
     CUDACHECK(cudaStreamCreateWithFlags(streams+i, cudaStreamNonBlocking));
   }
@@ -902,7 +909,7 @@ testResult_t run() {
      } else {
        NCCLCHECK(ncclGroupStart());
        for (int i=0; i<nGpus*nThreads; i++) {
-         CUDACHECK(cudaSetDevice(localRank*nThreads*nGpus+i));
+         CUDACHECK(cudaSetDevice((localRank*nThreads*nGpus+i) % nGpusVisible));
          NCCLCHECK(ncclCommInitRank(comms+i, nProcs*nThreads*nGpus, ncclId, proc*nThreads*nGpus+i));
        }
        NCCLCHECK(ncclGroupEnd());
