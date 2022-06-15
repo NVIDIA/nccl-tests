@@ -8,15 +8,15 @@
 #include "common.h"
 
 void print_header() {
-  PRINT("# %10s  %12s  %8s            out-of-place                       in-place          \n", "", "", "");
-  PRINT("# %10s  %12s  %8s  %7s  %6s  %6s  %5s  %7s  %6s  %6s  %5s\n", "size", "count", "type",
+  PRINT("# %10s  %12s  %8s  %6s            out-of-place                       in-place          \n", "", "", "", "");
+  PRINT("# %10s  %12s  %8s  %6s  %7s  %6s  %6s  %5s  %7s  %6s  %6s  %5s\n", "size", "count", "type", "dist",
         "time", "algbw", "busbw", "error", "time", "algbw", "busbw", "error");
-  PRINT("# %10s  %12s  %8s  %7s  %6s  %6s  %5s  %7s  %6s  %6s  %5s\n", "(B)", "(elements)", "",
+  PRINT("# %10s  %12s  %8s  %6s  %7s  %6s  %6s  %5s  %7s  %6s  %6s  %5s\n", "(B)", "(elements)", "", "",
         "(us)", "(GB/s)", "(GB/s)", "", "(us)", "(GB/s)", "(GB/s)", "");
 }
 
 void print_line_header (size_t size, size_t count, const char *typeName, const char *opName, int root) {
-  PRINT("%12li  %12li  %8s", size, count, typeName);
+  PRINT("%12li  %12li  %8s  %6i", size, count, typeName, root);
 }
 
 void SendRecvGetCollByteCount(size_t *sendcount, size_t *recvcount, size_t *paramcount, size_t *sendInplaceOffset, size_t *recvInplaceOffset, size_t count, int nranks) {
@@ -39,7 +39,7 @@ testResult_t SendRecvInitData(struct threadArgs* args, ncclDataType_t type, nccl
     CUDACHECK(cudaMemset(args->recvbuffs[i], 0, args->expectedBytes));
     void* data = in_place ? args->recvbuffs[i] : args->sendbuffs[i];
     TESTCHECK(InitData(data, sendcount, type, rep, rank));
-    int peer = (rank-1+nranks)%nranks;
+    int peer = (rank-root+nranks)%nranks;
     TESTCHECK(InitData(args->expected[i], recvcount, type, rep, peer));
     CUDACHECK(cudaDeviceSynchronize());
   }
@@ -61,8 +61,8 @@ testResult_t SendRecvRunColl(void* sendbuff, void* recvbuff, size_t count, ncclD
   NCCLCHECK(ncclCommCount(comm, &nRanks));
   int rank;
   NCCLCHECK(ncclCommUserRank(comm, &rank));
-  int recvPeer = (rank-1+nRanks) % nRanks;
-  int sendPeer = (rank+1) % nRanks;
+  int recvPeer = (rank-root+nRanks) % nRanks;
+  int sendPeer = (rank+root) % nRanks;
 
   NCCLCHECK(ncclGroupStart());
   NCCLCHECK(ncclSend(sendbuff, count, type, sendPeer, comm, stream));
@@ -90,6 +90,8 @@ testResult_t SendRecvRunTest(struct threadArgs* args, int root, ncclDataType_t t
   ncclRedOp_t *run_ops;
   const char **run_typenames, **run_opnames;
   int type_count, op_count;
+  int begin_root, end_root;
+  int step = 0;
 
   if ((int)type != -1) {
     type_count = 1;
@@ -110,10 +112,19 @@ testResult_t SendRecvRunTest(struct threadArgs* args, int root, ncclDataType_t t
     run_ops = test_ops;
     run_opnames = test_opnames;
   }
+  if (root >= 0) {
+    begin_root = end_root = root;
+  } else {
+    step = -root;
+    begin_root = step;
+    end_root = args->nProcs*args->nThreads*args->nGpus-1;
+  }
 
   for (int i=0; i<type_count; i++) {
     for (int j=0; j<op_count; j++) {
-      TESTCHECK(TimeTest(args, run_types[i], run_typenames[i], run_ops[j], run_opnames[j], -1));
+      for (int rr=begin_root; rr<=end_root; rr+=step) {
+        TESTCHECK(TimeTest(args, run_types[i], run_typenames[i], run_ops[j], run_opnames[j], rr));
+      }
     }
   }
   return testSuccess;

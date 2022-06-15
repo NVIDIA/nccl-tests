@@ -47,6 +47,9 @@ int test_ncclVersion = 0; // init'd with ncclGetVersion()
   int test_opnum = 4;
 #endif
 
+// Communication timeout, default is 30min
+double comm_timeout = 1800;
+
 thread_local int is_main_thread = 0;
 
 // Command line parameter defaults
@@ -65,6 +68,8 @@ static int nccltype = ncclFloat;
 static int ncclroot = 0;
 static int parallel_init = 0;
 static int blocking_coll = 0;
+static int slow_rank = -1;
+static int slow_rank_usec = 100000;
 static int cudaGraphLaunches = 0;
 // Report average iteration time: (0=RANK0,1=AVG,2=MIN,3=MAX)
 static int average = 1;
@@ -469,8 +474,11 @@ testResult_t CheckData(struct threadArgs* args, ncclDataType_t type, ncclRedOp_t
 testResult_t testStreamSynchronize(int ngpus, cudaStream_t* streams, ncclComm_t* comms) {
   cudaError_t cudaErr;
   int remaining = ngpus;
+  auto start = std::chrono::high_resolution_clock::time_point::min();
+  int checkTimeout = 0;
   int* done = (int*)malloc(sizeof(int)*ngpus);
   memset(done, 0, sizeof(int)*ngpus);
+
   while (remaining) {
    int idle = 1;
    for (int i=0; i<ngpus; i++) {
@@ -503,7 +511,25 @@ testResult_t testStreamSynchronize(int ngpus, cudaStream_t* streams, ncclComm_t*
    }
 
    // We might want to let other threads (including NCCL threads) use the CPU.
-   if (idle) pthread_yield();
+   if (idle) {
+       if (checkTimeout) {
+           auto delta = std::chrono::high_resolution_clock::now() - start;
+           double deltaSec = std::chrono::duration_cast<std::chrono::duration<double>>(delta).count();
+           if (deltaSec > comm_timeout) {
+               char hostname[1024];
+               getHostName(hostname, 1024);
+	       printf("COMMUNICATION TIMEOUT\n");
+               printf("%s: Test NCCL failure %s:%d communication dedline exceeded %.0f sec, timeout %.0f sec\n",
+                      hostname,  __FILE__,__LINE__, deltaSec, comm_timeout);
+               return testNcclError;
+           }
+
+       } else {
+           start = std::chrono::high_resolution_clock::now();
+           checkTimeout = 1;
+       }
+       pthread_yield();
+   }
   }
   free(done);
   return testSuccess;
@@ -528,6 +554,10 @@ testResult_t startColl(struct threadArgs* args, ncclDataType_t type, ncclRedOp_t
     char* recvBuff = ((char*)args->recvbuffs[i]) + shift;
     char* sendBuff = ((char*)args->sendbuffs[i]) + shift;
     ncclRedOp_t op;
+
+    if (slow_rank == rank) {
+      usleep(slow_rank_usec);
+    }
 
     if(opIndex < ncclNumOps) {
       op = opIndex;
@@ -882,13 +912,15 @@ int main(int argc, char* argv[]) {
     {"blocking", required_argument, 0, 'z'},
     {"cudagraph", required_argument, 0, 'G'},
     {"average", required_argument, 0, 'a'},
+    {"slowrank", required_argument, 0, 'S'},
+    {"slowrank_delay", required_argument, 0, 'D'},
     {"help", no_argument, 0, 'h'},
     {}
   };
 
   while(1) {
     int c;
-    c = getopt_long(argc, argv, "t:g:b:e:i:f:n:m:w:p:c:o:d:r:z:hG:a:", longopts, &longindex);
+    c = getopt_long(argc, argv, "t:g:b:e:i:f:n:m:w:p:c:o:d:r:z:hG:a:S:D:", longopts, &longindex);
 
     if (c == -1)
       break;
@@ -953,6 +985,12 @@ int main(int argc, char* argv[]) {
       case 'z':
         blocking_coll = strtol(optarg, NULL, 0);
         break;
+      case 'S':
+        slow_rank= (int)strtol(optarg, NULL, 0);
+        break;
+      case 'D':
+        slow_rank_usec= strtol(optarg, NULL, 0);
+        break;
       case 'G':
 #if (NCCL_MAJOR > 2 || (NCCL_MAJOR >= 2 && NCCL_MINOR >= 9)) && CUDART_VERSION >= 11030
         cudaGraphLaunches = strtol(optarg, NULL, 0);
@@ -990,6 +1028,8 @@ int main(int argc, char* argv[]) {
             "[-z,--blocking <0/1>] \n\t"
             "[-G,--cudagraph <num graph launches>] \n\t"
             "[-a,--average <0/1/2/3> report average iteration time <0=RANK0/1=AVG/2=MIN/3=MAX>] \n\t"
+            "[-S slowrank <rank>] slow rank (default is disabled) \n\t"
+            "[-D slowrank_delay <usec>] slow rank delay usec \n\t"
             "[-h,--help]\n",
 	    basename(argv[0]));
 	return 0;
@@ -1013,6 +1053,9 @@ testResult_t run() {
   int localRank = 0;
   char hostname[1024];
   getHostName(hostname, 1024);
+
+  char* str = getenv("NCCL_TESTS_COMM_TIMEOUT");
+  comm_timeout = str ? atof(str) : comm_timeout;
 
 #ifdef MPI_SUPPORT
   MPI_Comm_size(MPI_COMM_WORLD, &nProcs);
@@ -1195,7 +1238,7 @@ testResult_t run() {
   }
   CUDACHECK(cudaFreeHost(delta));
 
-  char* str = getenv("NCCL_TESTS_MIN_BW");
+  str = getenv("NCCL_TESTS_MIN_BW");
   double check_avg_bw = str ? atof(str) : -1;
   bw[0] /= bw_count[0];
 

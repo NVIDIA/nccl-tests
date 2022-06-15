@@ -97,6 +97,7 @@ testResult_t GatherRunTest(struct threadArgs* args, int root, ncclDataType_t typ
   const char **run_typenames;
   int type_count;
   int begin_root, end_root;
+  int step = 0;
 
   if ((int)type != -1) {
     type_count = 1;
@@ -108,15 +109,16 @@ testResult_t GatherRunTest(struct threadArgs* args, int root, ncclDataType_t typ
     run_typenames = test_typenames;
   }
 
-  if (root != -1) {
+  if (root >= 0) {
     begin_root = end_root = root;
   } else {
+    step = -root;
     begin_root = 0;
     end_root = args->nProcs*args->nThreads*args->nGpus-1;
   }
 
   for (int i=0; i<type_count; i++) {
-    for (int j=begin_root; j<=end_root; j++) {
+    for (int j=begin_root; j<=end_root; j+=step) {
       TESTCHECK(TimeTest(args, run_types[i], run_typenames[i], (ncclRedOp_t)0, "", j));
     }
   }
