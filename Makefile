@@ -4,6 +4,9 @@
 # See LICENCE.txt for license information
 #
 
+BUILDDIR ?= build
+override BUILDDIR := $(abspath $(BUILDDIR))
+
 .PHONY : all clean
 
 default : src.build
@@ -14,7 +17,7 @@ all:   ${TARGETS:%=%.build}
 clean: ${TARGETS:%=%.clean}
 
 %.build:
-	${MAKE} -C $* build
+	${MAKE} -C $* build BUILDDIR=${BUILDDIR}
 
 %.clean:
-	${MAKE} -C $* clean
+	${MAKE} -C $* clean BUILDDIR=${BUILDDIR}
