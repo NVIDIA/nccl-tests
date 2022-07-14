@@ -59,6 +59,7 @@ testResult_t AllReduceRunColl(void* sendbuff, void* recvbuff, size_t count, nccl
   static int round;
   ncclGroupStart();
   printf("\n<%d> %d ofccl_nccl_test group start\n", getpid(), round);
+
   NCCLCHECK(ncclAllReduce(sendbuff, recvbuff, count, type, op, comm, stream));
   printf("<%d> %d ofccl_nccl_test 1st allreduce\n", getpid(), round);
   NCCLCHECK(ncclAllReduce(sendbuff, recvbuff, count, type, op, comm, stream));
@@ -67,6 +68,15 @@ testResult_t AllReduceRunColl(void* sendbuff, void* recvbuff, size_t count, nccl
   printf("<%d> %d ofccl_nccl_test 3rd allreduce\n", getpid(), round);
   NCCLCHECK(ncclAllReduce(sendbuff, recvbuff, count, type, op, comm, stream));
   printf("<%d> %d ofccl_nccl_test 4th allreduce\n", getpid(), round);
+  NCCLCHECK(ncclAllReduce(sendbuff, recvbuff, count, type, op, comm, stream));
+  printf("<%d> %d ofccl_nccl_test 5th allreduce\n", getpid(), round);
+  NCCLCHECK(ncclAllReduce(sendbuff, recvbuff, count, type, op, comm, stream));
+  printf("<%d> %d ofccl_nccl_test 6th allreduce\n", getpid(), round);
+  NCCLCHECK(ncclAllReduce(sendbuff, recvbuff, count, type, op, comm, stream));
+  printf("<%d> %d ofccl_nccl_test 7th allreduce\n", getpid(), round);
+  NCCLCHECK(ncclAllReduce(sendbuff, recvbuff, count, type, op, comm, stream));
+  printf("<%d> %d ofccl_nccl_test 8th allreduce\n", getpid(), round);
+
   ncclGroupEnd();
   printf("<%d> %d ofccl_nccl_test group end\n", getpid(), round);
   round++;
