@@ -3,7 +3,7 @@
  *
  * See LICENSE.txt for license information
  ************************************************************************/
-
+#include <stdio.h>
 #ifndef NCCL1_COMPAT_H
 #define NCCL1_COMPAT_H
 
@@ -14,8 +14,8 @@
 #define ncclNumOps nccl_NUM_OPS
 #define ncclNumTypes nccl_NUM_TYPES
 
-static ncclResult_t ncclGroupStart() { return ncclSuccess; }
-static ncclResult_t ncclGroupEnd() { return ncclSuccess; }
+static ncclResult_t ncclGroupStart() { printf("[%s:%d] <%s>\n", __FILE__, __LINE__, __func__); return ncclSuccess; }
+static ncclResult_t ncclGroupEnd() { printf("[%s:%d] <%s>\n", __FILE__, __LINE__, __func__); return ncclSuccess; }
 
 #define CHECKCOUNT(count) if (count > INT_MAX) return ncclInvalidArgument;
 
