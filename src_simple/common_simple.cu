@@ -601,25 +601,7 @@ testResult_t BenchTime(struct threadArgs* args, ncclDataType_t type, ncclRedOp_t
     TESTCHECK(args->collTest->initData(args, type, op, root, 99, in_place));
   }
 
-  // Sync
-  TESTCHECK(startColl(args, type, op, root, in_place, 0));
-  TESTCHECK(completeColl(args));
-
   Barrier(args);
-
-#if CUDART_VERSION >= 11030
-  cudaGraph_t graphs[args->nGpus];
-  cudaGraphExec_t graphExec[args->nGpus];
-  if (cudaGraphLaunches >= 1) {
-    // Begin cuda graph capture
-    for (int i=0; i<args->nGpus; i++) {
-      // Thread local mode is needed for:
-      // - Multi-thread mode
-      // - P2P pre-connect
-      CUDACHECK(cudaStreamBeginCapture(args->streams[i], cudaStreamCaptureModeThreadLocal));
-    }
-  }
-#endif
 
   // Performance Benchmark
   auto start = std::chrono::high_resolution_clock::now();
