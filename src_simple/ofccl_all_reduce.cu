@@ -77,40 +77,36 @@ void AllReduceGetBuffSize(size_t *sendcount, size_t *recvcount, size_t count, in
 
 testResult_t AllReduceRunTest(struct threadArgs* args, int root, ncclDataType_t type, const char* typeName, ncclRedOp_t op, const char* opName) {
   args->collTest = &allReduceTest;
-  // ncclDataType_t *run_types;
-  // ncclRedOp_t *run_ops;
-  // const char **run_typenames, **run_opnames;
-  // int type_count, op_count;
+  ncclDataType_t *run_types;
+  ncclRedOp_t *run_ops;
+  const char **run_typenames, **run_opnames;
+  int type_count, op_count;
 
-  // if ((int)type != -1) {
-  //   type_count = 1;
-  //   run_types = &type;
-  //   run_typenames = &typeName;
-  // } else {
-  //   type_count = test_typenum;
-  //   run_types = test_types;
-  //   run_typenames = test_typenames;
-  // }
+  if ((int)type != -1) {
+    type_count = 1;
+    run_types = &type;
+    run_typenames = &typeName;
+  } else {
+    type_count = test_typenum;
+    run_types = test_types;
+    run_typenames = test_typenames;
+  }
 
-  // if ((int)op != -1) {
-  //   op_count = 1;
-  //   run_ops = &op;
-  //   run_opnames = &opName;
-  // } else {
-  //   op_count = test_opnum;
-  //   run_ops = test_ops;
-  //   run_opnames = test_opnames;
-  // }
+  if ((int)op != -1) {
+    op_count = 1;
+    run_ops = &op;
+    run_opnames = &opName;
+  } else {
+    op_count = test_opnum;
+    run_ops = test_ops;
+    run_opnames = test_opnames;
+  }
 
-  // for (int i=0; i<type_count; i++) {
-  //   for (int j=0; j<op_count; j++) {
-  //     TESTCHECK(TimeTest(args, run_types[i], run_typenames[i], run_ops[j], run_opnames[j], -1));
-  //   }
-  // }
-  static int test_round = 0;
-  printf("<%d> %d ofccl_nccl_test invoke TimeTest\n", getpid(), test_round);
-  test_round++;
-  TESTCHECK(TimeTest(args, ncclFloat, "float", ncclSum, "sum", -1));
+  for (int i=0; i<type_count; i++) {
+    for (int j=0; j<op_count; j++) {
+      TESTCHECK(TimeTest(args, run_types[i], run_typenames[i], run_ops[j], run_opnames[j], -1));
+    }
+  }
   return testSuccess;
 }
 
