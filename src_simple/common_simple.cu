@@ -600,7 +600,7 @@ testResult_t startColl(struct threadArgs *args, ncclDataType_t type,
   }
   for (int i = 0; i < args->nGpus; i++) {
     ncclComm_t comm = args->comms[miter * nGpus + i];
-    OFTEST_LOG(TEST, "commIndex=%d, comm=%p", miter * nGpus + i, comm);
+    // OFTEST_LOG(TEST, "commIndex=%d, comm=%p", miter * nGpus + i, comm);
 #ifndef NCCL_MAJOR
     int cudaDev;
     NCCLCHECK(ncclCommCuDevice(comm, &cudaDev));
