@@ -679,6 +679,7 @@ testResult_t TimeTest(struct threadArgs* args, ncclDataType_t type, const char* 
 }
 
 testResult_t threadRunTests(struct threadArgs* args) {
+  // OFTEST_LOG1(TEST, "Enter threadRunTests");
   // Set device to the first of our GPUs. If we don't do that, some operations
   // will be done on the current GPU (by default : 0) and if the GPUs are in
   // exclusive mode those operations will fail.
@@ -689,6 +690,7 @@ testResult_t threadRunTests(struct threadArgs* args) {
 }
 
 testResult_t threadInit(struct threadArgs* args) {
+  // OFTEST_LOG1(TEST, "Enter threadInit");
   char hostname[1024];
   getHostName(hostname, 1024);
   int nranks =  args->nProcs*args->nThreads*args->nGpus;
@@ -701,6 +703,7 @@ testResult_t threadInit(struct threadArgs* args) {
     int rank = args->proc*args->nThreads*args->nGpus + args->thread*args->nGpus + i;
     int gpuid = args->localRank*args->nThreads*args->nGpus + args->thread*args->nGpus + i;
     CUDACHECK(cudaSetDevice(gpuid));
+    // OFTEST_LOG1(TEST, "CommInitRank here");
     NCCLCHECK(ncclCommInitRank(args->comms+i, nranks, args->ncclId, rank));
   }
   NCCLCHECK(ncclGroupEnd());
@@ -992,11 +995,13 @@ testResult_t run() {
      if (nProcs == 1) {
        int gpuArray[nGpus*nThreads];
        for (int i=0; i<nGpus*nThreads; i++) gpuArray[i] = i;
+       OFTEST_LOG1(TEST, "CommInitAll here");
        NCCLCHECK(ncclCommInitAll(comms, nGpus*nThreads, gpuArray));
      } else {
        NCCLCHECK(ncclGroupStart());
        for (int i=0; i<nGpus*nThreads; i++) {
          CUDACHECK(cudaSetDevice(localRank*nThreads*nGpus+i));
+        //  OFTEST_LOG1(TEST, "CommInitRank here");
          NCCLCHECK(ncclCommInitRank(comms+i, nProcs*nThreads*nGpus, ncclId, proc*nThreads*nGpus+i));
        }
        NCCLCHECK(ncclGroupEnd());
