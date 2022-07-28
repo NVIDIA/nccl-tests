@@ -57,8 +57,15 @@ void AllReduceGetBw(size_t count, int typesize, double sec, double* algBw, doubl
 
 testResult_t AllReduceRunColl(void* sendbuff, void* recvbuff, size_t count, ncclDataType_t type, ncclRedOp_t op, int root, ncclComm_t comm, cudaStream_t stream) {
 
-  NCCLCHECK(ofcclAllReduce(sendbuff, recvbuff, count, type, op, comm, stream));
-  printf("<%d> ofccl_nccl_test invoke ofcclAllReduce\n", getpid());
+  // NCCLCHECK(ofcclAllReduce(sendbuff, recvbuff, count, type, op, comm, stream));
+  // OFTEST_LOG1(TEST, "UNIMPLEMENTED ofcclAllReduce");
+  return testSuccess;
+}
+
+testResult_t AllReducePrepare(size_t count, ncclDataType_t datatype, ncclRedOp_t op, ncclComm* comm, int collId) {
+
+  NCCLCHECK(ofcclPrepareAllReduce(count, datatype, op, comm, collId));
+  // OFTEST_LOG(TEST, "invoke ofcclPrepareAllReduce with count=%lu, collId=%d", count, collId);
   return testSuccess;
 }
 
@@ -67,7 +74,8 @@ struct testColl allReduceTest = {
   AllReduceGetCollByteCount,
   AllReduceInitData,
   AllReduceGetBw,
-  AllReduceRunColl
+  AllReduceRunColl,
+  AllReducePrepare
 };
 
 void AllReduceGetBuffSize(size_t *sendcount, size_t *recvcount, size_t count, int nranks) {
@@ -104,7 +112,7 @@ testResult_t AllReduceRunTest(struct threadArgs* args, int root, ncclDataType_t 
 
   for (int i=0; i<type_count; i++) {
     for (int j=0; j<op_count; j++) {
-      TESTCHECK(TimeTest(args, run_types[i], run_typenames[i], run_ops[j], run_opnames[j], -1));
+      TESTCHECK(TimeTest(args, run_types[i], run_typenames[i], run_ops[j], run_opnames[j], -1, true));
     }
   }
   return testSuccess;

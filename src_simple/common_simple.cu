@@ -584,6 +584,94 @@ testResult_t testStreamSynchronize(int ngpus, cudaStream_t *streams,
   return testSuccess;
 }
 
+testResult_t prepareColl(struct threadArgs *args, ncclDataType_t type,
+                       ncclRedOp_t opIndex, int root, int in_place, int iter, int miter) {
+  size_t count = args->nbytes / wordSize(type);
+  if (args->nGpus != 1) {
+    OFTEST_LOG1(TESTERR, "prepareColl cannot handle multiple GPUs");
+    return testInternalError;
+  }
+  // Try to change offset for each iteration so that we avoid cache effects and
+  // catch race conditions in ptrExchange
+  // size_t totalnbytes = max(args->sendBytes, args->expectedBytes);
+  // size_t steps = totalnbytes ? args->maxbytes / totalnbytes : 1;
+  // size_t shift = totalnbytes * (iter % steps);
+
+  for (int i = 0; i < args->nGpus; i++) {
+    ncclComm_t comm = args->comms[miter * nGpus + i];
+    int rank = ((args->proc * args->nThreads + args->thread) * args->nGpus + i);
+    ncclRedOp_t op;
+    
+    if (opIndex < ncclNumOps) {
+      op = opIndex;
+    }
+#if NCCL_VERSION_CODE >= NCCL_VERSION(2, 11, 0)
+    else {
+      union {
+        int8_t i8;
+        uint8_t u8;
+        int32_t i32;
+        uint32_t u32;
+        int64_t i64;
+        uint64_t u64;
+        half f16;
+        float f32;
+        double f64;
+#if defined(__CUDA_BF16_TYPES_EXIST__)
+        __nv_bfloat16 bf16;
+#endif
+      };
+      int scalar = preMulScalar(rank);
+      switch (type) {
+      case ncclInt8:
+        i8 = int8_t(scalar);
+        break;
+      case ncclUint8:
+        u8 = uint8_t(scalar);
+        break;
+      case ncclInt32:
+        i32 = int32_t(scalar);
+        break;
+      case ncclUint32:
+        u32 = uint32_t(scalar);
+        break;
+      case ncclInt64:
+        i64 = int32_t(scalar);
+        break;
+      case ncclUint64:
+        u64 = uint32_t(scalar);
+        break;
+      case ncclFloat16:
+        f16 = __float2half(float(scalar));
+        break;
+      case ncclFloat32:
+        f32 = float(scalar);
+        break;
+      case ncclFloat64:
+        f64 = double(scalar);
+        break;
+#if defined(__CUDA_BF16_TYPES_EXIST__)
+      case ncclBfloat16:
+        bf16 = __float2bfloat16(float(scalar));
+        break;
+#endif
+      }
+      NCCLCHECK(ncclRedOpCreatePreMulSum(
+          &op, &u64, type, ncclScalarHostImmediate, comm));
+    }
+#endif
+    TESTCHECK(args->collTest->prepareColl(count, type, op, comm, miter));
+
+#if NCCL_VERSION_CODE >= NCCL_VERSION(2, 11, 0)
+    if (opIndex >= ncclNumOps) {
+      NCCLCHECK(ncclRedOpDestroy(op, comm));
+    }
+#endif
+  }
+  
+  return testSuccess;
+}
+
 testResult_t startColl(struct threadArgs *args, ncclDataType_t type,
                        ncclRedOp_t opIndex, int root, int in_place, int iter, int miter) {
   size_t count = args->nbytes / wordSize(type);
@@ -595,7 +683,7 @@ testResult_t startColl(struct threadArgs *args, ncclDataType_t type,
   size_t shift = totalnbytes * (iter % steps);
 
   if (args->nGpus > 1) {
-    printf("\nstartColl, args->nGpus > 1 run ncclGroupStart\n");
+    // OFTEST_LOG1(TEST, "startColl, args->nGpus > 1 run ncclGroupStart");
     NCCLCHECK(ncclGroupStart());
   }
   for (int i = 0; i < args->nGpus; i++) {
@@ -684,7 +772,7 @@ testResult_t startColl(struct threadArgs *args, ncclDataType_t type,
 #endif
   }
   if (args->nGpus > 1) {
-    printf("\nstartColl, args->nGpus > 1 run ncclGroupEnd\n");
+    // OFTEST_LOG1(TEST, "startColl, args->nGpus > 1 run ncclGroupEnd");
     NCCLCHECK(ncclGroupEnd());
   }
 
@@ -809,7 +897,21 @@ void setupArgs(size_t size, ncclDataType_t type, struct threadArgs *args) {
 
 testResult_t TimeTest(struct threadArgs *args, ncclDataType_t type,
                       const char *typeName, ncclRedOp_t op, const char *opName,
-                      int root) {
+                      int root, bool is_ofccl) {
+  if (is_ofccl) {
+    // prepare for all size. op, type traversed in the caller.
+    for (size_t size = args->minbytes; size <= args->maxbytes;
+        size = ((args->stepfactor > 1) ? size * args->stepfactor
+                                        : size + args->stepbytes)) {
+      setupArgs(size, type, args);
+      for (int miter = 0; miter < multi_iters; miter++) {
+        TESTCHECK(prepareColl(args, type, op, root, 0, miter/* iter * multi_iters + miter when iter=0 */, miter));
+      }
+    }
+
+    ofcclPrepareDone();
+  }
+
   // Warm-up for large size
   setupArgs(args->maxbytes, type, args);
   for (int iter = 0; iter < warmup_iters; iter++) {

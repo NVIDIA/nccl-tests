@@ -16,9 +16,9 @@
 #include <pthread.h>
 #include "nccl1_compat.h"
 
-#define OFTEST_LOG(PRE, FMT, args...) printf("\nTEST [%s:%d] <%s> " #PRE " " FMT, __FILE__, __LINE__, __func__, args)
-#define OFTEST_LOG1(PRE, FMT) printf("\nTEST [%s:%d] <%s> " #PRE " " FMT, __FILE__, __LINE__, __func__)
-#define OFTEST_LOG0(PRE) printf("\nTEST [%s:%d] <%s> " #PRE, __FILE__, __LINE__, __func__)
+#define OFTEST_LOG(PRE, FMT, args...) printf("\n(testlog) [%s:%d] <%s> " #PRE " " FMT, __FILE__, __LINE__, __func__, args)
+#define OFTEST_LOG1(PRE, FMT) printf("\n(testlog) [%s:%d] <%s> " #PRE " " FMT, __FILE__, __LINE__, __func__)
+#define OFTEST_LOG0(PRE) printf("\n(testlog) [%s:%d] <%s> " #PRE, __FILE__, __LINE__, __func__)
 
 #define CUDACHECK(cmd) do {                         \
   cudaError_t err = cmd;                            \
@@ -75,6 +75,7 @@ struct testColl {
   void (*getBw)(size_t count, int typesize, double sec, double* algBw, double* busBw, int nranks);
   testResult_t (*runColl)(void* sendbuff, void* recvbuff, size_t count, ncclDataType_t type,
       ncclRedOp_t op, int root, ncclComm_t comm, cudaStream_t stream);
+  testResult_t (*prepareColl)(size_t count, ncclDataType_t datatype, ncclRedOp_t op, ncclComm* comm, int collId);
 };
 extern struct testColl allReduceTest;
 extern struct testColl allGatherTest;
@@ -144,7 +145,7 @@ struct testThread {
 
 // Provided by common.cu
 extern void Barrier(struct threadArgs* args);
-extern testResult_t TimeTest(struct threadArgs* args, ncclDataType_t type, const char* typeName, ncclRedOp_t op,  const char* opName, int root);
+extern testResult_t TimeTest(struct threadArgs* args, ncclDataType_t type, const char* typeName, ncclRedOp_t op,  const char* opName, int root, bool is_ofccl=false);
 extern testResult_t InitDataReduce(void* data, const size_t count, const size_t offset, ncclDataType_t type, ncclRedOp_t op, const int rep, const int nranks);
 extern testResult_t InitData(void* data, const size_t count, ncclDataType_t type, const int rep, const int rank);
 extern void AllocateBuffs(void **sendbuff, void **recvbuff, void **expected, void **expectedHost, size_t nbytes, int nranks);
