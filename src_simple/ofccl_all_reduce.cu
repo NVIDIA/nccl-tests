@@ -8,6 +8,7 @@
 #include "common_simple.h"
 #include <stdio.h>
 #include <unistd.h>
+#include <pthread.h>
 
 void print_header() {
   PRINT("# %10s  %12s  %8s  %6s            out-of-place                       in-place          \n", "", "", "", "\n");
@@ -65,7 +66,7 @@ testResult_t AllReduceRunColl(void* sendbuff, void* recvbuff, size_t count, nccl
 testResult_t AllReducePrepare(size_t count, ncclDataType_t datatype, ncclRedOp_t op, ncclComm* comm, int collId) {
 
   NCCLCHECK(ofcclPrepareAllReduce(count, datatype, op, comm, collId));
-  // OFTEST_LOG(TEST, "invoke ofcclPrepareAllReduce with count=%lu, collId=%d", count, collId);
+  OFTEST_LOG(TEST, "tid<%lu> invoke ofcclPrepareAllReduce with count=%lu, collId=%d", pthread_self(), count, collId);
   return testSuccess;
 }
 

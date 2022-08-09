@@ -1297,6 +1297,7 @@ testResult_t run() {
   }
 
   // if parallel init is not selected, use main thread to initialize NCCL
+  // TODO: assign more comms when use multi size.
   ncclComm_t *comms =
       (ncclComm_t *)malloc(sizeof(ncclComm_t) * nThreads * nGpus * multi_iters);
   ncclComm_t *adjusted_comms =
