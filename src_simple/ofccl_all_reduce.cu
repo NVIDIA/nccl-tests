@@ -66,7 +66,7 @@ testResult_t AllReduceRunColl(void* sendbuff, void* recvbuff, size_t count, nccl
 testResult_t AllReducePrepare(size_t count, ncclDataType_t datatype, ncclRedOp_t op, ncclComm* comm, int collId) {
 
   NCCLCHECK(ofcclPrepareAllReduce(count, datatype, op, comm, collId));
-  OFTEST_LOG(TEST, "tid<%lu> invoke ofcclPrepareAllReduce with count=%lu, collId=%d", pthread_self(), count, collId);
+  // OFTEST_LOG(TEST, "tid<%lu> invoke ofcclPrepareAllReduce with count=%lu, collId=%d", pthread_self(), count, collId);
   return testSuccess;
 }
 

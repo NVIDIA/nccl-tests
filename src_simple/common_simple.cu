@@ -900,6 +900,7 @@ testResult_t TimeTest(struct threadArgs *args, ncclDataType_t type,
                       int root, bool is_ofccl) {
   if (is_ofccl) {
     // prepare for all size. op, type traversed in the caller.
+    // TODO: if we support multi size, each size should use a separate ncclComm
     for (size_t size = args->minbytes; size <= args->maxbytes;
         size = ((args->stepfactor > 1) ? size * args->stepfactor
                                         : size + args->stepbytes)) {
@@ -912,6 +913,7 @@ testResult_t TimeTest(struct threadArgs *args, ncclDataType_t type,
     ofcclPrepareDone();
   }
 
+  // TODO: if we support multi size, 我们可以对所有size都warm up；或者保留现在的方式，但是要保证选取了正确的comm。
   // Warm-up for large size
   setupArgs(args->maxbytes, type, args);
   for (int iter = 0; iter < warmup_iters; iter++) {
@@ -943,6 +945,12 @@ testResult_t TimeTest(struct threadArgs *args, ncclDataType_t type,
     // TESTCHECK(BenchTime(args, type, op, root, 1));
     PRINT("\n");
   }
+
+  if (is_ofccl) {
+    // OFTEST_LOG(TEST, "tid<%lu> invoke ofcclDestroy", pthread_self());
+    ofcclDestroy();
+  }
+
   return testSuccess;
 }
 
@@ -1307,7 +1315,7 @@ testResult_t run() {
       int gpuArray[nGpus * nThreads];
       for (int i = 0; i < nGpus * nThreads; i++)
         gpuArray[i] = i;
-      OFTEST_LOG1(TEST, "CommInitAll here");
+      // OFTEST_LOG1(TEST, "CommInitAll here");
       // use seprate comm
       // TODO: we do not support MPI now.
       for (int miter = 0; miter < multi_iters; miter++) {
