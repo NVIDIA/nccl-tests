@@ -28,6 +28,21 @@
   }                                                 \
 } while(0)
 
+#if NCCL_VERSION_CODE >= NCCL_VERSION(2,12,10)
+#define NCCLCHECK(cmd) do {                         \
+  ncclResult_t res = cmd;                           \
+  if (res != ncclSuccess) {                         \
+    char hostname[1024];                            \
+    getHostName(hostname, 1024);                    \
+    printf("%s: Test NCCL failure %s:%d "           \
+           "'%s / %s'\n",                           \
+           hostname,__FILE__,__LINE__,              \
+           ncclGetErrorString(res),                 \
+           ncclGetLastError(NULL));                 \
+    return testNcclError;                           \
+  }                                                 \
+} while(0)
+#else
 #define NCCLCHECK(cmd) do {                         \
   ncclResult_t res = cmd;                           \
   if (res != ncclSuccess) {                         \
@@ -39,6 +54,7 @@
     return testNcclError;                           \
   }                                                 \
 } while(0)
+#endif
 
 typedef enum {
   testSuccess = 0,
@@ -111,14 +127,6 @@ struct threadArgs {
 
   void** expected;
   size_t expectedBytes;
-  volatile int* sync;
-  int sync_idx;
-  volatile int* barrier;
-  int barrier_idx;
-  volatile double* reduce;
-  int syncRank;
-  int syncNranks;
-  double* deltaHost;
   int* errors;
   double* bw;
   int* bw_count;
@@ -141,8 +149,8 @@ struct testThread {
 // Provided by common.cu
 extern void Barrier(struct threadArgs* args);
 extern testResult_t TimeTest(struct threadArgs* args, ncclDataType_t type, const char* typeName, ncclRedOp_t op,  const char* opName, int root);
-extern testResult_t InitDataReduce(void* data, const size_t count, const size_t offset, ncclDataType_t type, ncclRedOp_t op, const int rep, const int nranks);
-extern testResult_t InitData(void* data, const size_t count, ncclDataType_t type, const int rep, const int rank);
+extern testResult_t InitDataReduce(void* data, const size_t count, const size_t offset, ncclDataType_t type, ncclRedOp_t op, const uint64_t seed, const int nranks);
+extern testResult_t InitData(void* data, const size_t count, size_t offset, ncclDataType_t type, ncclRedOp_t op, const uint64_t seed, const int nranks, const int rank);
 extern void AllocateBuffs(void **sendbuff, void **recvbuff, void **expected, void **expectedHost, size_t nbytes, int nranks);
 
 // Provided by each coll
@@ -228,7 +236,7 @@ static size_t wordSize(ncclDataType_t type) {
     case ncclInt64:
     case ncclUint64:
     case ncclDouble:
-    //case ncclFloat64: 
+    //case ncclFloat64:
       return 8;
     default: return 0;
   }
