@@ -762,8 +762,7 @@ testResult_t startColl(struct threadArgs *args, ncclDataType_t type,
         (void *)(in_place ? recvBuff + args->sendInplaceOffset * rank
                           : sendBuff),
         (void *)(in_place ? recvBuff + args->recvInplaceOffset * rank
-                          : recvBuff),
-        count, type, op, root, comm, args->streams[i]));
+                          : recvBuff), miter));
 
 #if NCCL_VERSION_CODE >= NCCL_VERSION(2, 11, 0)
     if (opIndex >= ncclNumOps) {

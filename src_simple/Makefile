@@ -75,7 +75,8 @@ NVLDFLAGS += $(LIBRARIES:%=-l%)
 DST_DIR := $(BUILDDIR)
 SRC_FILES := $(wildcard *.cu)
 OBJ_FILES := $(SRC_FILES:%.cu=${DST_DIR}/%.o)
-BIN_FILES_LIST := all_reduce_group all_reduce_simple ofccl_all_reduce
+# BIN_FILES_LIST := all_reduce_group all_reduce_simple ofccl_all_reduce
+BIN_FILES_LIST := ofccl_all_reduce
 BIN_FILES := $(BIN_FILES_LIST:%=${DST_DIR}/%_perf)
 
 build: ${BIN_FILES}
