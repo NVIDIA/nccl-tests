@@ -64,6 +64,11 @@ typedef enum {
   }                                                 \
 } while(0)
 
+typedef struct {
+  int collId;
+  int gotCqe;
+} CallBackArgs;
+
 struct testColl {
   const char name[20];
   void (*getCollByteCount)(

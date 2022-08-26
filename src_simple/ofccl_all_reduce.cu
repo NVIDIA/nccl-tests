@@ -57,25 +57,33 @@ void AllReduceGetBw(size_t count, int typesize, double sec, double* algBw, doubl
   *busBw = baseBw * factor;
 }
 
-testResult_t AllReduceRunColl(void* sendbuff, void* recvbuff, int collId) {
-  int gotCqe = 0;
+int myCallback(int collIdFromCqe, void *args) {
+  // TODO: 不打log把这里删了
   int cudaDev;
   CUDACHECK(cudaGetDevice(&cudaDev));
-  auto callback = [&](int collIdFromCqe){
-    if (collId != collIdFromCqe) {
-      // TODO: more robust error handle.
-      OFTEST_LOG(TEST_ERROR, "<%lu> rank=%d, collIdFromCqe(%d) is not expected(%d)", pthread_self(), cudaDev, collIdFromCqe, collId);
-      return -1;
-    }
-    gotCqe = 1;
-    OFTEST_LOG(TEST, "<%lu> rank=%d, callback get cqe for collId %d", pthread_self(), cudaDev, collId);
-    return 0;
-  };
+  int collId = ((CallBackArgs *)args)->collId;
+  if (collId != collIdFromCqe) {
+    // TODO: more robust error handle.
+    OFTEST_LOG(TEST_ERROR, "<%lu> rank=%d, collIdFromCqe(%d) is not expected(%d)", pthread_self(), cudaDev, collIdFromCqe, collId);
+    return -1;
+  }
+  ((CallBackArgs *)args)->gotCqe = 1;
+  OFTEST_LOG(TEST, "<%lu> rank=%d, callback get cqe for collId %d", pthread_self(), cudaDev, collId);
+  return 0;
+}
 
-  NCCLCHECK(ofcclRunAllReduce(sendbuff, recvbuff, collId, callback));
+testResult_t AllReduceRunColl(void* sendbuff, void* recvbuff, int collId) {
+  int cudaDev;
+  CUDACHECK(cudaGetDevice(&cudaDev));
+
+  CallBackArgs *args = (CallBackArgs *)malloc(sizeof(CallBackArgs));
+  args->collId = collId;
+  args->gotCqe = 0;
+
+  NCCLCHECK(ofcclRunAllReduce(sendbuff, recvbuff, collId, myCallback, args));
 
   // TODO: 这会损害带宽测量的结果，之后在common_simple.cu里搞个数组，统一等待。
-  while(gotCqe == 0) {
+  while(args->gotCqe == 0) {
     sched_yield();
   }
   
