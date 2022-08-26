@@ -9,6 +9,7 @@
 #include <stdio.h>
 #include <unistd.h>
 #include <pthread.h>
+#include <sched.h>
 
 void print_header() {
   PRINT("# %10s  %12s  %8s  %6s            out-of-place                       in-place          \n", "", "", "", "\n");
@@ -57,9 +58,27 @@ void AllReduceGetBw(size_t count, int typesize, double sec, double* algBw, doubl
 }
 
 testResult_t AllReduceRunColl(void* sendbuff, void* recvbuff, int collId) {
+  int gotCqe = 0;
+  int cudaDev;
+  CUDACHECK(cudaGetDevice(&cudaDev));
+  auto callback = [&](int collIdFromCqe){
+    if (collId != collIdFromCqe) {
+      // TODO: more robust error handle.
+      OFTEST_LOG(TEST_ERROR, "<%lu> rank=%d, collIdFromCqe(%d) is not expected(%d)", pthread_self(), cudaDev, collIdFromCqe, collId);
+      return -1;
+    }
+    gotCqe = 1;
+    OFTEST_LOG(TEST, "<%lu> rank=%d, callback get cqe for collId %d", pthread_self(), cudaDev, collId);
+    return 0;
+  };
 
-  NCCLCHECK(ofcclRunAllReduce(sendbuff, recvbuff, collId));
-  // OFTEST_LOG1(TEST, "UNIMPLEMENTED ofcclAllReduce");
+  NCCLCHECK(ofcclRunAllReduce(sendbuff, recvbuff, collId, callback));
+
+  // TODO: 这会损害带宽测量的结果，之后在common_simple.cu里搞个数组，统一等待。
+  while(gotCqe == 0) {
+    sched_yield();
+  }
+  
   return testSuccess;
 }
 
