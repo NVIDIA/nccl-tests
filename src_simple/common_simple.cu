@@ -928,25 +928,26 @@ testResult_t TimeTest(struct threadArgs *args, ncclDataType_t type,
   }
 
   // TODO: if we support multi size, 我们可以对所有size都warm up；或者保留现在的方式，但是要保证选取了正确的comm。
+  // TODO: 同时如果要warmup的话，也要准备相应的callbackArgs。比较麻烦；可以考虑对比实验的时候，nccl和ofccl都不开warmup。
   // Warm-up for large size
-  setupArgs(args->maxbytes, type, args);
-  for (int iter = 0; iter < warmup_iters; iter++) {
-      for (int miter = 0; miter < multi_iters; miter++) {
-        TESTCHECK(startColl(args, type, op, root, 0,
-                            iter * multi_iters + miter, miter));
-      }
-  }
-  TESTCHECK(completeColl(args));
+  // setupArgs(args->maxbytes, type, args);
+  // for (int iter = 0; iter < warmup_iters; iter++) {
+  //     for (int miter = 0; miter < multi_iters; miter++) {
+  //       TESTCHECK(startColl(args, type, op, root, 0,
+  //                           iter * multi_iters + miter, miter));
+  //     }
+  // }
+  // TESTCHECK(completeColl(args));
 
-  // Warm-up for small size
-  setupArgs(args->minbytes, type, args);
-  for (int iter = 0; iter < warmup_iters; iter++) {
-      for (int miter = 0; miter < multi_iters; miter++) {
-        TESTCHECK(startColl(args, type, op, root, 0,
-                            iter * multi_iters + miter, miter));
-      }
-  }
-  TESTCHECK(completeColl(args));
+  // // Warm-up for small size
+  // setupArgs(args->minbytes, type, args);
+  // for (int iter = 0; iter < warmup_iters; iter++) {
+  //     for (int miter = 0; miter < multi_iters; miter++) {
+  //       TESTCHECK(startColl(args, type, op, root, 0,
+  //                           iter * multi_iters + miter, miter));
+  //     }
+  // }
+  // TESTCHECK(completeColl(args));
 
   // Benchmark
   for (size_t size = args->minbytes; size <= args->maxbytes;

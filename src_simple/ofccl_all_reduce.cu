@@ -81,6 +81,7 @@ testResult_t AllReduceRunColl(void* sendbuff, void* recvbuff, int collId, CallBa
   args->gotCqe = 0;
 
   NCCLCHECK(ofcclRunAllReduce(sendbuff, recvbuff, collId, myCallback, args));
+  OFTEST_LOG(TEST, "<%lu> rank=%d, invoke ofcclRunAllReduce for collId %d with args @ %p", pthread_self(), cudaDev, collId, args);
   
   return testSuccess;
 }
