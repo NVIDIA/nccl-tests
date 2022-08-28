@@ -100,6 +100,9 @@ static int average = 1;
 
 #define NUM_BLOCKS 32
 
+static thread_local CallBackArgs cbArgList[MAX_COLL_NUM];
+static thread_local int seenCqe[MAX_COLL_NUM];
+
 static double parsesize(const char *value) {
   long long int units;
   double size;
@@ -757,12 +760,12 @@ testResult_t startColl(struct threadArgs *args, ncclDataType_t type,
           &op, &u64, type, ncclScalarHostImmediate, comm));
     }
 #endif
-
+    // miter就是collId。
     TESTCHECK(args->collTest->runColl(
         (void *)(in_place ? recvBuff + args->sendInplaceOffset * rank
                           : sendBuff),
         (void *)(in_place ? recvBuff + args->recvInplaceOffset * rank
-                          : recvBuff), miter));
+                          : recvBuff), miter, cbArgList + miter));
 
 #if NCCL_VERSION_CODE >= NCCL_VERSION(2, 11, 0)
     if (opIndex >= ncclNumOps) {
@@ -787,8 +790,20 @@ testResult_t startColl(struct threadArgs *args, ncclDataType_t type,
 testResult_t completeColl(struct threadArgs *args) {
   if (blocking_coll)
     return testSuccess;
+  
+  int gotCqeCnt = 0;
+  while (gotCqeCnt < multi_iters) {
+    for (int i = 0; i < multi_iters; i++) {
+      if (cbArgList[i].gotCqe == 1) {
+        if (seenCqe[i] == 0) {
+          gotCqeCnt++;
+          seenCqe[i] = 1;
+        }
+      }
+    }
+  }
 
-  TESTCHECK(testStreamSynchronize(args->nGpus, args->streams, args->comms));
+  // TESTCHECK(testStreamSynchronize(args->nGpus, args->streams, args->comms));
   return testSuccess;
 }
 

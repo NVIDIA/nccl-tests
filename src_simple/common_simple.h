@@ -69,6 +69,8 @@ typedef struct {
   int gotCqe;
 } CallBackArgs;
 
+#define MAX_COLL_NUM 10000
+
 struct testColl {
   const char name[20];
   void (*getCollByteCount)(
@@ -78,7 +80,7 @@ struct testColl {
   testResult_t (*initData)(struct threadArgs* args, ncclDataType_t type,
       ncclRedOp_t op, int root, int rep, int in_place);
   void (*getBw)(size_t count, int typesize, double sec, double* algBw, double* busBw, int nranks);
-  testResult_t (*runColl)(void* sendbuff, void* recvbuff, int collId);
+  testResult_t (*runColl)(void* sendbuff, void* recvbuff, int collId, CallBackArgs *args);
   testResult_t (*prepareColl)(size_t count, ncclDataType_t datatype, ncclRedOp_t op, ncclComm* comm, int collId);
 };
 extern struct testColl allReduceTest;
