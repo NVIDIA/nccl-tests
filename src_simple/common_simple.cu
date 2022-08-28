@@ -790,25 +790,35 @@ testResult_t startColl(struct threadArgs *args, ncclDataType_t type,
 testResult_t completeColl(struct threadArgs *args) {
   if (blocking_coll)
     return testSuccess;
+    
+  int cudaDev;
+  CUDACHECK(cudaGetDevice(&cudaDev));
   
   int gotCqeCnt = 0;
   while (gotCqeCnt < multi_iters) {
     for (int i = 0; i < multi_iters; i++) {
+      pthread_mutex_lock(&cbArgList[i].mutex);
       if (cbArgList[i].gotCqe == 1) {
         if (seenCqe[i] == 0) {
           gotCqeCnt++;
           seenCqe[i] = 1;
         }
       }
+      pthread_mutex_unlock(&cbArgList[i].mutex);
     }
+    // OFTEST_LOG(TEST, "<%lu> rank=%d, completeColl gotCqeCnt = %d", pthread_self(), cudaDev, gotCqeCnt);
   }
 
   // TESTCHECK(testStreamSynchronize(args->nGpus, args->streams, args->comms));
   return testSuccess;
 }
 
-testResult_t BenchTime(struct threadArgs *args, ncclDataType_t type,
-                       ncclRedOp_t op, int root, int in_place) {
+testResult_t BenchTime(struct threadArgs *args, ncclDataType_t type, ncclRedOp_t op, int root, int in_place) {
+  
+  int cudaDev;
+  CUDACHECK(cudaGetDevice(&cudaDev));
+  OFTEST_LOG(TEST_INIT, "<%lu> rank=%d, multi_iters = %d", pthread_self(), cudaDev, multi_iters);
+
   size_t count = args->nbytes / wordSize(type);
   if (datacheck) {
     // Initialize sendbuffs, recvbuffs and expected

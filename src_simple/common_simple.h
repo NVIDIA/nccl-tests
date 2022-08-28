@@ -67,6 +67,7 @@ typedef enum {
 typedef struct {
   int collId;
   int gotCqe;
+  pthread_mutex_t mutex;
 } CallBackArgs;
 
 #define MAX_COLL_NUM 10000

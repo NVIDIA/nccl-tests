@@ -67,7 +67,9 @@ int myCallback(int collIdFromCqe, void *args) {
     OFTEST_LOG(TEST_ERROR, "<%lu> rank=%d, collIdFromCqe(%d) is not expected(%d)", pthread_self(), cudaDev, collIdFromCqe, collId);
     return -1;
   }
+  pthread_mutex_lock(&(((CallBackArgs *)args)->mutex));
   ((CallBackArgs *)args)->gotCqe = 1;
+  pthread_mutex_unlock(&(((CallBackArgs *)args)->mutex));
   OFTEST_LOG(TEST, "<%lu> rank=%d, callback get cqe for collId %d", pthread_self(), cudaDev, collId);
   return 0;
 }
@@ -79,6 +81,7 @@ testResult_t AllReduceRunColl(void* sendbuff, void* recvbuff, int collId, CallBa
   // CallBackArgs *args = (CallBackArgs *)malloc(sizeof(CallBackArgs));
   args->collId = collId;
   args->gotCqe = 0;
+  pthread_mutex_init(&args->mutex, NULL);
 
   NCCLCHECK(ofcclRunAllReduce(sendbuff, recvbuff, collId, myCallback, args));
   OFTEST_LOG(TEST, "<%lu> rank=%d, invoke ofcclRunAllReduce for collId %d with args @ %p", pthread_self(), cudaDev, collId, args);
