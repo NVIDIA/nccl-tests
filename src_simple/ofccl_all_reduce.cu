@@ -58,7 +58,7 @@ void AllReduceGetBw(size_t count, int typesize, double sec, double* algBw, doubl
 }
 
 int myCallback(int collIdFromCqe, void *args) {
-  // TODO: 不打log把这里删了
+  // TODO: 不打log把这里删了，不然影响性能。
   int cudaDev;
   CUDACHECK(cudaGetDevice(&cudaDev));
   int collId = ((CallBackArgs *)args)->collId;
@@ -72,20 +72,16 @@ int myCallback(int collIdFromCqe, void *args) {
   return 0;
 }
 
-testResult_t AllReduceRunColl(void* sendbuff, void* recvbuff, int collId) {
+testResult_t AllReduceRunColl(void* sendbuff, void* recvbuff, int collId, CallBackArgs *args) {
   int cudaDev;
   CUDACHECK(cudaGetDevice(&cudaDev));
 
-  CallBackArgs *args = (CallBackArgs *)malloc(sizeof(CallBackArgs));
+  // CallBackArgs *args = (CallBackArgs *)malloc(sizeof(CallBackArgs));
   args->collId = collId;
   args->gotCqe = 0;
 
   NCCLCHECK(ofcclRunAllReduce(sendbuff, recvbuff, collId, myCallback, args));
-
-  // TODO: 这会损害带宽测量的结果，之后在common_simple.cu里搞个数组，统一等待。
-  while(args->gotCqe == 0) {
-    sched_yield();
-  }
+  OFTEST_LOG(TEST, "<%lu> rank=%d, invoke ofcclRunAllReduce for collId %d with args @ %p", pthread_self(), cudaDev, collId, args);
   
   return testSuccess;
 }

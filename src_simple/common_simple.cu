@@ -100,6 +100,9 @@ static int average = 1;
 
 #define NUM_BLOCKS 32
 
+static thread_local CallBackArgs cbArgList[MAX_COLL_NUM];
+static thread_local int seenCqe[MAX_COLL_NUM];
+
 static double parsesize(const char *value) {
   long long int units;
   double size;
@@ -757,12 +760,12 @@ testResult_t startColl(struct threadArgs *args, ncclDataType_t type,
           &op, &u64, type, ncclScalarHostImmediate, comm));
     }
 #endif
-
+    // miter就是collId。
     TESTCHECK(args->collTest->runColl(
         (void *)(in_place ? recvBuff + args->sendInplaceOffset * rank
                           : sendBuff),
         (void *)(in_place ? recvBuff + args->recvInplaceOffset * rank
-                          : recvBuff), miter));
+                          : recvBuff), miter, cbArgList + miter));
 
 #if NCCL_VERSION_CODE >= NCCL_VERSION(2, 11, 0)
     if (opIndex >= ncclNumOps) {
@@ -787,8 +790,20 @@ testResult_t startColl(struct threadArgs *args, ncclDataType_t type,
 testResult_t completeColl(struct threadArgs *args) {
   if (blocking_coll)
     return testSuccess;
+  
+  int gotCqeCnt = 0;
+  while (gotCqeCnt < multi_iters) {
+    for (int i = 0; i < multi_iters; i++) {
+      if (cbArgList[i].gotCqe == 1) {
+        if (seenCqe[i] == 0) {
+          gotCqeCnt++;
+          seenCqe[i] = 1;
+        }
+      }
+    }
+  }
 
-  TESTCHECK(testStreamSynchronize(args->nGpus, args->streams, args->comms));
+  // TESTCHECK(testStreamSynchronize(args->nGpus, args->streams, args->comms));
   return testSuccess;
 }
 
@@ -913,25 +928,26 @@ testResult_t TimeTest(struct threadArgs *args, ncclDataType_t type,
   }
 
   // TODO: if we support multi size, 我们可以对所有size都warm up；或者保留现在的方式，但是要保证选取了正确的comm。
+  // TODO: 同时如果要warmup的话，也要准备相应的callbackArgs。比较麻烦；可以考虑对比实验的时候，nccl和ofccl都不开warmup。
   // Warm-up for large size
-  setupArgs(args->maxbytes, type, args);
-  for (int iter = 0; iter < warmup_iters; iter++) {
-      for (int miter = 0; miter < multi_iters; miter++) {
-        TESTCHECK(startColl(args, type, op, root, 0,
-                            iter * multi_iters + miter, miter));
-      }
-  }
-  TESTCHECK(completeColl(args));
+  // setupArgs(args->maxbytes, type, args);
+  // for (int iter = 0; iter < warmup_iters; iter++) {
+  //     for (int miter = 0; miter < multi_iters; miter++) {
+  //       TESTCHECK(startColl(args, type, op, root, 0,
+  //                           iter * multi_iters + miter, miter));
+  //     }
+  // }
+  // TESTCHECK(completeColl(args));
 
-  // Warm-up for small size
-  setupArgs(args->minbytes, type, args);
-  for (int iter = 0; iter < warmup_iters; iter++) {
-      for (int miter = 0; miter < multi_iters; miter++) {
-        TESTCHECK(startColl(args, type, op, root, 0,
-                            iter * multi_iters + miter, miter));
-      }
-  }
-  TESTCHECK(completeColl(args));
+  // // Warm-up for small size
+  // setupArgs(args->minbytes, type, args);
+  // for (int iter = 0; iter < warmup_iters; iter++) {
+  //     for (int miter = 0; miter < multi_iters; miter++) {
+  //       TESTCHECK(startColl(args, type, op, root, 0,
+  //                           iter * multi_iters + miter, miter));
+  //     }
+  // }
+  // TESTCHECK(completeColl(args));
 
   // Benchmark
   for (size_t size = args->minbytes; size <= args->maxbytes;
