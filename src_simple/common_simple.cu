@@ -814,10 +814,6 @@ testResult_t completeColl(struct threadArgs *args) {
 }
 
 testResult_t BenchTime(struct threadArgs *args, ncclDataType_t type, ncclRedOp_t op, int root, int in_place) {
-  
-  int cudaDev;
-  CUDACHECK(cudaGetDevice(&cudaDev));
-  OFTEST_LOG(TEST_INIT, "<%lu> rank=%d, multi_iters = %d", pthread_self(), cudaDev, multi_iters);
 
   size_t count = args->nbytes / wordSize(type);
   if (datacheck) {
@@ -1263,6 +1259,10 @@ testResult_t run() {
   PRINT("#\n");
 
   PRINT("# Using devices\n");
+  
+  int cudaDev;
+  CUDACHECK(cudaGetDevice(&cudaDev));
+  OFTEST_LOG(TEST_INIT, "<%lu> rank=%d, multi_iters = %d", pthread_self(), cudaDev, multi_iters);
 #define MAX_LINE 2048
   char line[MAX_LINE];
   int len = 0;
