@@ -596,8 +596,9 @@ testResult_t BenchTime(struct threadArgs* args, ncclDataType_t type, ncclRedOp_t
   }
 
   // Sync
-  TESTCHECK(startColl(args, type, op, root, in_place, 0));
-  TESTCHECK(completeColl(args));
+  // TODO: 之后恢复？
+  // TESTCHECK(startColl(args, type, op, root, in_place, 0));
+  // TESTCHECK(completeColl(args));
 
   Barrier(args);
 
@@ -777,7 +778,8 @@ testResult_t TimeTest(struct threadArgs* args, ncclDataType_t type, const char* 
       setupArgs(size, type, args);
       print_line_header(max(args->sendBytes, args->expectedBytes), args->nbytes / wordSize(type), typeName, opName, root);
       TESTCHECK(BenchTime(args, type, op, root, 0));
-      TESTCHECK(BenchTime(args, type, op, root, 1));
+      // TODO: 实测是否恢复？
+      // TESTCHECK(BenchTime(args, type, op, root, 1));
       PRINT("\n");
   }
   return testSuccess;
