@@ -28,7 +28,7 @@
   }                                                 \
 } while(0)
 
-#if NCCL_VERSION_CODE >= NCCL_VERSION(2,12,10)
+#if NCCL_VERSION_CODE >= NCCL_VERSION(2,13,0)
 #define NCCLCHECK(cmd) do {                         \
   ncclResult_t res = cmd;                           \
   if (res != ncclSuccess) {                         \
