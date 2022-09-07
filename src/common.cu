@@ -467,7 +467,7 @@ testResult_t BenchTime(struct threadArgs* args, ncclDataType_t type, ncclRedOp_t
   int64_t wrongElts = 0;
   static __thread int rep = 0;
   rep++;
-  if (args->reportErrors) {
+  if (datacheck) {
       // Initialize sendbuffs, recvbuffs and expected
       TESTCHECK(args->collTest->initData(args, type, op, root, rep, in_place));
 
@@ -952,7 +952,7 @@ testResult_t run() {
     threads[t].args.bw=bw+t;
     threads[t].args.bw_count=bw_count+t;
 
-    threads[t].args.reportErrors = 1;
+    threads[t].args.reportErrors = datacheck;
 
     threads[t].func = parallel_init ? threadInit : threadRunTests;
     if (t)
