@@ -279,7 +279,9 @@ __device__ double testValue<double>(const size_t offset, const int rep,
 template <>
 __device__ float testValue<float>(const size_t offset, const int rep,
                                   const int rank) {
-  return 1.0 / (1.0 + (float)testValue<int>(offset, rep, rank));
+  // IF_CHECK 如果要检查对错，把第一个return注释掉，露出来第二个。
+  // return 1.0 / (1.0 + (float)testValue<int>(offset, rep, rank));
+  return 1.0;
 }
 template <>
 __device__ half testValue<half>(const size_t offset, const int rep,
@@ -826,20 +828,9 @@ testResult_t BenchTime(struct threadArgs *args, ncclDataType_t type, ncclRedOp_t
   // Performance Benchmark
   auto start = std::chrono::high_resolution_clock::now();
   for (int iter = 0; iter < iters; iter++) {
-    if (multi_iters > 1) {
-      for (int miter = 0; miter < multi_iters; miter++) {
-        TESTCHECK(startColl(args, type, op, root, in_place,
-                            iter * multi_iters + miter, miter));
-      }
-    } else {
-      if (agg_iters > 1)
-        NCCLCHECK(ncclGroupStart());
-      for (int aiter = 0; aiter < agg_iters; aiter++) {
-        TESTCHECK(startColl(args, type, op, root, in_place,
-                            iter * agg_iters + aiter, 0));
-      }
-      if (agg_iters > 1)
-        NCCLCHECK(ncclGroupEnd());
+    for (int miter = 0; miter < multi_iters; miter++) {
+      TESTCHECK(startColl(args, type, op, root, in_place,
+                          iter * multi_iters + miter, miter));
     }
   }
 
@@ -862,6 +853,17 @@ testResult_t BenchTime(struct threadArgs *args, ncclDataType_t type, ncclRedOp_t
   double maxDelta = 0;
   static __thread int rep = 0;
   rep++;
+
+  // IF_CHECK 如果要检查对错，把下边露出来
+  int printNum = 10;
+  int cudaDev;
+  CUDACHECK(cudaGetDevice(&cudaDev));
+  float *ptr = (float *)malloc(printNum * sizeof(float));
+  cudaMemcpy(ptr, args->recvbuffs[0], printNum * sizeof(float), cudaMemcpyDeviceToHost);
+  for (int i = 0; i < printNum; i++) {
+    OFTEST_LOG(TEST, "<%lu> rank=%d, recvbuff[%d]=%f", pthread_self(), cudaDev, i, ptr[i]);
+  }
+  free(ptr);
 
   if (datacheck) {
     // Initialize sendbuffs, recvbuffs and expected
