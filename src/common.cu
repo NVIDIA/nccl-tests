@@ -590,7 +590,7 @@ testResult_t completeColl(struct threadArgs* args) {
 
 testResult_t BenchTime(struct threadArgs* args, ncclDataType_t type, ncclRedOp_t op, int root, int in_place) {
   size_t count = args->nbytes / wordSize(type);
-  if (datacheck) {
+  if (datacheck) { // 这里的目的应该是让测带宽跑的coll也使用非0数据。
     // Initialize sendbuffs, recvbuffs and expected
     TESTCHECK(args->collTest->initData(args, type, op, root, 99, in_place));
   }

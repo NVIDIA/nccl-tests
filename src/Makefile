@@ -7,7 +7,7 @@
 CUDA_HOME ?= /usr/local/cuda
 PREFIX ?= /usr/local
 VERBOSE ?= 0
-DEBUG ?= 0
+DEBUG ?= 1
 
 CUDA_LIB ?= $(CUDA_HOME)/lib64
 CUDA_INC ?= $(CUDA_HOME)/include
@@ -19,20 +19,32 @@ CUDA_MAJOR = $(shell echo $(CUDA_VERSION) | cut -d "." -f 1)
 
 # Better define NVCC_GENCODE in your environment to the minimal set
 # of archs to reduce compile time.
-ifeq ($(shell test "0$(CUDA_MAJOR)" -ge 11; echo $$?),0)
-NVCC_GENCODE ?= -gencode=arch=compute_60,code=sm_60 \
-                -gencode=arch=compute_61,code=sm_61 \
-                -gencode=arch=compute_70,code=sm_70 \
-                -gencode=arch=compute_80,code=sm_80 \
-                -gencode=arch=compute_80,code=compute_80
+# ifeq ($(shell test "0$(CUDA_MAJOR)" -ge 11; echo $$?),0)
+# NVCC_GENCODE ?= -gencode=arch=compute_60,code=sm_60 \
+#                 -gencode=arch=compute_61,code=sm_61 \
+#                 -gencode=arch=compute_70,code=sm_70 \
+#                 -gencode=arch=compute_80,code=sm_80 \
+#                 -gencode=arch=compute_80,code=compute_80
+# else
+# NVCC_GENCODE ?= -gencode=arch=compute_35,code=sm_35 \
+#                 -gencode=arch=compute_50,code=sm_50 \
+#                 -gencode=arch=compute_60,code=sm_60 \
+#                 -gencode=arch=compute_61,code=sm_61 \
+#                 -gencode=arch=compute_70,code=sm_70 \
+#                 -gencode=arch=compute_70,code=compute_70
+# endif
+
+CUDA_GENCODE_3080   = -gencode=arch=compute_86,code=sm_86
+CUDA_GENCODE_2080   = -gencode=arch=compute_75,code=sm_75
+
+CARDNAME ?= 3080
+ifeq ($(CARDNAME), 3080)
+NVCC_GENCODE ?= $(CUDA_GENCODE_3080) $(CUDA_PTX_INUSE)
 else
-NVCC_GENCODE ?= -gencode=arch=compute_35,code=sm_35 \
-                -gencode=arch=compute_50,code=sm_50 \
-                -gencode=arch=compute_60,code=sm_60 \
-                -gencode=arch=compute_61,code=sm_61 \
-                -gencode=arch=compute_70,code=sm_70 \
-                -gencode=arch=compute_70,code=compute_70
+NVCC_GENCODE ?= $(CUDA_GENCODE_2080) $(CUDA_PTX_INUSE)
 endif
+$(info CARDNAME $(CARDNAME))
+$(info NVCC_GENCODE $(NVCC_GENCODE))
 
 NVCUFLAGS  := -ccbin $(CXX) $(NVCC_GENCODE) -std=c++11
 
@@ -71,6 +83,8 @@ NVLDFLAGS += -lmpi_ibm
 endif
 LIBRARIES += nccl
 NVLDFLAGS += $(LIBRARIES:%=-l%)
+
+$(info CARDNAME $(NVCUFLAGS))
 
 DST_DIR := $(BUILDDIR)
 SRC_FILES := $(wildcard *.cu)

@@ -216,7 +216,7 @@ __global__ void deltaKern(void *A_, void *B_, size_t count, double *max) {
 }
 
 testResult_t CheckDelta(void *results, void *expected, size_t count,
-                        ncclDataType_t type, double *devmax) {
+                        ncclDataType_t type, double *devmax, cudaStream_t stream) {
   switch (type) {
 #if defined(__CUDA_BF16_TYPES_EXIST__)
   case ncclBfloat16:
@@ -281,7 +281,7 @@ __device__ float testValue<float>(const size_t offset, const int rep,
                                   const int rank) {
   // IF_CHECK 如果要检查对错，把第一个return注释掉，露出来第二个。
   // return 1.0 / (1.0 + (float)testValue<int>(offset, rep, rank));
-  return 1.0;
+  return 0.25;
 }
 template <>
 __device__ half testValue<half>(const size_t offset, const int rep,
@@ -437,8 +437,7 @@ testResult_t InitData(void *data, const size_t count, ncclDataType_t type,
   dim3 grid = {32, 1, 1};
   dim3 block = {256, 1, 1};
   void *args[4] = {(void *)&data, (void *)&count, (void *)&rep, (void *)&rank};
-  CUDACHECK(cudaLaunchKernel(initDataKerns[type], grid, block, args, 0,
-                             cudaStreamDefault));
+  CUDACHECK(cudaLaunchKernel(initDataKerns[type], grid, block, args, 0, cudaStreamDefault));
   return testSuccess;
 }
 
@@ -496,7 +495,7 @@ void Allreduce(struct threadArgs *args, double *value, int average) {
 }
 
 testResult_t CheckData(struct threadArgs *args, ncclDataType_t type,
-                       ncclRedOp_t op, int root, int in_place, double *delta) {
+                       ncclRedOp_t op, int root, int in_place, double *delta, cudaStream_t stream) { // 不要在默认stream上跑。
   size_t count = args->expectedBytes / wordSize(type);
   double maxDelta = 0.0;
   for (int i = 0; i < args->nGpus; i++) {
@@ -508,7 +507,7 @@ testResult_t CheckData(struct threadArgs *args, ncclDataType_t type,
                                       args->recvInplaceOffset * rank))
                           : args->recvbuffs[i];
     TESTCHECK(
-        CheckDelta(data, args->expected[i], count, type, args->deltaHost));
+        CheckDelta(data, args->expected[i], count, type, args->deltaHost, stream));
     maxDelta = std::max(*(args->deltaHost), maxDelta);
 
 #ifdef DEBUG_PRINT
@@ -516,15 +515,15 @@ testResult_t CheckData(struct threadArgs *args, ncclDataType_t type,
       int *expectedHost = (int *)malloc(args->expectedBytes);
       int *dataHost = (int *)malloc(args->expectedBytes);
 
-      cudaMemcpy(expectedHost, args->expected[0], args->expectedBytes,
-                 cudaMemcpyDeviceToHost);
+      cudaMemcpyAsync(expectedHost, args->expected[0], args->expectedBytes,
+                 cudaMemcpyDeviceToHost, stream);
       printf("\n Expected: ");
       for (int j = 0; j < args->expectedBytes / sizeof(int); j++) {
         printf("%d:%d ", j, expectedHost[j]);
       }
       printf("\n");
 
-      cudaMemcpy(dataHost, data, args->expectedBytes, cudaMemcpyDeviceToHost);
+      cudaMemcpyAsync(dataHost, data, args->expectedBytes, cudaMemcpyDeviceToHost, stream);
       printf("\n Actual: ");
       for (int j = 0; j < args->expectedBytes / sizeof(int); j++) {
         printf("%d:%d ", j, dataHost[j]);
@@ -818,15 +817,16 @@ testResult_t completeColl(struct threadArgs *args) {
 testResult_t BenchTime(struct threadArgs *args, ncclDataType_t type, ncclRedOp_t op, int root, int in_place) {
 
   size_t count = args->nbytes / wordSize(type);
-  if (datacheck) {
-    // Initialize sendbuffs, recvbuffs and expected
-    TESTCHECK(args->collTest->initData(args, type, op, root, 99, in_place));
-  }
+  // if (datacheck) {
+  //   // Initialize sendbuffs, recvbuffs and expected
+  //   TESTCHECK(args->collTest->initData(args, type, op, root, 99, in_place));
+  // }
 
   Barrier(args);
 
   // Performance Benchmark
   auto start = std::chrono::high_resolution_clock::now();
+  // TODO: 这里要支持多轮，好像也没有很复杂。
   for (int iter = 0; iter < iters; iter++) {
     for (int miter = 0; miter < multi_iters; miter++) {
       TESTCHECK(startColl(args, type, op, root, in_place,
@@ -851,33 +851,35 @@ testResult_t BenchTime(struct threadArgs *args, ncclDataType_t type, ncclRedOp_t
   Barrier(args);
 
   double maxDelta = 0;
-  static __thread int rep = 0;
-  rep++;
 
   // IF_CHECK 如果要检查对错，把下边露出来
-  int printNum = 10;
-  int cudaDev;
-  CUDACHECK(cudaGetDevice(&cudaDev));
-  float *ptr = (float *)malloc(printNum * sizeof(float));
-  cudaMemcpy(ptr, args->recvbuffs[0], printNum * sizeof(float), cudaMemcpyDeviceToHost);
-  for (int i = 0; i < printNum; i++) {
-    OFTEST_LOG(TEST, "<%lu> rank=%d, recvbuff[%d]=%f", pthread_self(), cudaDev, i, ptr[i]);
-  }
-  free(ptr);
+  // int printNum = 10;
+  // int cudaDev;
+  // CUDACHECK(cudaGetDevice(&cudaDev));
+  // float *ptr = (float *)malloc(printNum * sizeof(float));
+  // cudaMemcpy(ptr, args->recvbuffs[0], printNum * sizeof(float), cudaMemcpyDeviceToHost);
+  // for (int i = 0; i < printNum; i++) {
+  //   OFTEST_LOG(TEST, "<%lu> rank=%d, recvbuff[%d]=%f", pthread_self(), cudaDev, i, ptr[i]);
+  // }
+  // free(ptr);
 
   if (datacheck) {
-    // Initialize sendbuffs, recvbuffs and expected
-    TESTCHECK(args->collTest->initData(args, type, op, root, rep, in_place));
 
     //test validation in single itertion, should ideally be included into the multi-iteration run
-    TESTCHECK(startColl(args, type, op, root, in_place, 0, 0));
+    // TESTCHECK(startColl(args, type, op, root, in_place, 0, 0)); // will set cbArgList[0].gotCqe = 0
 
-    TESTCHECK(completeColl(args));
+    // // // TESTCHECK(completeColl(args));
+    // pthread_mutex_lock(&cbArgList[0].mutex);
+    // while (cbArgList[0].gotCqe == 0) {
 
-    TESTCHECK(CheckData(args, type, op, root, in_place, &maxDelta));
+    // }
+    // pthread_mutex_unlock(&cbArgList[0].mutex);
+  
 
-    //aggregate delta from all threads and procs
-    Allreduce(args, &maxDelta, 3);
+    // TESTCHECK(CheckData(args, type, op, root, in_place, &maxDelta, args->streams[0]));
+
+    // //aggregate delta from all threads and procs
+    // Allreduce(args, &maxDelta, 3);
   }
 
   double timeUsec = deltaSec * 1.0E6;
@@ -932,6 +934,16 @@ testResult_t TimeTest(struct threadArgs *args, ncclDataType_t type,
       }
     }
 
+    // 在这里完成check数据的准备；
+    static __thread int rep = 0;
+    rep++;
+    if (datacheck) {
+      // Initialize sendbuffs, recvbuffs and expected
+      TESTCHECK(args->collTest->initData(args, type, op, root, rep, 0));
+      int cudaDev;
+      CUDACHECK(cudaGetDevice(&cudaDev));
+    }
+    
     ofcclPrepareDone();
   }
 
