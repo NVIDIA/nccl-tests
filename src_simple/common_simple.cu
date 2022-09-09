@@ -792,8 +792,6 @@ testResult_t completeColl(struct threadArgs *args) {
   if (blocking_coll)
     return testSuccess;
     
-  int cudaDev;
-  CUDACHECK(cudaGetDevice(&cudaDev));
   
   int gotCqeCnt = 0;
   while (gotCqeCnt < multi_iters) {
@@ -803,14 +801,18 @@ testResult_t completeColl(struct threadArgs *args) {
         if (seenCqe[i] == 0) {
           gotCqeCnt++;
           seenCqe[i] = 1;
+          
+          // int cudaDev;
+          // CUDACHECK(cudaGetDevice(&cudaDev));
+          // if (cudaDev == 0) {
+          // OFTEST_LOG(TEST, "<%lu> rank=%d, completeColl get cqe for collId %d", pthread_self(), cudaDev, i);
+          // }
+
         }
       }
       pthread_mutex_unlock(&cbArgList[i].mutex);
     }
-    // OFTEST_LOG(TEST, "<%lu> rank=%d, completeColl gotCqeCnt = %d", pthread_self(), cudaDev, gotCqeCnt);
   }
-
-  // TESTCHECK(testStreamSynchronize(args->nGpus, args->streams, args->comms));
   return testSuccess;
 }
 
@@ -828,13 +830,15 @@ testResult_t BenchTime(struct threadArgs *args, ncclDataType_t type, ncclRedOp_t
   auto start = std::chrono::high_resolution_clock::now();
   // TODO: 这里要支持多轮，好像也没有很复杂。
   for (int iter = 0; iter < iters; iter++) {
+
     for (int miter = 0; miter < multi_iters; miter++) {
+      seenCqe[miter] = 0;
       TESTCHECK(startColl(args, type, op, root, in_place,
                           iter * multi_iters + miter, miter));
     }
-  }
 
-  TESTCHECK(completeColl(args));
+    TESTCHECK(completeColl(args));
+  }
 
   auto delta = std::chrono::high_resolution_clock::now() - start;
   double deltaSec =
