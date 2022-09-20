@@ -1,5 +1,5 @@
 /*************************************************************************
- * Copyright (c) 2016-2019, NVIDIA CORPORATION. All rights reserved.
+ * Copyright (c) 2016-2022, NVIDIA CORPORATION. All rights reserved.
  *
  * See LICENSE.txt for license information
  ************************************************************************/
@@ -7,12 +7,15 @@
 #include "cuda_runtime.h"
 #include "common.h"
 
+#define ALIGN 4
+
 void AllGatherGetCollByteCount(size_t *sendcount, size_t *recvcount, size_t *paramcount, size_t *sendInplaceOffset, size_t *recvInplaceOffset, size_t count, int nranks) {
-  *sendcount = count/nranks;
-  *recvcount = (count/nranks)*nranks;
-  *sendInplaceOffset = count/nranks;
+  size_t base = (count/(ALIGN*nranks))*ALIGN;
+  *sendcount = base;
+  *recvcount = base*nranks;
+  *sendInplaceOffset = base;
   *recvInplaceOffset = 0;
-  *paramcount = *sendcount;
+  *paramcount = base;
 }
 
 testResult_t AllGatherInitData(struct threadArgs* args, ncclDataType_t type, ncclRedOp_t op, int root, int rep, int in_place) {
@@ -21,8 +24,7 @@ testResult_t AllGatherInitData(struct threadArgs* args, ncclDataType_t type, ncc
   int nranks = args->nProcs*args->nThreads*args->nGpus;
 
   for (int i=0; i<args->nGpus; i++) {
-    int gpuid = args->localRank*args->nThreads*args->nGpus + args->thread*args->nGpus + i;
-    CUDACHECK(cudaSetDevice(gpuid));
+    CUDACHECK(cudaSetDevice(args->gpus[i]));
     int rank = ((args->proc*args->nThreads + args->thread)*args->nGpus + i);
     CUDACHECK(cudaMemset(args->recvbuffs[i], 0, args->expectedBytes));
     void* data = in_place ? ((char*)args->recvbuffs[i])+rank*args->sendBytes : args->sendbuffs[i];
@@ -78,7 +80,7 @@ testResult_t AllGatherRunTest(struct threadArgs* args, int root, ncclDataType_t 
   }
 
   for (int i=0; i<type_count; i++) {
-    TESTCHECK(TimeTest(args, run_types[i], run_typenames[i], (ncclRedOp_t)0, "", -1));
+    TESTCHECK(TimeTest(args, run_types[i], run_typenames[i], (ncclRedOp_t)0, "none", -1));
   }
   return testSuccess;
 }

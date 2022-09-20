@@ -1,5 +1,5 @@
 /*************************************************************************
- * Copyright (c) 2016-2019, NVIDIA CORPORATION. All rights reserved.
+ * Copyright (c) 2016-2022, NVIDIA CORPORATION. All rights reserved.
  *
  * See LICENSE.txt for license information
  ************************************************************************/
@@ -15,6 +15,10 @@
 #endif
 #include <pthread.h>
 #include "nccl1_compat.h"
+#include "timer.h"
+
+// For nccl.h < 2.13 since we define a weak fallback
+extern "C" char const* ncclGetLastError(ncclComm_t comm);
 
 #define CUDACHECK(cmd) do {                         \
   cudaError_t err = cmd;                            \
@@ -61,6 +65,8 @@ typedef enum {
   testInternalError = 1,
   testCudaError = 2,
   testNcclError = 3,
+  testTimeout = 4,
+  testNumResults = 5
 } testResult_t;
 
 // Relay errors up and trace
@@ -110,11 +116,13 @@ struct threadArgs {
   size_t stepbytes;
   size_t stepfactor;
 
+  int totalProcs;
   int nProcs;
   int proc;
   int nThreads;
   int thread;
   int nGpus;
+  int* gpus;
   int localRank;
   void** sendbuffs;
   size_t sendBytes;
@@ -144,18 +152,12 @@ struct testThread {
   testResult_t ret;
 };
 
-#include <chrono>
-
 // Provided by common.cu
 extern void Barrier(struct threadArgs* args);
 extern testResult_t TimeTest(struct threadArgs* args, ncclDataType_t type, const char* typeName, ncclRedOp_t op,  const char* opName, int root);
 extern testResult_t InitDataReduce(void* data, const size_t count, const size_t offset, ncclDataType_t type, ncclRedOp_t op, const uint64_t seed, const int nranks);
 extern testResult_t InitData(void* data, const size_t count, size_t offset, ncclDataType_t type, ncclRedOp_t op, const uint64_t seed, const int nranks, const int rank);
 extern void AllocateBuffs(void **sendbuff, void **recvbuff, void **expected, void **expectedHost, size_t nbytes, int nranks);
-
-// Provided by each coll
-extern void print_line_header (size_t size, size_t count, const char *typeName, const char *opName, int root);
-extern void print_header();
 
 #include <unistd.h>
 
@@ -171,44 +173,13 @@ static void getHostName(char* hostname, int maxlen) {
 
 #include <stdint.h>
 
-static uint64_t getHash(const char* string, size_t n) {
-  // Based on DJB2a, result = result * 33 ^ char
+static uint64_t getHostHash(const char* string) {
+  // Based on DJB2, result = result * 33 + char
   uint64_t result = 5381;
-  for (size_t c = 0; c < n; c++) {
-    result = ((result << 5) + result) ^ string[c];
+  for (int c = 0; string[c] != '\0'; c++){
+    result = ((result << 5) + result) + string[c];
   }
   return result;
-}
-
-/* Generate a hash of the unique identifying string for this host
- * that will be unique for both bare-metal and container instances
- * Equivalent of a hash of;
- *
- * $(hostname)$(cat /proc/sys/kernel/random/boot_id)
- *
- */
-#define HOSTID_FILE "/proc/sys/kernel/random/boot_id"
-static uint64_t getHostHash(const char* hostname) {
-  char hostHash[1024];
-
-  // Fall back is the hostname if something fails
-  (void) strncpy(hostHash, hostname, sizeof(hostHash));
-  int offset = strlen(hostHash);
-
-  FILE *file = fopen(HOSTID_FILE, "r");
-  if (file != NULL) {
-    char *p;
-    if (fscanf(file, "%ms", &p) == 1) {
-        strncpy(hostHash+offset, p, sizeof(hostHash)-offset-1);
-        free(p);
-    }
-  }
-  fclose(file);
-
-  // Make sure the string is terminated
-  hostHash[sizeof(hostHash)-1]='\0';
-
-  return getHash(hostHash, strlen(hostHash));
 }
 
 static size_t wordSize(ncclDataType_t type) {
@@ -277,6 +248,7 @@ static int ncclstringtoop (char *str) {
     return ncclSum;
 }
 
+extern int is_main_proc;
 extern thread_local int is_main_thread;
 #define PRINT if (is_main_thread) printf
 

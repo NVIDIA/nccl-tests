@@ -1,5 +1,5 @@
 /*************************************************************************
- * Copyright (c) 2016-2019, NVIDIA CORPORATION. All rights reserved.
+ * Copyright (c) 2016-2022, NVIDIA CORPORATION. All rights reserved.
  *
  * See LICENSE.txt for license information
  ************************************************************************/
@@ -50,6 +50,12 @@ int test_ncclVersion = 0; // init'd with ncclGetVersion()
   int test_opnum = 4;
 #endif
 
+// For libnccl's < 2.13
+extern "C" __attribute__((weak)) char const* ncclGetLastError(ncclComm_t comm) {
+  return "";
+}
+
+int is_main_proc = 0;
 thread_local int is_main_thread = 0;
 
 // Command line parameter defaults
@@ -68,7 +74,10 @@ static int nccltype = ncclFloat;
 static int ncclroot = 0;
 static int parallel_init = 0;
 static int blocking_coll = 0;
+static int streamnull = 0;
+static int timeout = 0;
 static int cudaGraphLaunches = 0;
+static int report_cputime = 0;
 // Report average iteration time: (0=RANK0,1=AVG,2=MIN,3=MAX)
 static int average = 1;
 
@@ -198,7 +207,7 @@ void Allreduce(struct threadArgs* args, T* value, int average) {
     }
     #endif
 
-    if(average == 1) accumulator[epoch] /= args->nProcs*args->nThreads;
+    if(average == 1) accumulator[epoch] /= args->totalProcs*args->nThreads;
     counter[epoch] = 0;
     pthread_cond_broadcast(&cond[epoch]);
   }
@@ -220,10 +229,8 @@ testResult_t CheckData(struct threadArgs* args, ncclDataType_t type, ncclRedOp_t
   CUDACHECK(cudaHostAlloc((void**)&wrongPerGpu, args->nGpus*sizeof(int64_t), cudaHostAllocMapped));
 
   for (int i=0; i<args->nGpus; i++) {
-    int device;
     int rank = ((args->proc*args->nThreads + args->thread)*args->nGpus + i);
-    NCCLCHECK(ncclCommCuDevice(args->comms[i], &device));
-    CUDACHECK(cudaSetDevice(device));
+    CUDACHECK(cudaSetDevice(args->gpus[i]));
     void *data = in_place ? ((void *)((uintptr_t)args->recvbuffs[i] + args->recvInplaceOffset*rank)) : args->recvbuffs[i];
 
     TESTCHECK(CheckDelta(data, args->expected[i], count, 0, type, op, 0, nranks, wrongPerGpu+i));
@@ -266,6 +273,8 @@ testResult_t testStreamSynchronize(int ngpus, cudaStream_t* streams, ncclComm_t*
   int remaining = ngpus;
   int* done = (int*)malloc(sizeof(int)*ngpus);
   memset(done, 0, sizeof(int)*ngpus);
+  timer tim;
+
   while (remaining) {
    int idle = 1;
    for (int i=0; i<ngpus; i++) {
@@ -294,6 +303,19 @@ testResult_t testStreamSynchronize(int ngpus, cudaStream_t* streams, ncclComm_t*
          NCCLCHECK(ncclAsyncErr);
        }
      }
+     double delta = tim.elapsed();
+     if (delta > timeout && timeout > 0) {
+       for (int i=0; i<ngpus; i++)
+         NCCLCHECK(ncclCommAbort(comms[i]));
+       char hostname[1024];
+       getHostName(hostname, 1024);
+       printf("%s: Test timeout (%ds) %s:%d\n",
+           hostname,
+           timeout,
+           __FILE__,__LINE__);
+       free(done);
+       return testTimeout;
+     }
 #endif
    }
 
@@ -315,9 +337,7 @@ testResult_t startColl(struct threadArgs* args, ncclDataType_t type, ncclRedOp_t
   if (args->nGpus > 1) NCCLCHECK(ncclGroupStart());
   for (int i = 0; i < args->nGpus; i++) {
 #ifndef NCCL_MAJOR
-    int cudaDev;
-    NCCLCHECK(ncclCommCuDevice(args->comms[i], &cudaDev));
-    CUDACHECK(cudaSetDevice(cudaDev));
+    CUDACHECK(cudaSetDevice(args->gpus[i]));
 #endif
     int rank = ((args->proc*args->nThreads + args->thread)*args->nGpus + i);
     char* recvBuff = ((char*)args->recvbuffs[i]) + shift;
@@ -411,7 +431,7 @@ testResult_t BenchTime(struct threadArgs* args, ncclDataType_t type, ncclRedOp_t
 #endif
 
   // Performance Benchmark
-  auto start = std::chrono::high_resolution_clock::now();
+  timer tim;
   for (int iter = 0; iter < iters; iter++) {
     if (agg_iters>1) NCCLCHECK(ncclGroupStart());
     for (int aiter = 0; aiter < agg_iters; aiter++) {
@@ -432,7 +452,7 @@ testResult_t BenchTime(struct threadArgs* args, ncclDataType_t type, ncclRedOp_t
     }
     // Resync CPU, restart timing, launch cuda graph
     Barrier(args);
-    start = std::chrono::high_resolution_clock::now();
+    tim.reset();
     for (int l=0; l<cudaGraphLaunches; l++) {
       for (int i=0; i<args->nGpus; i++) {
         CUDACHECK(cudaGraphLaunch(graphExec[i], args->streams[i]));
@@ -441,10 +461,10 @@ testResult_t BenchTime(struct threadArgs* args, ncclDataType_t type, ncclRedOp_t
   }
 #endif
 
+  double cputimeSec = tim.elapsed()/(iters*agg_iters);
   TESTCHECK(completeColl(args));
 
-  auto delta = std::chrono::high_resolution_clock::now() - start;
-  double deltaSec = std::chrono::duration_cast<std::chrono::duration<double>>(delta).count();
+  double deltaSec = tim.elapsed();
   deltaSec = deltaSec/(iters*agg_iters);
   if (cudaGraphLaunches >= 1) deltaSec = deltaSec/cudaGraphLaunches;
   Allreduce(args, &deltaSec, average);
@@ -520,7 +540,7 @@ testResult_t BenchTime(struct threadArgs* args, ncclDataType_t type, ncclRedOp_t
       wrongElts = wrongElts1;
   }
 
-  double timeUsec = deltaSec*1.0E6;
+  double timeUsec = (report_cputime ? cputimeSec : deltaSec)*1.0E6;
   char timeStr[100];
   if (timeUsec >= 10000.0) {
     sprintf(timeStr, "%7.0f", timeUsec);
@@ -555,6 +575,9 @@ void setupArgs(size_t size, ncclDataType_t type, struct threadArgs* args) {
 }
 
 testResult_t TimeTest(struct threadArgs* args, ncclDataType_t type, const char* typeName, ncclRedOp_t op, const char* opName, int root) {
+  // Sync to avoid first-call timeout
+  Barrier(args);
+
   // Warm-up for large size
   setupArgs(args->maxbytes, type, args);
   for (int iter = 0; iter < warmup_iters; iter++) {
@@ -586,8 +609,7 @@ testResult_t threadRunTests(struct threadArgs* args) {
   // Set device to the first of our GPUs. If we don't do that, some operations
   // will be done on the current GPU (by default : 0) and if the GPUs are in
   // exclusive mode those operations will fail.
-  int gpuid = args->localRank*args->nThreads*args->nGpus + args->thread*args->nGpus;
-  CUDACHECK(cudaSetDevice(gpuid));
+  CUDACHECK(cudaSetDevice(args->gpus[0]));
   TESTCHECK(ncclTestEngine.runTest(args, ncclroot, (ncclDataType_t)nccltype, test_typenames[nccltype], (ncclRedOp_t)ncclop, test_opnames[ncclop]));
   return testSuccess;
 }
@@ -598,13 +620,12 @@ testResult_t threadInit(struct threadArgs* args) {
   int nranks =  args->nProcs*args->nThreads*args->nGpus;
 
   //set main thread again
-  is_main_thread = (args->proc == 0 && args->thread == 0) ? 1 : 0;
+  is_main_thread = (is_main_proc && args->thread == 0) ? 1 : 0;
 
   NCCLCHECK(ncclGroupStart());
   for (int i=0; i<args->nGpus; i++) {
     int rank = args->proc*args->nThreads*args->nGpus + args->thread*args->nGpus + i;
-    int gpuid = args->localRank*args->nThreads*args->nGpus + args->thread*args->nGpus + i;
-    CUDACHECK(cudaSetDevice(gpuid));
+    CUDACHECK(cudaSetDevice(args->gpus[i]));
     NCCLCHECK(ncclCommInitRank(args->comms+i, nranks, args->ncclId, rank));
   }
   NCCLCHECK(ncclGroupEnd());
@@ -679,7 +700,10 @@ int main(int argc, char* argv[]) {
     {"datatype", required_argument, 0, 'd'},
     {"root", required_argument, 0, 'r'},
     {"blocking", required_argument, 0, 'z'},
+    {"stream_null", required_argument, 0, 'y'},
+    {"timeout", required_argument, 0, 'T'},
     {"cudagraph", required_argument, 0, 'G'},
+    {"report_cputime", required_argument, 0, 'C'},
     {"average", required_argument, 0, 'a'},
     {"help", no_argument, 0, 'h'},
     {}
@@ -687,7 +711,7 @@ int main(int argc, char* argv[]) {
 
   while(1) {
     int c;
-    c = getopt_long(argc, argv, "t:g:b:e:i:f:n:m:w:p:c:o:d:r:z:hG:a:", longopts, &longindex);
+    c = getopt_long(argc, argv, "t:g:b:e:i:f:n:m:w:p:c:o:d:r:z:y:T:hG:C:a:", longopts, &longindex);
 
     if (c == -1)
       break;
@@ -752,12 +776,21 @@ int main(int argc, char* argv[]) {
       case 'z':
         blocking_coll = strtol(optarg, NULL, 0);
         break;
+      case 'y':
+        streamnull = strtol(optarg, NULL, 0);
+        break;
+      case 'T':
+        timeout = strtol(optarg, NULL, 0);
+        break;
       case 'G':
 #if (NCCL_MAJOR > 2 || (NCCL_MAJOR >= 2 && NCCL_MINOR >= 9)) && CUDART_VERSION >= 11030
         cudaGraphLaunches = strtol(optarg, NULL, 0);
 #else
         printf("Option -G (CUDA graph) not supported before NCCL 2.9 + CUDA 11.3. Ignoring\n");
 #endif
+        break;
+      case 'C':
+        report_cputime = strtol(optarg, NULL, 0);
         break;
       case 'a':
         average = (int)strtol(optarg, NULL, 0);
@@ -787,11 +820,14 @@ int main(int argc, char* argv[]) {
             "[-d,--datatype <nccltype/all>] \n\t"
             "[-r,--root <root>] \n\t"
             "[-z,--blocking <0/1>] \n\t"
+            "[-y,--stream_null <0/1>] \n\t"
+            "[-T,--timeout <time in seconds>] \n\t"
             "[-G,--cudagraph <num graph launches>] \n\t"
+            "[-C,--report_cputime <0/1>] \n\t"
             "[-a,--average <0/1/2/3> report average iteration time <0=RANK0/1=AVG/2=MIN/3=MAX>] \n\t"
             "[-h,--help]\n",
-	    basename(argv[0]));
-	return 0;
+          basename(argv[0]));
+        return 0;
     }
   }
   if (minBytes > maxBytes) {
@@ -808,23 +844,31 @@ int main(int argc, char* argv[]) {
 }
 
 testResult_t run() {
-  int nProcs = 1, proc = 0;
+  int totalProcs = 1, proc = 0, ncclProcs = 1, ncclProc = 0, color = 0;
   int localRank = 0;
   char hostname[1024];
   getHostName(hostname, 1024);
 
 #ifdef MPI_SUPPORT
-  MPI_Comm_size(MPI_COMM_WORLD, &nProcs);
+  MPI_Comm_size(MPI_COMM_WORLD, &totalProcs);
   MPI_Comm_rank(MPI_COMM_WORLD, &proc);
-  uint64_t hostHashs[nProcs];
+  uint64_t hostHashs[totalProcs];
   hostHashs[proc] = getHostHash(hostname);
   MPI_Allgather(MPI_IN_PLACE, 0, MPI_DATATYPE_NULL, hostHashs, sizeof(uint64_t), MPI_BYTE, MPI_COMM_WORLD);
-  for (int p=0; p<nProcs; p++) {
+  for (int p=0; p<totalProcs; p++) {
     if (p == proc) break;
     if (hostHashs[p] == hostHashs[proc]) localRank++;
   }
+
+  char* str = getenv("NCCL_TESTS_SPLIT_MASK");
+  uint64_t mask = str ? strtoul(str, NULL, 16) : 0;
+  MPI_Comm mpi_comm;
+  color = proc & mask;
+  MPI_Comm_split(MPI_COMM_WORLD, color, proc, &mpi_comm);
+  MPI_Comm_size(mpi_comm, &ncclProcs);
+  MPI_Comm_rank(mpi_comm, &ncclProc);
 #endif
-  is_main_thread = (proc == 0) ? 1 : 0;
+  is_main_thread = is_main_proc = (proc == 0) ? 1 : 0;
 
   PRINT("# nThread %d nGpus %d minBytes %ld maxBytes %ld step: %ld(%s) warmup iters: %d iters: %d agg iters: %d validation: %d graph: %d\n",
         nThreads, nGpus, minBytes, maxBytes,
@@ -839,22 +883,24 @@ testResult_t run() {
   char line[MAX_LINE];
   int len = 0;
   size_t maxMem = ~0;
+  char* envstr = getenv("NCCL_TESTS_DEVICE");
+  int gpu0 = envstr ? atoi(envstr) : -1;
   for (int i=0; i<nThreads*nGpus; i++) {
-    int cudaDev = localRank*nThreads*nGpus+i;
+    int cudaDev = (gpu0 != -1 ? gpu0 : localRank*nThreads*nGpus) + i;
     int rank = proc*nThreads*nGpus+i;
     cudaDeviceProp prop;
     CUDACHECK(cudaGetDeviceProperties(&prop, cudaDev));
-    len += snprintf(line+len, MAX_LINE-len, "#   Rank %2d Pid %6d on %10s device %2d [0x%02x] %s\n",
-                    rank, getpid(), hostname, cudaDev, prop.pciBusID, prop.name);
+    len += snprintf(line+len, MAX_LINE-len, "#  Rank %2d Group %2d Pid %6d on %10s device %2d [0x%02x] %s\n",
+                    rank, color, getpid(), hostname, cudaDev, prop.pciBusID, prop.name);
     maxMem = std::min(maxMem, prop.totalGlobalMem);
   }
 
 #if MPI_SUPPORT
-  char *lines = (proc == 0) ? (char *)malloc(nProcs*MAX_LINE) : NULL;
+  char *lines = (proc == 0) ? (char *)malloc(totalProcs*MAX_LINE) : NULL;
   // Gather all output in rank order to root (0)
   MPI_Gather(line, MAX_LINE, MPI_BYTE, lines, MAX_LINE, MPI_BYTE, 0, MPI_COMM_WORLD);
   if (proc == 0) {
-    for (int p = 0; p < nProcs; p++)
+    for (int p = 0; p < totalProcs; p++)
       PRINT("%s", lines+MAX_LINE*p);
     free(lines);
   }
@@ -871,39 +917,43 @@ testResult_t run() {
   }
 
   ncclUniqueId ncclId;
-  if (proc == 0) {
+  if (ncclProc == 0) {
     NCCLCHECK(ncclGetUniqueId(&ncclId));
   }
 #ifdef MPI_SUPPORT
-  MPI_Bcast(&ncclId, sizeof(ncclId), MPI_BYTE, 0, MPI_COMM_WORLD);
-  MPI_Barrier(MPI_COMM_WORLD);
+  MPI_Bcast(&ncclId, sizeof(ncclId), MPI_BYTE, 0, mpi_comm);
 #endif
+  int gpus[nGpus*nThreads];
   cudaStream_t streams[nGpus*nThreads];
   void* sendbuffs[nGpus*nThreads];
   void* recvbuffs[nGpus*nThreads];
   void* expected[nGpus*nThreads];
   size_t sendBytes, recvBytes;
 
-  ncclTestEngine.getBuffSize(&sendBytes, &recvBytes, (size_t)maxBytes, (size_t)nProcs*nGpus*nThreads);
+  ncclTestEngine.getBuffSize(&sendBytes, &recvBytes, (size_t)maxBytes, (size_t)ncclProcs*nGpus*nThreads);
 
+  envstr = getenv("NCCL_TESTS_DEVICE");
+  gpu0 = envstr ? atoi(envstr) : -1;
   for (int i=0; i<nGpus*nThreads; i++) {
-    CUDACHECK(cudaSetDevice(localRank*nThreads*nGpus+i));
+    gpus[i] = (gpu0 != -1 ? gpu0 : localRank*nThreads*nGpus) + i;
+    CUDACHECK(cudaSetDevice(gpus[i]));
     TESTCHECK(AllocateBuffs(sendbuffs+i, sendBytes, recvbuffs+i, recvBytes, expected+i, (size_t)maxBytes));
-    CUDACHECK(cudaStreamCreateWithFlags(streams+i, cudaStreamNonBlocking));
+    if (streamnull)
+      streams[i] = NULL;
+    else
+      CUDACHECK(cudaStreamCreateWithFlags(streams+i, cudaStreamNonBlocking));
   }
 
   //if parallel init is not selected, use main thread to initialize NCCL
   ncclComm_t* comms = (ncclComm_t*)malloc(sizeof(ncclComm_t)*nThreads*nGpus);
   if (!parallel_init) {
-     if (nProcs == 1) {
-       int gpuArray[nGpus*nThreads];
-       for (int i=0; i<nGpus*nThreads; i++) gpuArray[i] = i;
-       NCCLCHECK(ncclCommInitAll(comms, nGpus*nThreads, gpuArray));
+     if (ncclProcs == 1) {
+       NCCLCHECK(ncclCommInitAll(comms, nGpus*nThreads, gpus));
      } else {
        NCCLCHECK(ncclGroupStart());
        for (int i=0; i<nGpus*nThreads; i++) {
-         CUDACHECK(cudaSetDevice(localRank*nThreads*nGpus+i));
-         NCCLCHECK(ncclCommInitRank(comms+i, nProcs*nThreads*nGpus, ncclId, proc*nThreads*nGpus+i));
+         CUDACHECK(cudaSetDevice(gpus[i]));
+         NCCLCHECK(ncclCommInitRank(comms+i, ncclProcs*nThreads*nGpus, ncclId, ncclProc*nThreads*nGpus+i));
        }
        NCCLCHECK(ncclGroupEnd());
      }
@@ -919,10 +969,11 @@ testResult_t run() {
     errors[t] = bw_count[t] = 0;
   }
 
+  const char* timeStr = report_cputime ? "cputime" : "time";
   PRINT("#\n");
   PRINT("# %10s  %12s  %8s  %6s  %6s           out-of-place                       in-place          \n", "", "", "", "", "");
   PRINT("# %10s  %12s  %8s  %6s  %6s  %7s  %6s  %6s %6s  %7s  %6s  %6s %6s\n", "size", "count", "type", "redop", "root",
-      "time", "algbw", "busbw", "#wrong", "time", "algbw", "busbw", "#wrong");
+      timeStr, "algbw", "busbw", "#wrong", timeStr, "algbw", "busbw", "#wrong");
   PRINT("# %10s  %12s  %8s  %6s  %6s  %7s  %6s  %6s  %5s  %7s  %6s  %6s  %5s\n", "(B)", "(elements)", "", "", "",
       "(us)", "(GB/s)", "(GB/s)", "", "(us)", "(GB/s)", "(GB/s)", "");
 
@@ -936,11 +987,13 @@ testResult_t run() {
     threads[t].args.stepfactor=stepFactor;
     threads[t].args.localRank = localRank;
 
-    threads[t].args.nProcs=nProcs;
-    threads[t].args.proc=proc;
+    threads[t].args.totalProcs=totalProcs;
+    threads[t].args.nProcs=ncclProcs;
+    threads[t].args.proc=ncclProc;
     threads[t].args.nThreads=nThreads;
     threads[t].args.thread=t;
     threads[t].args.nGpus=nGpus;
+    threads[t].args.gpus=gpus+t*nGpus;
     threads[t].args.sendbuffs = sendbuffs+t*nGpus;
     threads[t].args.recvbuffs = recvbuffs+t*nGpus;
     threads[t].args.expected = expected+t*nGpus;
@@ -990,8 +1043,8 @@ testResult_t run() {
   }
   CUDACHECK(cudaFreeHost(delta));
 
-  char* str = getenv("NCCL_TESTS_MIN_BW");
-  double check_avg_bw = str ? atof(str) : -1;
+  envstr = getenv("NCCL_TESTS_MIN_BW");
+  double check_avg_bw = envstr ? atof(envstr) : -1;
   bw[0] /= bw_count[0];
 
   PRINT("# Out of bounds values : %d %s\n", errors[0], errors[0] ? "FAILED" : "OK");
@@ -1000,6 +1053,8 @@ testResult_t run() {
 #ifdef MPI_SUPPORT
   MPI_Finalize();
 #endif
+
+  PRINT("%s\n", ncclGetLastError(NULL));
 
   // 'cuda-memcheck --leak-check full' requires this
   cudaDeviceReset();
