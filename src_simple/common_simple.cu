@@ -828,7 +828,6 @@ testResult_t BenchTime(struct threadArgs *args, ncclDataType_t type, ncclRedOp_t
 
   // Performance Benchmark
   auto start = std::chrono::high_resolution_clock::now();
-  // TODO: 这里要支持多轮，好像也没有很复杂。
   for (int iter = 0; iter < iters; iter++) {
 
     for (int miter = 0; miter < multi_iters; miter++) {
@@ -952,26 +951,16 @@ testResult_t TimeTest(struct threadArgs *args, ncclDataType_t type,
   }
 
   // TODO: if we support multi size, 我们可以对所有size都warm up；或者保留现在的方式，但是要保证选取了正确的comm。
-  // TODO: 同时如果要warmup的话，也要准备相应的callbackArgs。比较麻烦；可以考虑对比实验的时候，nccl和ofccl都不开warmup。
-  // Warm-up for large size
-  // setupArgs(args->maxbytes, type, args);
-  // for (int iter = 0; iter < warmup_iters; iter++) {
-  //     for (int miter = 0; miter < multi_iters; miter++) {
-  //       TESTCHECK(startColl(args, type, op, root, 0,
-  //                           iter * multi_iters + miter, miter));
-  //     }
-  // }
-  // TESTCHECK(completeColl(args));
+  // warmup还是需要开，不然ofccl性能拉胯。
+  setupArgs(args->maxbytes, type, args);
+  for (int iter = 0; iter < warmup_iters; iter++) {
+      for (int miter = 0; miter < multi_iters; miter++) {
+        TESTCHECK(startColl(args, type, op, root, 0,
+                            iter * multi_iters + miter, miter));
+      }
+  }
+  TESTCHECK(completeColl(args));
 
-  // // Warm-up for small size
-  // setupArgs(args->minbytes, type, args);
-  // for (int iter = 0; iter < warmup_iters; iter++) {
-  //     for (int miter = 0; miter < multi_iters; miter++) {
-  //       TESTCHECK(startColl(args, type, op, root, 0,
-  //                           iter * multi_iters + miter, miter));
-  //     }
-  // }
-  // TESTCHECK(completeColl(args));
 
   // Benchmark
   for (size_t size = args->minbytes; size <= args->maxbytes;
@@ -1415,6 +1404,11 @@ testResult_t run() {
   for (int t = nThreads - 1; t >= 0; t--) {
     threads[t].args.minbytes = minBytes;
     threads[t].args.maxbytes = maxBytes;
+    // TODO: 不支持多个size。
+    if (minBytes != maxBytes) {
+      OFTEST_LOG1(TEST_FATAL, "Only supports single size now");
+      return testInternalError;
+    }
     threads[t].args.stepbytes = stepBytes;
     threads[t].args.stepfactor = stepFactor;
     threads[t].args.localRank = localRank;
