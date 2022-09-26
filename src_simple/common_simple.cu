@@ -954,13 +954,12 @@ testResult_t TimeTest(struct threadArgs *args, ncclDataType_t type,
   // warmup还是需要开，不然ofccl性能拉胯。
   setupArgs(args->maxbytes, type, args);
   for (int iter = 0; iter < warmup_iters; iter++) {
-      for (int miter = 0; miter < multi_iters; miter++) {
-        TESTCHECK(startColl(args, type, op, root, 0,
-                            iter * multi_iters + miter, miter));
-      }
+    for (int miter = 0; miter < multi_iters; miter++) {
+      TESTCHECK(startColl(args, type, op, root, 0,
+                          iter * multi_iters + miter, miter));
+    }
+    TESTCHECK(completeColl(args));
   }
-  TESTCHECK(completeColl(args));
-
 
   // Benchmark
   for (size_t size = args->minbytes; size <= args->maxbytes;
