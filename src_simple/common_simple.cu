@@ -589,7 +589,7 @@ testResult_t testStreamSynchronize(int ngpus, cudaStream_t *streams,
 }
 
 testResult_t prepareColl(struct threadArgs *args, ncclDataType_t type,
-                       ncclRedOp_t opIndex, int root, int in_place, int iter, int miter) {
+                       ncclRedOp_t opIndex, int root, int in_place, int iter, int miter, ofcclRankCtx_t rankCtx) {
   size_t count = args->nbytes / wordSize(type);
   if (args->nGpus != 1) {
     OFTEST_LOG1(TESTERR, "prepareColl cannot handle multiple GPUs");
@@ -664,7 +664,7 @@ testResult_t prepareColl(struct threadArgs *args, ncclDataType_t type,
           &op, &u64, type, ncclScalarHostImmediate, comm));
     }
 #endif
-    TESTCHECK(args->collTest->prepareColl(count, type, op, comm, miter));
+    TESTCHECK(args->collTest->prepareColl(count, type, op, comm, miter, rankCtx));
 
 #if NCCL_VERSION_CODE >= NCCL_VERSION(2, 11, 0)
     if (opIndex >= ncclNumOps) {
@@ -677,7 +677,7 @@ testResult_t prepareColl(struct threadArgs *args, ncclDataType_t type,
 }
 
 testResult_t startColl(struct threadArgs *args, ncclDataType_t type,
-                       ncclRedOp_t opIndex, int root, int in_place, int iter, int miter) {
+                       ncclRedOp_t opIndex, int root, int in_place, int iter, int miter, ofcclRankCtx_t rankCtx) {
   size_t count = args->nbytes / wordSize(type);
 
   // Try to change offset for each iteration so that we avoid cache effects and
@@ -766,7 +766,7 @@ testResult_t startColl(struct threadArgs *args, ncclDataType_t type,
         (void *)(in_place ? recvBuff + args->sendInplaceOffset * rank
                           : sendBuff),
         (void *)(in_place ? recvBuff + args->recvInplaceOffset * rank
-                          : recvBuff), miter, cbArgList + miter));
+                          : recvBuff), miter, cbArgList + miter, rankCtx));
 
 #if NCCL_VERSION_CODE >= NCCL_VERSION(2, 11, 0)
     if (opIndex >= ncclNumOps) {
@@ -816,7 +816,7 @@ testResult_t completeColl(struct threadArgs *args) {
   return testSuccess;
 }
 
-testResult_t BenchTime(struct threadArgs *args, ncclDataType_t type, ncclRedOp_t op, int root, int in_place) {
+testResult_t BenchTime(struct threadArgs *args, ncclDataType_t type, ncclRedOp_t op, int root, int in_place, ofcclRankCtx_t rankCtx) {
 
   size_t count = args->nbytes / wordSize(type);
   // if (datacheck) {
@@ -833,7 +833,7 @@ testResult_t BenchTime(struct threadArgs *args, ncclDataType_t type, ncclRedOp_t
     for (int miter = 0; miter < multi_iters; miter++) {
       seenCqe[miter] = 0;
       TESTCHECK(startColl(args, type, op, root, in_place,
-                          iter * multi_iters + miter, miter));
+                          iter * multi_iters + miter, miter, rankCtx));
     }
 
     TESTCHECK(completeColl(args));
@@ -869,7 +869,7 @@ testResult_t BenchTime(struct threadArgs *args, ncclDataType_t type, ncclRedOp_t
   if (datacheck) {
 
     //test validation in single itertion, should ideally be included into the multi-iteration run
-    // TESTCHECK(startColl(args, type, op, root, in_place, 0, 0)); // will set cbArgList[0].gotCqe = 0
+    // TESTCHECK(startColl(args, type, op, root, in_place, 0, 0, rankCtx)); // will set cbArgList[0].gotCqe = 0
 
     // // // TESTCHECK(completeColl(args));
     // pthread_mutex_lock(&cbArgList[0].mutex);
@@ -925,30 +925,36 @@ void setupArgs(size_t size, ncclDataType_t type, struct threadArgs *args) {
 testResult_t TimeTest(struct threadArgs *args, ncclDataType_t type,
                       const char *typeName, ncclRedOp_t op, const char *opName,
                       int root, bool is_ofccl) {
-  if (is_ofccl) {
-    // prepare for all size. op, type traversed in the caller.
-    // TODO: if we support multi size, each size should use a separate ncclComm
-    for (size_t size = args->minbytes; size <= args->maxbytes;
-        size = ((args->stepfactor > 1) ? size * args->stepfactor
-                                        : size + args->stepbytes)) {
-      setupArgs(size, type, args);
-      for (int miter = 0; miter < multi_iters; miter++) {
-        TESTCHECK(prepareColl(args, type, op, root, 0, miter/* iter * multi_iters + miter when iter=0 */, miter));
-      }
-    }
+  // if (is_ofccl) {
+  // 首先创建ofcclRankCtx_t
+  int thrdCudaDev;
+  CUDACHECK(cudaGetDevice(&thrdCudaDev));
+  ofcclRankCtx_t rankCtx;
+  ofcclInitRankCtx(&rankCtx, thrdCudaDev);
 
-    // 在这里完成check数据的准备；
-    static __thread int rep = 0;
-    rep++;
-    if (datacheck) {
-      // Initialize sendbuffs, recvbuffs and expected
-      TESTCHECK(args->collTest->initData(args, type, op, root, rep, 0));
-      int cudaDev;
-      CUDACHECK(cudaGetDevice(&cudaDev));
+  // prepare for all size. op, type traversed in the caller.
+  // TODO: if we support multi size, each size should use a separate ncclComm
+  for (size_t size = args->minbytes; size <= args->maxbytes;
+      size = ((args->stepfactor > 1) ? size * args->stepfactor
+                                      : size + args->stepbytes)) {
+    setupArgs(size, type, args);
+    for (int miter = 0; miter < multi_iters; miter++) {
+      TESTCHECK(prepareColl(args, type, op, root, 0, miter/* iter * multi_iters + miter when iter=0 */, miter, rankCtx));
     }
-    
-    ofcclPrepareDone();
   }
+
+  // 在这里完成check数据的准备；
+  static __thread int rep = 0;
+  rep++;
+  if (datacheck) {
+    // Initialize sendbuffs, recvbuffs and expected
+    TESTCHECK(args->collTest->initData(args, type, op, root, rep, 0));
+    int cudaDev;
+    CUDACHECK(cudaGetDevice(&cudaDev));
+  }
+  
+  ofcclPrepareDone(rankCtx);
+  // }
 
   // TODO: if we support multi size, 我们可以对所有size都warm up；或者保留现在的方式，但是要保证选取了正确的comm。
   // warmup还是需要开，不然ofccl性能拉胯。
@@ -956,7 +962,7 @@ testResult_t TimeTest(struct threadArgs *args, ncclDataType_t type,
   for (int iter = 0; iter < warmup_iters; iter++) {
     for (int miter = 0; miter < multi_iters; miter++) {
       TESTCHECK(startColl(args, type, op, root, 0,
-                          iter * multi_iters + miter, miter));
+                          iter * multi_iters + miter, miter, rankCtx));
     }
     TESTCHECK(completeColl(args));
   }
@@ -968,15 +974,15 @@ testResult_t TimeTest(struct threadArgs *args, ncclDataType_t type,
     setupArgs(size, type, args);
     print_line_header(max(args->sendBytes, args->expectedBytes),
                       args->nbytes / wordSize(type), typeName, opName, root);
-    TESTCHECK(BenchTime(args, type, op, root, 0));
-    // TESTCHECK(BenchTime(args, type, op, root, 1));
+    TESTCHECK(BenchTime(args, type, op, root, 0, rankCtx));
+    // TESTCHECK(BenchTime(args, type, op, root, 1, rankCtx));
     PRINT("\n");
   }
 
-  if (is_ofccl) {
-    // OFTEST_LOG(TEST, "tid<%lu> invoke ofcclDestroy", pthread_self());
-    ofcclDestroy();
-  }
+  // if (is_ofccl) {
+  // OFTEST_LOG(TEST, "tid<%lu> invoke ofcclDestroy", pthread_self());
+  ofcclDestroy(rankCtx);
+  // }
 
   return testSuccess;
 }
