@@ -961,6 +961,7 @@ testResult_t TimeTest(struct threadArgs *args, ncclDataType_t type,
   setupArgs(args->maxbytes, type, args);
   for (int iter = 0; iter < warmup_iters; iter++) {
     for (int miter = 0; miter < multi_iters; miter++) {
+      seenCqe[miter] = 0;
       TESTCHECK(startColl(args, type, op, root, 0,
                           iter * multi_iters + miter, miter, rankCtx));
     }
