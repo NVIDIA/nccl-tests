@@ -62,15 +62,15 @@ void AllReduceGetBw(size_t count, int typesize, double sec, double* algBw, doubl
 }
 
 int myCallback(int collIdFromCqe, void *args) {
-  // TODO: 不打log把这里删了，不然影响性能。
-  int cudaDev;
-  CUDACHECK(cudaGetDevice(&cudaDev));
-  int collId = ((CallBackArgs *)args)->collId;
-  if (collId != collIdFromCqe) {
-    // TODO: more robust error handle.
-    OFTEST_LOG(TEST_ERROR, "<%lu> rank=%d, collIdFromCqe(%d) is not expected(%d)", pthread_self(), cudaDev, collIdFromCqe, collId);
-    return -1;
-  }
+  // 不打log把这里删了，不然影响性能。
+  // int cudaDev;
+  // CUDACHECK(cudaGetDevice(&cudaDev));
+  // int collId = ((CallBackArgs *)args)->collId;
+  // if (collId != collIdFromCqe) {
+  //   // more robust error handle.
+  //   OFTEST_LOG(TEST_ERROR, "<%lu> rank=%d, collIdFromCqe(%d) is not expected(%d)", pthread_self(), cudaDev, collIdFromCqe, collId);
+  //   return -1;
+  // }
   pthread_mutex_lock(&(((CallBackArgs *)args)->mutex));
   ((CallBackArgs *)args)->gotCqe = 1;
   pthread_mutex_unlock(&(((CallBackArgs *)args)->mutex));
