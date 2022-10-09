@@ -597,8 +597,8 @@ testResult_t BenchTime(struct threadArgs* args, ncclDataType_t type, ncclRedOp_t
 
   // Sync
   // TODO: 之后恢复？
-  // TESTCHECK(startColl(args, type, op, root, in_place, 0));
-  // TESTCHECK(completeColl(args));
+  TESTCHECK(startColl(args, type, op, root, in_place, 0));
+  TESTCHECK(completeColl(args));
 
   Barrier(args);
 
