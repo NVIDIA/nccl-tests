@@ -215,50 +215,35 @@ __global__ void deltaKern(void *A_, void *B_, size_t count, double *max) {
     max[blockIdx.x] = temp[0] > temp[1] ? temp[0] : temp[1];
 }
 
-testResult_t CheckDelta(void *results, void *expected, size_t count,
-                        ncclDataType_t type, double *devmax, cudaStream_t stream) {
+testResult_t CheckDelta(void* results, void* expected, size_t count, ncclDataType_t type, double* devmax) {
   switch (type) {
 #if defined(__CUDA_BF16_TYPES_EXIST__)
-  case ncclBfloat16:
-    deltaKern<__nv_bfloat16, 512>
-        <<<NUM_BLOCKS, 512>>>(results, expected, count, devmax);
-    break;
+    case ncclBfloat16:
+      deltaKern<__nv_bfloat16, 512><<<NUM_BLOCKS, 512>>>(results, expected, count, devmax); break;
 #endif
-  case ncclHalf:
-    deltaKern<half, 512><<<NUM_BLOCKS, 512>>>(results, expected, count, devmax);
-    break;
-  case ncclFloat:
-    deltaKern<float, 512>
-        <<<NUM_BLOCKS, 512>>>(results, expected, count, devmax);
-    break;
-  case ncclDouble:
-    deltaKern<double, 512>
-        <<<NUM_BLOCKS, 512>>>(results, expected, count, devmax);
-    break;
+    case ncclHalf:
+      deltaKern<half, 512><<<NUM_BLOCKS, 512>>>(results, expected, count, devmax); break;
+    case ncclFloat:
+      deltaKern<float, 512><<<NUM_BLOCKS, 512>>>(results, expected, count, devmax); break;
+    case ncclDouble:
+      deltaKern<double, 512><<<NUM_BLOCKS, 512>>>(results, expected, count, devmax); break;
 
-  case ncclChar:
+    case ncclChar:
 #if NCCL_MAJOR >= 2
-  case ncclUint8:
+    case ncclUint8:
 #endif
-    deltaKern<uint8_t, 512>
-        <<<NUM_BLOCKS, 512>>>(results, expected, count, devmax);
-    break;
-  case ncclInt:
+      deltaKern<uint8_t, 512><<<NUM_BLOCKS, 512>>>(results, expected, count, devmax); break;
+    case ncclInt:
 #if NCCL_MAJOR >= 2
-  case ncclUint32:
+    case ncclUint32:
 #endif
-    deltaKern<uint32_t, 512>
-        <<<NUM_BLOCKS, 512>>>(results, expected, count, devmax);
-    break;
-  case ncclInt64:
-  case ncclUint64:
-    deltaKern<uint64_t, 512>
-        <<<NUM_BLOCKS, 512>>>(results, expected, count, devmax);
-    break;
+      deltaKern<uint32_t, 512><<<NUM_BLOCKS, 512>>>(results, expected, count, devmax); break;
+    case ncclInt64:
+    case ncclUint64:
+      deltaKern<uint64_t, 512><<<NUM_BLOCKS, 512>>>(results, expected, count, devmax); break;
   }
   CUDACHECK(cudaDeviceSynchronize());
-  for (int i = 1; i < NUM_BLOCKS; i++)
-    devmax[0] = std::max(devmax[0], devmax[i]);
+  for (int i=1; i<NUM_BLOCKS; i++) devmax[0] = std::max(devmax[0], devmax[i]);
   return testSuccess;
 }
 
@@ -281,7 +266,7 @@ __device__ float testValue<float>(const size_t offset, const int rep,
                                   const int rank) {
   // IF_CHECK 如果要检查对错，把第一个return注释掉，露出来第二个。
   // return 1.0 / (1.0 + (float)testValue<int>(offset, rep, rank));
-  return 0.25;
+  return 1.0 / 3.0;
 }
 template <>
 __device__ half testValue<half>(const size_t offset, const int rep,
@@ -494,52 +479,47 @@ void Allreduce(struct threadArgs *args, double *value, int average) {
   args->barrier_idx = !args->barrier_idx;
 }
 
-testResult_t CheckData(struct threadArgs *args, ncclDataType_t type,
-                       ncclRedOp_t op, int root, int in_place, double *delta, cudaStream_t stream) { // 不要在默认stream上跑。
-  size_t count = args->expectedBytes / wordSize(type);
+testResult_t CheckData(struct threadArgs* args, ncclDataType_t type, ncclRedOp_t op, int root, int in_place, double *delta) {
+  size_t count = args->expectedBytes/wordSize(type);
   double maxDelta = 0.0;
-  for (int i = 0; i < args->nGpus; i++) {
+  for (int i=0; i<args->nGpus; i++) {
     int device;
-    int rank = ((args->proc * args->nThreads + args->thread) * args->nGpus + i);
+    int rank = ((args->proc*args->nThreads + args->thread)*args->nGpus + i);
     NCCLCHECK(ncclCommCuDevice(args->comms[i], &device));
     CUDACHECK(cudaSetDevice(device));
-    void *data = in_place ? ((void *)((uintptr_t)args->recvbuffs[i] +
-                                      args->recvInplaceOffset * rank))
-                          : args->recvbuffs[i];
-    TESTCHECK(
-        CheckDelta(data, args->expected[i], count, type, args->deltaHost, stream));
+    void *data = in_place ? ((void *)((uintptr_t)args->recvbuffs[i] + args->recvInplaceOffset*rank)) : args->recvbuffs[i];
+    TESTCHECK(CheckDelta(data , args->expected[i], count, type, args->deltaHost));
     maxDelta = std::max(*(args->deltaHost), maxDelta);
 
 #ifdef DEBUG_PRINT
     if (rank == 0) {
-      int *expectedHost = (int *)malloc(args->expectedBytes);
-      int *dataHost = (int *)malloc(args->expectedBytes);
+       int *expectedHost = (int *)malloc(args->expectedBytes);
+       int *dataHost = (int *)malloc(args->expectedBytes);
 
-      cudaMemcpyAsync(expectedHost, args->expected[0], args->expectedBytes,
-                 cudaMemcpyDeviceToHost, stream);
-      printf("\n Expected: ");
-      for (int j = 0; j < args->expectedBytes / sizeof(int); j++) {
-        printf("%d:%d ", j, expectedHost[j]);
-      }
-      printf("\n");
+       cudaMemcpy(expectedHost, args->expected[0], args->expectedBytes, cudaMemcpyDeviceToHost);
+       printf("\n Expected: ");
+       for(int j=0; j<args->expectedBytes/sizeof(int); j++) {
+         printf("%d:%d ", j, expectedHost[j]);
+       }
+       printf("\n");
 
-      cudaMemcpyAsync(dataHost, data, args->expectedBytes, cudaMemcpyDeviceToHost, stream);
-      printf("\n Actual: ");
-      for (int j = 0; j < args->expectedBytes / sizeof(int); j++) {
-        printf("%d:%d ", j, dataHost[j]);
-      }
-      printf("\n");
-      free(expectedHost);
-      free(dataHost);
+       cudaMemcpy(dataHost, data, args->expectedBytes, cudaMemcpyDeviceToHost);
+       printf("\n Actual: ");
+       for (int j=0; j<args->expectedBytes/sizeof(int); j++) {
+         printf("%d:%d ", j, dataHost[j]);
+       }
+       printf("\n");
+       free(expectedHost);
+       free(dataHost);
     }
 #endif
   }
-  double nranks = args->nProcs * args->nThreads * args->nGpus;
-  if (args->reportErrors && maxDelta > DeltaMaxValue(type) * (nranks - 1))
-    args->errors[0]++;
+  double nranks = args->nProcs*args->nThreads*args->nGpus;
+  if (args->reportErrors && maxDelta > DeltaMaxValue(type)*(nranks - 1)) args->errors[0]++;
   *delta = maxDelta;
   return testSuccess;
 }
+
 
 testResult_t testStreamSynchronize(int ngpus, cudaStream_t *streams,
                                    ncclComm_t *comms) {
@@ -819,10 +799,6 @@ testResult_t completeColl(struct threadArgs *args) {
 testResult_t BenchTime(struct threadArgs *args, ncclDataType_t type, ncclRedOp_t op, int root, int in_place, ofcclRankCtx_t rankCtx) {
 
   size_t count = args->nbytes / wordSize(type);
-  // if (datacheck) {
-  //   // Initialize sendbuffs, recvbuffs and expected
-  //   TESTCHECK(args->collTest->initData(args, type, op, root, 99, in_place));
-  // }
 
   Barrier(args);
 
@@ -854,35 +830,21 @@ testResult_t BenchTime(struct threadArgs *args, ncclDataType_t type, ncclRedOp_t
   Barrier(args);
 
   double maxDelta = 0;
-
-  // IF_CHECK 如果要检查对错，把下边露出来
-  // int printNum = 10;
-  // int cudaDev;
-  // CUDACHECK(cudaGetDevice(&cudaDev));
-  // float *ptr = (float *)malloc(printNum * sizeof(float));
-  // cudaMemcpy(ptr, args->recvbuffs[0], printNum * sizeof(float), cudaMemcpyDeviceToHost);
-  // for (int i = 0; i < printNum; i++) {
-  //   OFTEST_LOG(TEST, "<%lu> rank=%d, recvbuff[%d]=%f", pthread_self(), cudaDev, i, ptr[i]);
-  // }
-  // free(ptr);
-
+  // static __thread int rep = 0; // 为了再次初始化buffer的参数，没用了。
+  // rep++;
   if (datacheck) {
-
     //test validation in single itertion, should ideally be included into the multi-iteration run
-    // TESTCHECK(startColl(args, type, op, root, in_place, 0, 0, rankCtx)); // will set cbArgList[0].gotCqe = 0
+    // seenCqe[0] = 0;
+    // TESTCHECK(startColl(args, type, op, root, in_place, 0, 0, rankCtx));
+    // TESTCHECK(completeColl(args));
 
-    // // // TESTCHECK(completeColl(args));
-    // pthread_mutex_lock(&cbArgList[0].mutex);
-    // while (cbArgList[0].gotCqe == 0) {
+    ofcclDestroy(rankCtx);
 
-    // }
-    // pthread_mutex_unlock(&cbArgList[0].mutex);
-  
-
-    // TESTCHECK(CheckData(args, type, op, root, in_place, &maxDelta, args->streams[0]));
-
+    // TESTCHECK(CheckData(args, type, op, root, in_place, &maxDelta));
     // //aggregate delta from all threads and procs
     // Allreduce(args, &maxDelta, 3);
+  } else {
+    ofcclDestroy(rankCtx);
   }
 
   double timeUsec = deltaSec * 1.0E6;
@@ -946,11 +908,13 @@ testResult_t TimeTest(struct threadArgs *args, ncclDataType_t type,
   // 在这里完成check数据的准备；
   static __thread int rep = 0;
   rep++;
-  if (datacheck) {
+  if (datacheck) { // 让init数据的kernel在启动daemonKernel之前执行。
     // Initialize sendbuffs, recvbuffs and expected
     TESTCHECK(args->collTest->initData(args, type, op, root, rep, 0));
-    int cudaDev;
-    CUDACHECK(cudaGetDevice(&cudaDev));
+    
+    // int cudaDev;
+    // CUDACHECK(cudaGetDevice(&cudaDev));
+    // OFTEST_LOG(TEST, "<%lu> rank=%d, initData OK", pthread_self(), cudaDev);
   }
   
   ofcclPrepareDone(rankCtx);
@@ -969,20 +933,20 @@ testResult_t TimeTest(struct threadArgs *args, ncclDataType_t type,
   }
 
   // Benchmark
-  for (size_t size = args->minbytes; size <= args->maxbytes;
-       size = ((args->stepfactor > 1) ? size * args->stepfactor
-                                      : size + args->stepbytes)) {
-    setupArgs(size, type, args);
-    print_line_header(max(args->sendBytes, args->expectedBytes),
-                      args->nbytes / wordSize(type), typeName, opName, root);
-    TESTCHECK(BenchTime(args, type, op, root, 0, rankCtx));
-    // TESTCHECK(BenchTime(args, type, op, root, 1, rankCtx));
-    PRINT("\n");
-  }
+  // for (size_t size = args->minbytes; size <= args->maxbytes;
+  //      size = ((args->stepfactor > 1) ? size * args->stepfactor
+  //                                     : size + args->stepbytes)) {
+  // setupArgs(size, type, args);
+  print_line_header(max(args->sendBytes, args->expectedBytes),
+                    args->nbytes / wordSize(type), typeName, opName, root);
+  TESTCHECK(BenchTime(args, type, op, root, 0, rankCtx));
+  // TESTCHECK(BenchTime(args, type, op, root, 1, rankCtx));
+  PRINT("\n");
+  // }
 
   // if (is_ofccl) {
   // OFTEST_LOG(TEST, "tid<%lu> invoke ofcclDestroy", pthread_self());
-  ofcclDestroy(rankCtx);
+  // ofcclDestroy(rankCtx); // 为了做check，把这个挪到BenchTime里边。
   // }
 
   return testSuccess;
