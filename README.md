@@ -9,13 +9,13 @@ To build the tests, just type `make`.
 If CUDA is not installed in /usr/local/cuda, you may specify CUDA\_HOME. Similarly, if NCCL is not installed in /usr, you may specify NCCL\_HOME.
 
 ```shell
-$ make CUDA_HOME=/path/to/cuda NCCL_HOME=/path/to/nccl
+$ CXXFLAGS="-std=c++11" make CUDA_HOME=/path/to/cuda NCCL_HOME=/path/to/nccl
 ```
 
 NCCL tests rely on MPI to work on multiple processes, hence multiple nodes. If you want to compile the tests with MPI support, you need to set MPI=1 and set MPI\_HOME to the path where MPI is installed.
 
 ```shell
-$ make MPI=1 MPI_HOME=/path/to/mpi CUDA_HOME=/path/to/cuda NCCL_HOME=/path/to/nccl
+$ CXXFLAGS="-std=c++11" make MPI=1 MPI_HOME=/path/to/mpi CUDA_HOME=/path/to/cuda NCCL_HOME=/path/to/nccl
 ```
 
 ## Usage
