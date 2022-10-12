@@ -265,8 +265,8 @@ template <>
 __device__ float testValue<float>(const size_t offset, const int rep,
                                   const int rank) {
   // IF_CHECK 如果要检查对错，把第一个return注释掉，露出来第二个。
-  return 1.0 / (1.0 + (float)testValue<int>(offset, rep, rank));
-  // return 1.0 / 2.0;
+  // return 1.0 / (1.0 + (float)testValue<int>(offset, rep, rank));
+  return 1.0 / 1.0;
 }
 template <>
 __device__ half testValue<half>(const size_t offset, const int rep,
@@ -829,22 +829,16 @@ testResult_t BenchTime(struct threadArgs *args, ncclDataType_t type, ncclRedOp_t
 
   Barrier(args);
 
+  ofcclDestroy(rankCtx);
+
   double maxDelta = 0;
   // static __thread int rep = 0; // 为了再次初始化buffer的参数，没用了。
   // rep++;
   if (datacheck) {
-    //test validation in single itertion, should ideally be included into the multi-iteration run
-    // seenCqe[0] = 0;
-    // TESTCHECK(startColl(args, type, op, root, in_place, 0, 0, rankCtx));
-    // TESTCHECK(completeColl(args));
 
-    ofcclDestroy(rankCtx);
-
-    // TESTCHECK(CheckData(args, type, op, root, in_place, &maxDelta));
-    // //aggregate delta from all threads and procs
-    // Allreduce(args, &maxDelta, 3);
-  } else {
-    ofcclDestroy(rankCtx);
+    TESTCHECK(CheckData(args, type, op, root, in_place, &maxDelta));
+    //aggregate delta from all threads and procs
+    Allreduce(args, &maxDelta, 3);
   }
 
   double timeUsec = deltaSec * 1.0E6;
