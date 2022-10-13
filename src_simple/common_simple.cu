@@ -265,8 +265,8 @@ template <>
 __device__ float testValue<float>(const size_t offset, const int rep,
                                   const int rank) {
   // IF_CHECK 如果要检查对错，把第一个return注释掉，露出来第二个。
-  // return 1.0 / (1.0 + (float)testValue<int>(offset, rep, rank));
-  return 1.0 / 1.0;
+  return 1.0 / (1.0 + (float)testValue<int>(offset, rep, rank));
+  // return 1.0 / 1.0;
 }
 template <>
 __device__ half testValue<half>(const size_t offset, const int rep,
