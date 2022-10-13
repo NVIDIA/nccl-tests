@@ -785,7 +785,7 @@ testResult_t completeColl(struct threadArgs *args) {
           // int cudaDev;
           // CUDACHECK(cudaGetDevice(&cudaDev));
           // if (cudaDev == 0) {
-          // OFTEST_LOG(TEST, "<%lu> rank=%d, completeColl get cqe for collId %d", pthread_self(), cudaDev, i);
+          // OFTEST_LOG(TEST, "<%lu> Rank<%d>, completeColl get cqe for collId %d", pthread_self(), cudaDev, i);
           // }
 
         }
@@ -914,10 +914,14 @@ testResult_t TimeTest(struct threadArgs *args, ncclDataType_t type,
     
     // int cudaDev;
     // CUDACHECK(cudaGetDevice(&cudaDev));
-    // OFTEST_LOG(TEST, "<%lu> rank=%d, initData OK", pthread_self(), cudaDev);
+    // OFTEST_LOG(TEST, "<%lu> Rank<%d>, initData OK", pthread_self(), cudaDev);
   }
   
-  ofcclPrepareDone(rankCtx);
+  int cudaDev;
+  CUDACHECK(cudaGetDevice(&cudaDev));
+  OFTEST_LOG(TEST, "<%lu> Rank<%d>, invoke ofcclPrepareDone from TimeTest", pthread_self(), cudaDev);
+  ofcclPrepareDone(rankCtx); // TODO: 测性能的时候保持这里，cheat一下，省下启动kernel的时间。同时配合ofccl里，不要激进地主动退出。
+  // ofcclFinalizeRankCtx7StartHostThrds(rankCtx);
   // }
 
   // TODO: if we support multi size, 我们可以对所有size都warm up；或者保留现在的方式，但是要保证选取了正确的comm。
@@ -1239,7 +1243,7 @@ testResult_t run() {
   
   int cudaDev;
   CUDACHECK(cudaGetDevice(&cudaDev));
-  OFTEST_LOG(TEST_INIT, "<%lu> rank=%d, multi_iters = %d", pthread_self(), cudaDev, multi_iters);
+  OFTEST_LOG(TEST_INIT, "<%lu> Rank<%d>, multi_iters = %d", pthread_self(), cudaDev, multi_iters);
 #define MAX_LINE 2048
   char line[MAX_LINE];
   int len = 0;
