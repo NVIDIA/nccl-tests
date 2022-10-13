@@ -72,10 +72,10 @@ int myCallback(int collIdFromCqe, void *args) {
   ((CallBackArgs *)args)->gotCqe = 1;
   pthread_mutex_unlock(&(((CallBackArgs *)args)->mutex));
 
-  int cudaDev;
-  CUDACHECK(cudaGetDevice(&cudaDev));
-  int collId = ((CallBackArgs *)args)->collId;
-  OFTEST_LOG(TEST, "<%lu> Rank<%d>, callback get cqe for collId %d", pthread_self(), cudaDev, collId);
+  // int cudaDev;
+  // CUDACHECK(cudaGetDevice(&cudaDev));
+  // int collId = ((CallBackArgs *)args)->collId;
+  // OFTEST_LOG(TEST, "<%lu> Rank<%d>, callback get cqe for collId %d", pthread_self(), cudaDev, collId);
   return 0;
 }
 

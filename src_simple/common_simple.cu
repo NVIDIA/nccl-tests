@@ -913,7 +913,6 @@ testResult_t TimeTest(struct threadArgs *args, ncclDataType_t type,
   
   int cudaDev;
   CUDACHECK(cudaGetDevice(&cudaDev));
-  OFTEST_LOG(TEST, "<%lu> Rank<%d>, invoke ofcclPrepareDone from TimeTest", pthread_self(), cudaDev);
   ofcclPrepareDone(rankCtx); // TODO: 测性能的时候保持这里，cheat一下，省下启动kernel的时间。同时配合ofccl里，不要激进地主动退出。
   // ofcclFinalizeRankCtx7StartHostThrds(rankCtx);
   // }
@@ -928,6 +927,7 @@ testResult_t TimeTest(struct threadArgs *args, ncclDataType_t type,
                           iter * multi_iters + miter, miter, rankCtx));
     }
     TESTCHECK(completeColl(args));
+    // OFTEST_LOG(TEST, "<%lu> Rank<%d>, done %dth iter for %d colls", pthread_self(), cudaDev, iter, multi_iters);
   }
 
   // Benchmark
