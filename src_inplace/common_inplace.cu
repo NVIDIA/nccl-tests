@@ -785,7 +785,7 @@ testResult_t completeColl(struct threadArgs *args) {
           // int cudaDev;
           // CUDACHECK(cudaGetDevice(&cudaDev));
           // if (cudaDev == 0) {
-          // OFTEST_LOG(TEST, "<%lu> Rank<%d>, completeColl get cqe for collId %d", pthread_self(), cudaDev, i);
+          // OFTEST_LOG(TEST, "<%lu> Rank<%d>, completeColl get cqe for coll_id = %d", pthread_self(), cudaDev, i);
           // }
 
         }
