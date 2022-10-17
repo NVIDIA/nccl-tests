@@ -5,9 +5,11 @@
  ************************************************************************/
 
 #include "cuda_runtime.h"
-#include "common_simple.h"
+#include "common_inplace.h"
 #include <stdio.h>
 #include <unistd.h>
+#include <pthread.h>
+#include <sched.h>
 
 void print_header() {
   PRINT("# %10s  %12s  %8s  %6s            out-of-place                       in-place          \n", "", "", "", "\n");
@@ -34,6 +36,9 @@ testResult_t AllReduceInitData(struct threadArgs* args, ncclDataType_t type, ncc
   size_t recvcount = args->expectedBytes / wordSize(type);
   int nranks = args->nProcs*args->nThreads*args->nGpus;
 
+  int cudaDev;
+  CUDACHECK(cudaGetDevice(&cudaDev));
+
   for (int i=0; i<args->nGpus; i++) {
     int gpuid = args->localRank*args->nThreads*args->nGpus + args->thread*args->nGpus + i;
     CUDACHECK(cudaSetDevice(gpuid));
@@ -44,6 +49,7 @@ testResult_t AllReduceInitData(struct threadArgs* args, ncclDataType_t type, ncc
     TESTCHECK(InitDataReduce(args->expected[i], recvcount, 0, type, op, rep, nranks));
     CUDACHECK(cudaDeviceSynchronize());
   }
+  // OFTEST_LOG(TEST, "<%lu> Rank<%d>, done AllReduceInitData", pthread_self(), cudaDev);
   return testSuccess;
 }
 
@@ -55,31 +61,44 @@ void AllReduceGetBw(size_t count, int typesize, double sec, double* algBw, doubl
   *busBw = baseBw * factor;
 }
 
-testResult_t AllReduceRunColl(void* sendbuff, void* recvbuff, size_t count, ncclDataType_t type, ncclRedOp_t op, int root, ncclComm_t comm, cudaStream_t stream) {
-  static int round;
-  ncclGroupStart();
-  printf("\n<%d> %d ofccl_nccl_test group start\n", getpid(), round);
+int myCallback(int collIdFromCqe, void *args) {
+  // 不打log把这里删了，不然影响性能。
+  // if (collId != collIdFromCqe) {
+  //   // more robust error handle.
+  //   OFTEST_LOG(TEST_ERROR, "<%lu> Rank<%d>, collIdFromCqe(%d) is not expected(%d)", pthread_self(), cudaDev, collIdFromCqe, collId);
+  //   return -1;
+  // }
+  pthread_mutex_lock(&(((CallBackArgs *)args)->mutex));
+  ((CallBackArgs *)args)->gotCqe = 1;
+  pthread_mutex_unlock(&(((CallBackArgs *)args)->mutex));
 
-  NCCLCHECK(ncclAllReduce(sendbuff, recvbuff, count, type, op, comm, stream));
-  printf("<%d> %d ofccl_nccl_test 1st allreduce\n", getpid(), round);
-  NCCLCHECK(ncclAllReduce(sendbuff, recvbuff, count, type, op, comm, stream));
-  printf("<%d> %d ofccl_nccl_test 2nd allreduce\n", getpid(), round);
-  NCCLCHECK(ncclAllReduce(sendbuff, recvbuff, count, type, op, comm, stream));
-  printf("<%d> %d ofccl_nccl_test 3rd allreduce\n", getpid(), round);
-  NCCLCHECK(ncclAllReduce(sendbuff, recvbuff, count, type, op, comm, stream));
-  printf("<%d> %d ofccl_nccl_test 4th allreduce\n", getpid(), round);
-  NCCLCHECK(ncclAllReduce(sendbuff, recvbuff, count, type, op, comm, stream));
-  printf("<%d> %d ofccl_nccl_test 5th allreduce\n", getpid(), round);
-  NCCLCHECK(ncclAllReduce(sendbuff, recvbuff, count, type, op, comm, stream));
-  printf("<%d> %d ofccl_nccl_test 6th allreduce\n", getpid(), round);
-  NCCLCHECK(ncclAllReduce(sendbuff, recvbuff, count, type, op, comm, stream));
-  printf("<%d> %d ofccl_nccl_test 7th allreduce\n", getpid(), round);
-  NCCLCHECK(ncclAllReduce(sendbuff, recvbuff, count, type, op, comm, stream));
-  printf("<%d> %d ofccl_nccl_test 8th allreduce\n", getpid(), round);
+  // int cudaDev;
+  // CUDACHECK(cudaGetDevice(&cudaDev));
+  // int collId = ((CallBackArgs *)args)->collId;
+  // OFTEST_LOG(TEST, "<%lu> Rank<%d>, callback get cqe for collId %d", pthread_self(), cudaDev, collId);
+  return 0;
+}
 
-  ncclGroupEnd();
-  printf("<%d> %d ofccl_nccl_test group end\n", getpid(), round);
-  round++;
+testResult_t AllReduceRunColl(void* sendbuff, void* recvbuff, int collId, CallBackArgs *args, ofcclRankCtx_t rankCtx) {
+  int cudaDev;
+  CUDACHECK(cudaGetDevice(&cudaDev));
+
+  // CallBackArgs *args = (CallBackArgs *)malloc(sizeof(CallBackArgs));
+  args->collId = collId;
+  args->gotCqe = 0;
+  pthread_mutex_init(&args->mutex, NULL);
+
+  NCCLCHECK(ofcclRunAllReduce(sendbuff, recvbuff, collId, myCallback, args, rankCtx));
+  // OFTEST_LOG(TEST, "<%lu> Rank<%d>, invoke ofcclRunAllReduce for collId %d with args @ %p", pthread_self(), cudaDev, collId, args);
+  // OFTEST_LOG(TEST, "<%lu> Rank<%d>, invoke ofcclRunAllReduce sendbuff @ %p, recvbuff @ %p", pthread_self(), cudaDev, sendbuff, recvbuff);
+  
+  return testSuccess;
+}
+
+testResult_t AllReducePrepare(size_t count, ncclDataType_t datatype, ncclRedOp_t op, ncclComm* comm, int collId, ofcclRankCtx_t rankCtx) {
+
+  NCCLCHECK(ofcclPrepareAllReduce(count, datatype, op, comm, collId, rankCtx));
+  // OFTEST_LOG(TEST, "tid<%lu> invoke ofcclPrepareAllReduce with count=%lu, collId=%d", pthread_self(), count, collId);
   return testSuccess;
 }
 
@@ -88,7 +107,8 @@ struct testColl allReduceTest = {
   AllReduceGetCollByteCount,
   AllReduceInitData,
   AllReduceGetBw,
-  AllReduceRunColl
+  AllReduceRunColl,
+  AllReducePrepare
 };
 
 void AllReduceGetBuffSize(size_t *sendcount, size_t *recvcount, size_t count, int nranks) {
@@ -98,40 +118,36 @@ void AllReduceGetBuffSize(size_t *sendcount, size_t *recvcount, size_t count, in
 
 testResult_t AllReduceRunTest(struct threadArgs* args, int root, ncclDataType_t type, const char* typeName, ncclRedOp_t op, const char* opName) {
   args->collTest = &allReduceTest;
-  // ncclDataType_t *run_types;
-  // ncclRedOp_t *run_ops;
-  // const char **run_typenames, **run_opnames;
-  // int type_count, op_count;
+  ncclDataType_t *run_types;
+  ncclRedOp_t *run_ops;
+  const char **run_typenames, **run_opnames;
+  int type_count, op_count;
 
-  // if ((int)type != -1) {
-  //   type_count = 1;
-  //   run_types = &type;
-  //   run_typenames = &typeName;
-  // } else {
-  //   type_count = test_typenum;
-  //   run_types = test_types;
-  //   run_typenames = test_typenames;
-  // }
+  if ((int)type != -1) {
+    type_count = 1;
+    run_types = &type;
+    run_typenames = &typeName;
+  } else {
+    type_count = test_typenum;
+    run_types = test_types;
+    run_typenames = test_typenames;
+  }
 
-  // if ((int)op != -1) {
-  //   op_count = 1;
-  //   run_ops = &op;
-  //   run_opnames = &opName;
-  // } else {
-  //   op_count = test_opnum;
-  //   run_ops = test_ops;
-  //   run_opnames = test_opnames;
-  // }
+  if ((int)op != -1) {
+    op_count = 1;
+    run_ops = &op;
+    run_opnames = &opName;
+  } else {
+    op_count = test_opnum;
+    run_ops = test_ops;
+    run_opnames = test_opnames;
+  }
 
-  // for (int i=0; i<type_count; i++) {
-  //   for (int j=0; j<op_count; j++) {
-  //     TESTCHECK(TimeTest(args, run_types[i], run_typenames[i], run_ops[j], run_opnames[j], -1));
-  //   }
-  // }
-  static int test_round = 0;
-  printf("<%d> %d ofccl_nccl_test invoke TimeTest\n", getpid(), test_round);
-  test_round++;
-  TESTCHECK(TimeTest(args, ncclFloat, "float", ncclSum, "sum", -1));
+  for (int i=0; i<type_count; i++) {
+    for (int j=0; j<op_count; j++) {
+      TESTCHECK(TimeTest(args, run_types[i], run_typenames[i], run_ops[j], run_opnames[j], -1, true));
+    }
+  }
   return testSuccess;
 }
 

@@ -4,7 +4,7 @@
  * See LICENSE.txt for license information
  ************************************************************************/
 
-#include "common_simple.h"
+#include "common_inplace.h"
 #include "cuda.h"
 #include "nccl.h"
 #include <cstdio>
@@ -941,8 +941,8 @@ testResult_t TimeTest(struct threadArgs *args, ncclDataType_t type,
   // setupArgs(size, type, args);
   print_line_header(max(args->sendBytes, args->expectedBytes),
                     args->nbytes / wordSize(type), typeName, opName, root);
-  TESTCHECK(BenchTime(args, type, op, root, 0, rankCtx));
-  // TESTCHECK(BenchTime(args, type, op, root, 1, rankCtx)); // 由于我们把ofcclDestroy挪到BenchTime里边，所以没办法在这里通过调用两次BenchTime来先做out-of-place，再做in-place。像这样的话，可以在BenchTime里加个循环。
+  // TESTCHECK(BenchTime(args, type, op, root, 0, rankCtx));
+  TESTCHECK(BenchTime(args, type, op, root, 1, rankCtx)); // 由于我们把ofcclDestroy挪到BenchTime里边，所以没办法在这里通过调用两次BenchTime来先做out-of-place，再做in-place。像这样的话，可以在BenchTime里加个循环。
   PRINT("\n");
   // }
 
@@ -1011,7 +1011,7 @@ testResult_t AllocateBuffs(void **sendbuff, size_t sendBytes, void **recvbuff,
                            size_t recvBytes, void **expected, size_t nbytes,
                            int nranks) {
   CUDACHECK(cudaMalloc(sendbuff, nbytes));
-  CUDACHECK(cudaMalloc(recvbuff, nbytes));
+  // CUDACHECK(cudaMalloc(recvbuff, nbytes));
   if (datacheck)
     CUDACHECK(cudaMalloc(expected, recvBytes));
   return testSuccess;
@@ -1275,13 +1275,13 @@ testResult_t run() {
 
   // We need sendbuff, recvbuff, expected (when datacheck enabled), plus 1G for
   // the rest.
-  size_t memMaxBytes = (maxMem - (1 << 30)) / (datacheck ? 3 : 2);
-  if (maxBytes > memMaxBytes) {
-    maxBytes = memMaxBytes;
-    if (proc == 0)
-      printf("#\n# Reducing maxBytes to %ld due to memory limitation\n",
-             maxBytes);
-  }
+  // size_t memMaxBytes = (maxMem - (1 << 30)) / (datacheck ? 3 : 2);
+  // if (maxBytes > memMaxBytes) {
+  //   maxBytes = memMaxBytes;
+  //   if (proc == 0)
+  //     printf("#\n# Reducing maxBytes to %ld due to memory limitation\n",
+  //            maxBytes);
+  // }
 
   ncclUniqueId ncclId;
   if (proc == 0) {
@@ -1391,7 +1391,7 @@ testResult_t run() {
     threads[t].args.thread = t;
     threads[t].args.nGpus = nGpus;
     threads[t].args.sendbuffs = sendbuffs + t * nGpus;
-    threads[t].args.recvbuffs = recvbuffs + t * nGpus;
+    threads[t].args.recvbuffs = sendbuffs + t * nGpus;
     threads[t].args.expected = expected + t * nGpus;
     threads[t].args.ncclId = ncclId;
     threads[t].args.comms = adjusted_comms + t * multi_iters * nGpus;
@@ -1446,8 +1446,8 @@ testResult_t run() {
   for (int i = 0; i < nGpus * nThreads; i++) {
     if (sendbuffs[i])
       CUDACHECK(cudaFree((char *)sendbuffs[i]));
-    if (recvbuffs[i])
-      CUDACHECK(cudaFree((char *)recvbuffs[i]));
+    // if (recvbuffs[i])
+    //   CUDACHECK(cudaFree((char *)recvbuffs[i]));
     if (datacheck)
       CUDACHECK(cudaFree(expected[i]));
   }
