@@ -4,7 +4,7 @@
  * See LICENSE.txt for license information
  ************************************************************************/
 
-#include "common_simple.h"
+#include "common_ms.h"
 #include "cuda.h"
 #include "nccl.h"
 #include <cstdio>
@@ -14,6 +14,12 @@
 #include <pthread.h>
 
 int test_ncclVersion = 0; // init'd with ncclGetVersion()
+
+// TODO: 丑丑地搞个全局变量
+// size_t countList[MULTI_ITERS] = {4000, 8192000};
+size_t countList[MULTI_ITERS] = {4000, 8192000};
+size_t sendBytesList[MULTI_ITERS];
+size_t recvBytesList[MULTI_ITERS];
 
 #if NCCL_MAJOR >= 2
 ncclDataType_t test_types[ncclNumTypes] = {ncclInt8,
@@ -88,7 +94,7 @@ static int datacheck = 1;
 static int warmup_iters = 5;
 static int iters = 20;
 static int agg_iters = 1;
-static int multi_iters = 1;
+static int multi_iters = MULTI_ITERS;
 static int ncclop = ncclSum;
 static int nccltype = ncclFloat;
 static int ncclroot = 0;
@@ -662,9 +668,9 @@ testResult_t startColl(struct threadArgs *args, ncclDataType_t type,
 
   // Try to change offset for each iteration so that we avoid cache effects and
   // catch race conditions in ptrExchange
-  size_t totalnbytes = max(args->sendBytes, args->expectedBytes);
-  size_t steps = totalnbytes ? args->maxbytes / totalnbytes : 1;
-  size_t shift = totalnbytes * (iter % steps);
+  // size_t totalnbytes = max(args->sendBytes, args->expectedBytes);
+  // size_t steps = totalnbytes ? args->maxbytes / totalnbytes : 1;
+  // size_t shift = totalnbytes * (iter % steps);
 
   if (args->nGpus > 1) {
     // OFTEST_LOG1(TEST, "startColl, args->nGpus > 1 run ncclGroupStart");
@@ -679,8 +685,15 @@ testResult_t startColl(struct threadArgs *args, ncclDataType_t type,
     CUDACHECK(cudaSetDevice(cudaDev));
 #endif
     int rank = ((args->proc * args->nThreads + args->thread) * args->nGpus + i);
-    char *recvBuff = ((char *)args->recvbuffs[i]) + shift;
-    char *sendBuff = ((char *)args->sendbuffs[i]) + shift;
+    // char *recvBuff = ((char *)args->recvbuffs[i]) + shift;
+    // char *sendBuff = ((char *)args->sendbuffs[i]) + shift;
+    char *recvBuff = (char *)(args->recvbuffs[miter]);
+    char *sendBuff = (char *)(args->sendbuffs[miter]);
+    
+    // int cudaDev;
+    // cudaGetDevice(&cudaDev);
+    // OFTEST_LOG(TEST, "Rank<%d> coll_id = %d, RUN sendbuff @ %p, recvbuff @ %p", cudaDev, miter, sendBuff, recvBuff);
+
     ncclRedOp_t op;
 
     if (opIndex < ncclNumOps) {
@@ -743,10 +756,8 @@ testResult_t startColl(struct threadArgs *args, ncclDataType_t type,
 #endif
     // miter就是collId。
     TESTCHECK(args->collTest->runColl(
-        (void *)(in_place ? recvBuff + args->sendInplaceOffset * rank
-                          : sendBuff),
-        (void *)(in_place ? recvBuff + args->recvInplaceOffset * rank
-                          : recvBuff), miter, cbArgList + miter, rankCtx));
+        (void *)(sendBuff),
+        (void *)(recvBuff), miter, cbArgList + miter, rankCtx));
 
 #if NCCL_VERSION_CODE >= NCCL_VERSION(2, 11, 0)
     if (opIndex >= ncclNumOps) {
@@ -893,13 +904,11 @@ testResult_t TimeTest(struct threadArgs *args, ncclDataType_t type,
 
   // prepare for all size. op, type traversed in the caller.
   // TODO: if we support multi size, each size should use a separate ncclComm
-  for (size_t size = args->minbytes; size <= args->maxbytes;
-      size = ((args->stepfactor > 1) ? size * args->stepfactor
-                                      : size + args->stepbytes)) {
-    setupArgs(size, type, args);
-    for (int miter = 0; miter < multi_iters; miter++) {
-      TESTCHECK(prepareColl(args, type, op, root, 0, miter/* iter * multi_iters + miter when iter=0 */, miter, rankCtx));
-    }
+
+  for (int miter = 0; miter < multi_iters; miter++) {
+    args->nbytes = sendBytesList[miter];
+    args->sendBytes = args->nbytes;
+    TESTCHECK(prepareColl(args, type, op, root, 0, miter/* iter * multi_iters + miter when iter=0 */, miter, rankCtx));
   }
 
   // 在这里完成check数据的准备；
@@ -917,9 +926,10 @@ testResult_t TimeTest(struct threadArgs *args, ncclDataType_t type,
 
   // TODO: if we support multi size, 我们可以对所有size都warm up；或者保留现在的方式，但是要保证选取了正确的comm。
   // warmup还是需要开，不然ofccl性能拉胯。
-  setupArgs(args->maxbytes, type, args);
   for (int iter = 0; iter < warmup_iters; iter++) {
     for (int miter = 0; miter < multi_iters; miter++) {
+      args->nbytes = sendBytesList[miter];
+      args->sendBytes = args->nbytes;
       seenCqe[miter] = 0;
       TESTCHECK(startColl(args, type, op, root, 0,
                           iter * multi_iters + miter, miter, rankCtx));
@@ -997,6 +1007,12 @@ testResult_t AllocateBuffs(void **sendbuff, size_t sendBytes, void **recvbuff,
   CUDACHECK(cudaMalloc(recvbuff, nbytes));
   if (datacheck)
     CUDACHECK(cudaMalloc(expected, recvBytes));
+  return testSuccess;
+}
+
+testResult_t AllocateBuffLists(void **sendbuff, size_t sendBytes, void **recvbuff, size_t recvBytes) {
+  CUDACHECK(cudaMalloc(sendbuff, sendBytes));
+  CUDACHECK(cudaMalloc(recvbuff, recvBytes));
   return testSuccess;
 }
 
@@ -1224,6 +1240,10 @@ testResult_t run() {
   
   int cudaDev;
   CUDACHECK(cudaGetDevice(&cudaDev));
+  if (multi_iters != 2) {
+    // TODO: he is only a baby T^T
+  OFTEST_LOG(TEST_FATAL, "<%lu> Rank<%d>, multi_iters = %d damie", pthread_self(), cudaDev, multi_iters);
+  }
   OFTEST_LOG(TEST_INIT, "<%lu> Rank<%d>, multi_iters = %d", pthread_self(), cudaDev, multi_iters);
 #define MAX_LINE 2048
   char line[MAX_LINE];
@@ -1275,20 +1295,32 @@ testResult_t run() {
   MPI_Barrier(MPI_COMM_WORLD);
 #endif
   cudaStream_t streams[nGpus * nThreads];
-  void *sendbuffs[nGpus * nThreads];
-  void *recvbuffs[nGpus * nThreads];
+  void *sendbuffs[nGpus * nThreads][MULTI_ITERS];
+  void *recvbuffs[nGpus * nThreads][MULTI_ITERS];
   void *expected[nGpus * nThreads];
-  size_t sendBytes, recvBytes;
+  // size_t sendBytes, recvBytes;
 
-  ncclTestEngine.getBuffSize(&sendBytes, &recvBytes, (size_t)maxBytes,
-                             (size_t)nProcs * nGpus * nThreads);
+  // ncclTestEngine.getBuffSize(&sendBytes, &recvBytes, (size_t)maxBytes,
+  //                            (size_t)nProcs * nGpus * nThreads);
+
+  ncclTestEngine.getCollByteCountList(sendBytesList, recvBytesList, countList, multi_iters);
+  // for (int i = 0; i < MULTI_ITERS; i++) {
+  //   OFTEST_LOG(TEST, "sendBytesList[%d] = %lu, recvBytesList[%d] = %lu", i, sendBytesList[i], i, recvBytesList[i]);
+  // }
 
   for (int i = 0; i < nGpus * nThreads; i++) {
     CUDACHECK(cudaSetDevice(localRank * nThreads * nGpus + i));
-    TESTCHECK(AllocateBuffs(sendbuffs + i, sendBytes, recvbuffs + i, recvBytes,
-                            expected + i, (size_t)maxBytes,
-                            nProcs * nThreads * nGpus));
+    // 这里的调用是给每个线程分配。
+    // TESTCHECK(AllocateBuffs(sendbuffs + i, sendBytes, recvbuffs + i, recvBytes,
+    //                         expected + i, (size_t)maxBytes,
+    //                         nProcs * nThreads * nGpus));
     CUDACHECK(cudaStreamCreateWithFlags(streams + i, cudaStreamNonBlocking));
+    
+    for (int j = 0; j < multi_iters; j++) {
+      AllocateBuffLists(&sendbuffs[i][j], sendBytesList[j], &recvbuffs[i][j], recvBytesList[j]);
+
+      // OFTEST_LOG(TEST, "Rank<%d> coll_id = %d, ALLOCATE sendbuff @ %p, recvbuff @ %p", i, j, sendbuffs[i][j], recvbuffs[i][j]);
+    }
   }
 
   // if parallel init is not selected, use main thread to initialize NCCL
@@ -1373,8 +1405,14 @@ testResult_t run() {
     threads[t].args.nThreads = nThreads;
     threads[t].args.thread = t;
     threads[t].args.nGpus = nGpus;
-    threads[t].args.sendbuffs = sendbuffs + t * nGpus;
-    threads[t].args.recvbuffs = recvbuffs + t * nGpus;
+    // threads[t].args.sendbuffs = sendbuffs[t];
+    // threads[t].args.recvbuffs = recvbuffs[t];
+    for (int j = 0; j < MULTI_ITERS; j++) {
+      threads[t].args.sendbuffs[j] = sendbuffs[t][j];
+      threads[t].args.recvbuffs[j] = recvbuffs[t][j];
+      // OFTEST_LOG(TEST, "Rank<%d> coll_id = %d, DISPATCH SRC sendbuff @ %p, recvbuff @ %p", t, j, sendbuffs[t][j], recvbuffs[t][j]);
+      // OFTEST_LOG(TEST, "Rank<%d> coll_id = %d, DISPATCH IN ARGS sendbuff @ %p, recvbuff @ %p", t, j, threads[t].args.sendbuffs[j], threads[t].args.recvbuffs[j]);
+    }
     threads[t].args.expected = expected + t * nGpus;
     threads[t].args.ncclId = ncclId;
     threads[t].args.comms = adjusted_comms + t * multi_iters * nGpus;
@@ -1427,12 +1465,10 @@ testResult_t run() {
 
   // Free off CUDA allocated memory
   for (int i = 0; i < nGpus * nThreads; i++) {
-    if (sendbuffs[i])
-      CUDACHECK(cudaFree((char *)sendbuffs[i]));
-    if (recvbuffs[i])
-      CUDACHECK(cudaFree((char *)recvbuffs[i]));
-    if (datacheck)
-      CUDACHECK(cudaFree(expected[i]));
+    for (int j = 0; j < MULTI_ITERS; j++) {
+      CUDACHECK(cudaFree((char *)sendbuffs[i][j]));
+      CUDACHECK(cudaFree((char *)recvbuffs[i][j]));
+    }
   }
   CUDACHECK(cudaFreeHost(delta));
 
