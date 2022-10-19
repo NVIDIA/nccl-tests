@@ -827,7 +827,7 @@ testResult_t BenchTime(struct threadArgs *args, ncclDataType_t type, ncclRedOp_t
 
     int cudaDev;
     cudaGetDevice(&cudaDev);
-    OFTEST_LOG(TEST, "<%lu> rank=%d, done %dth BenchTime iter for %d multi_iters", pthread_self(), cudaDev, iter, multi_iters);
+    OFTEST_LOG(TEST, "<%lu> Rank<%d>, done %dth BenchTime iter for %d multi_iters", pthread_self(), cudaDev, iter, multi_iters);
   }
 
   auto delta = std::chrono::high_resolution_clock::now() - start;
