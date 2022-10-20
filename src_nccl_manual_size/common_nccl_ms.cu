@@ -18,6 +18,8 @@ int test_ncclVersion = 0; // init'd with ncclGetVersion()
 size_t countList[AGG_ITERS] = {4000, 8192000};
 size_t sendBytesList[AGG_ITERS];
 size_t recvBytesList[AGG_ITERS];
+// ncclDataType_t typeList[AGG_ITERS] = {ncclInt32, ncclFloat};
+ncclDataType_t typeList[AGG_ITERS] = {ncclInt32, ncclFloat};
 
 #if NCCL_MAJOR >= 2
   ncclDataType_t test_types[ncclNumTypes] = {
@@ -606,7 +608,7 @@ testResult_t BenchTime(struct threadArgs* args, ncclDataType_t type, ncclRedOp_t
     for (int aiter = 0; aiter < agg_iters; aiter++) {
       args->nbytes = sendBytesList[aiter];
       args->sendBytes = args->nbytes;
-      TESTCHECK(startColl(args, type, op, root, in_place, iter*agg_iters+aiter));
+      TESTCHECK(startColl(args, typeList[aiter], op, root, in_place, iter*agg_iters+aiter));
     }
     if (agg_iters>1) NCCLCHECK(ncclGroupEnd());
   }
