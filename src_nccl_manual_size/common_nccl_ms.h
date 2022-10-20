@@ -16,6 +16,8 @@
 #include <pthread.h>
 #include "nccl1_compat.h"
 
+#define AGG_ITERS 2
+
 #define CUDACHECK(cmd) do {                         \
   cudaError_t err = cmd;                            \
   if( err != cudaSuccess ) {                        \
@@ -83,6 +85,7 @@ struct testEngine {
   void (*getBuffSize)(size_t *sendcount, size_t *recvcount, size_t count, int nranks);
   testResult_t (*runTest)(struct threadArgs* args, int root, ncclDataType_t type,
       const char* typeName, ncclRedOp_t op, const char* opName);
+  void (*getCollByteCountList)(size_t *sendCntList, size_t *recvCntList, const size_t *countList, int listLen);
 };
 
 extern struct testEngine ncclTestEngine;
@@ -100,10 +103,10 @@ struct threadArgs {
   int thread;
   int nGpus;
   int localRank;
-  void** sendbuffs;
+  void* sendbuffs[AGG_ITERS];
   size_t sendBytes;
   size_t sendInplaceOffset;
-  void** recvbuffs;
+  void* recvbuffs[AGG_ITERS];
   size_t recvInplaceOffset;
   ncclUniqueId ncclId;
   ncclComm_t* comms;

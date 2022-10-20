@@ -27,6 +27,14 @@ void AllReduceGetCollByteCount(size_t *sendcount, size_t *recvcount, size_t *par
   *paramcount = *sendcount;
 }
 
+void AllReduceGetCollByteCountList(size_t *sendCntList, size_t *recvCntList, const size_t *countList, int listLen) { // listLen就等于agg_iters
+  // OFTEST_LOG1(TEST, "hi");
+  for (int i = 0; i < listLen; i++) {
+    *(sendCntList + i) = *(countList + i);
+    *(recvCntList + i) = *(countList + i);
+  }
+}
+
 testResult_t AllReduceInitData(struct threadArgs* args, ncclDataType_t type, ncclRedOp_t op, int root, int rep, int in_place) {
   size_t sendcount = args->sendBytes / wordSize(type);
   size_t recvcount = args->expectedBytes / wordSize(type);
@@ -108,7 +116,8 @@ testResult_t AllReduceRunTest(struct threadArgs* args, int root, ncclDataType_t 
 
 struct testEngine allReduceEngine = {
   AllReduceGetBuffSize,
-  AllReduceRunTest
+  AllReduceRunTest,
+  AllReduceGetCollByteCountList
 };
 
 #pragma weak ncclTestEngine=allReduceEngine
