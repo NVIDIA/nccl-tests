@@ -71,6 +71,7 @@ typedef enum {
 typedef struct {
   int collId;
   int gotCqe;
+  int cudaDev;
   pthread_mutex_t mutex;
 } CallBackArgs;
 

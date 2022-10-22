@@ -84,9 +84,12 @@ int myCallback(int collIdFromCqe, void *args) {
   ((CallBackArgs *)args)->gotCqe = 1;
   pthread_mutex_unlock(&(((CallBackArgs *)args)->mutex));
 
-  int cudaDev;
-  CUDACHECK(cudaGetDevice(&cudaDev));
+  // int cudaDev;
+  // CUDACHECK(cudaGetDevice(&cudaDev)); // 这个函数之后在poller线程里调用的，所以这个获得的dev应该是不对的。
+
   int collId = ((CallBackArgs *)args)->collId;
+  int cudaDev = ((CallBackArgs *)args)->cudaDev;
+  
   OFTEST_LOG(TEST, "<%lu> Rank<%d>, callback get cqe for coll_id = %d", pthread_self(), cudaDev, collId);
   return 0;
 }
@@ -95,13 +98,13 @@ testResult_t AllReduceRunColl(void* sendbuff, void* recvbuff, int collId, CallBa
   int cudaDev;
   CUDACHECK(cudaGetDevice(&cudaDev));
 
-  // CallBackArgs *args = (CallBackArgs *)malloc(sizeof(CallBackArgs));
   args->collId = collId;
   args->gotCqe = 0;
+  args->cudaDev = cudaDev;
   pthread_mutex_init(&args->mutex, NULL);
 
   NCCLCHECK(ofcclRunAllReduce(sendbuff, recvbuff, collId, myCallback, args, rankCtx));
-  // OFTEST_LOG(TEST, "<%lu> Rank<%d>, invoke ofcclRunAllReduce for coll_id = %d with args @ %p", pthread_self(), cudaDev, collId, args);
+  OFTEST_LOG(TEST, "<%lu> Rank<%d>, invoke ofcclRunAllReduce for coll_id = %d", pthread_self(), cudaDev, collId);
   // OFTEST_LOG(TEST, "<%lu> Rank<%d>, invoke ofcclRunAllReduce sendbuff @ %p, recvbuff @ %p", pthread_self(), cudaDev, sendbuff, recvbuff);
   
   return testSuccess;
