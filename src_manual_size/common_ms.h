@@ -18,7 +18,8 @@
 
 // #define DEBUG_PRINT 1
 
-#define MULTI_ITERS 2
+// #define MULTI_ITERS 2
+#define MULTI_ITERS 161
 
 #define OFTEST_LOG(PRE, FMT, args...) printf("(testlog) [%s:%d] <%s> " #PRE " " FMT "\n", __FILE__, __LINE__, __func__, args)
 #define OFTEST_LOG1(PRE, FMT) printf("(testlog) [%s:%d] <%s> " #PRE " " FMT "\n", __FILE__, __LINE__, __func__)
