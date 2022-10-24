@@ -1240,7 +1240,7 @@ testResult_t run() {
   
   int cudaDev;
   CUDACHECK(cudaGetDevice(&cudaDev));
-  if (multi_iters != 2) {
+  if (multi_iters != MULTI_ITERS) {
     // TODO: he is only a baby T^T
   OFTEST_LOG(TEST_FATAL, "<%lu> Rank<%d>, multi_iters = %d damie", pthread_self(), cudaDev, multi_iters);
   }
