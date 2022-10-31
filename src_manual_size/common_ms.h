@@ -10,6 +10,7 @@
 #include <stdio.h>
 #include <cstdint>
 #include <algorithm>
+#include <unistd.h> // usleep
 #ifdef MPI_SUPPORT
 #include "mpi.h"
 #endif
