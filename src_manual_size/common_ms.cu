@@ -785,7 +785,7 @@ testResult_t startColl(struct threadArgs *args, ncclDataType_t type,
   return testSuccess;
 }
 
-testResult_t completeColl(struct threadArgs *args) {
+testResult_t completeColl(struct threadArgs *args, int iter=0) {
   if (blocking_coll)
     return testSuccess;
     
@@ -799,10 +799,10 @@ testResult_t completeColl(struct threadArgs *args) {
           gotCqeCnt++;
           seenCqe[i] = 1;
           
-          // int cudaDev;
-          // CUDACHECK(cudaGetDevice(&cudaDev));
+          int cudaDev;
+          CUDACHECK(cudaGetDevice(&cudaDev));
           // if (cudaDev == 0) {
-          // OFTEST_LOG(TEST, "<%lu> Rank<%d>, completeColl get cqe for coll_id = %d", pthread_self(), cudaDev, i);
+          OFTEST_LOG(TEST, "<%lu> Rank<%d>, completeColl get %dth cqe for coll_id = %d", pthread_self(), cudaDev, iter, i);
           // }
 
         }
@@ -824,18 +824,17 @@ testResult_t BenchTime(struct threadArgs *args, ncclDataType_t type, ncclRedOp_t
 
   // Performance Benchmark
   auto start = std::chrono::high_resolution_clock::now();
-  for (int iter = 0; iter < iters; iter++) {
+  for (int iter = 1; iter <= iters; iter++) {
     // 在这个地方改变miter的遍历顺序，起到乱序调用的作用。
-    for (int miter_idx = 0; miter_idx < multi_iters; miter_idx++) {
+    for (int miter_idx = 0; miter_idx < multi_iters; miter_idx++) { // for (int miter = 0; miter < multi_iters; miter++) {
       int miter = idxList[cudaDev][miter_idx];
       // OFTEST_LOG(TEST, "<%lu> Rank<%d>, invoke %dth startColl iter for coll_id = %d", pthread_self(), cudaDev, iter, miter);
-    // for (int miter = 0; miter < multi_iters; miter++) {
-      seenCqe[miter] = 0; // TODO: 这样的写法或许不能保证“同步”，即现在的161个都跑完，才去启动下一波161个。
+      seenCqe[miter] = 0;
       TESTCHECK(startColl(args, type, op, root, in_place,
                           iter * multi_iters + miter, miter, rankCtx));
     }
 
-    TESTCHECK(completeColl(args));
+    TESTCHECK(completeColl(args, iter));
 
     // usleep(100000);
     OFTEST_LOG(TEST, "<%lu> Rank<%d>, done %dth BenchTime iter for %d multi_iters", pthread_self(), cudaDev, iter, multi_iters);
