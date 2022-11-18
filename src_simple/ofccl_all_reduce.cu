@@ -36,9 +36,6 @@ testResult_t AllReduceInitData(struct threadArgs* args, ncclDataType_t type, ncc
   size_t recvcount = args->expectedBytes / wordSize(type);
   int nranks = args->nProcs*args->nThreads*args->nGpus;
 
-  int cudaDev;
-  CUDACHECK(cudaGetDevice(&cudaDev));
-
   for (int i=0; i<args->nGpus; i++) {
     int gpuid = args->localRank*args->nThreads*args->nGpus + args->thread*args->nGpus + i;
     CUDACHECK(cudaSetDevice(gpuid));
@@ -49,6 +46,9 @@ testResult_t AllReduceInitData(struct threadArgs* args, ncclDataType_t type, ncc
     TESTCHECK(InitDataReduce(args->expected[i], recvcount, 0, type, op, rep, nranks));
     CUDACHECK(cudaDeviceSynchronize());
   }
+
+  // int cudaDev;
+  // CUDACHECK(cudaGetDevice(&cudaDev));
   // OFTEST_LOG(TEST, "<%lu> Rank<%d>, done AllReduceInitData", pthread_self(), cudaDev);
   return testSuccess;
 }
@@ -80,8 +80,6 @@ int myCallback(int collIdFromCqe, void *args) {
 }
 
 testResult_t AllReduceRunColl(void* sendbuff, void* recvbuff, int collId, CallBackArgs *args, ofcclRankCtx_t rankCtx) {
-  int cudaDev;
-  CUDACHECK(cudaGetDevice(&cudaDev));
 
   // CallBackArgs *args = (CallBackArgs *)malloc(sizeof(CallBackArgs));
   args->collId = collId;
@@ -89,6 +87,9 @@ testResult_t AllReduceRunColl(void* sendbuff, void* recvbuff, int collId, CallBa
   pthread_mutex_init(&args->mutex, NULL);
 
   NCCLCHECK(ofcclRunAllReduce(sendbuff, recvbuff, collId, myCallback, args, rankCtx));
+
+  // int cudaDev;
+  // CUDACHECK(cudaGetDevice(&cudaDev));
   // OFTEST_LOG(TEST, "<%lu> Rank<%d>, invoke ofcclRunAllReduce for coll_id = %d with args @ %p", pthread_self(), cudaDev, collId, args);
   // OFTEST_LOG(TEST, "<%lu> Rank<%d>, invoke ofcclRunAllReduce sendbuff @ %p, recvbuff @ %p", pthread_self(), cudaDev, sendbuff, recvbuff);
   

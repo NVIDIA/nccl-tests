@@ -814,9 +814,9 @@ testResult_t BenchTime(struct threadArgs *args, ncclDataType_t type, ncclRedOp_t
 
     TESTCHECK(completeColl(args));
 
-    int cudaDev;
-    cudaGetDevice(&cudaDev);
-    OFTEST_LOG(TEST, "<%lu> Rank<%d>, done %dth BenchTime iter for %d multi_iters", pthread_self(), cudaDev, iter, multi_iters);
+    // int cudaDev;
+    // cudaGetDevice(&cudaDev);
+    // OFTEST_LOG(TEST, "<%lu> Rank<%d>, done %dth BenchTime iter for %d multi_iters", pthread_self(), cudaDev, iter, multi_iters);
   }
 
   auto delta = std::chrono::high_resolution_clock::now() - start;
@@ -912,8 +912,8 @@ testResult_t TimeTest(struct threadArgs *args, ncclDataType_t type,
     // OFTEST_LOG(TEST, "<%lu> Rank<%d>, initData OK", pthread_self(), thrdCudaDev);
   }
   
-  // ofcclPrepareDone(rankCtx); // TODO: 测性能的时候保持这里，cheat一下，省下启动kernel的时间。同时配合ofccl里，不要激进地主动退出。
-  ofcclFinalizeRankCtx7StartHostThrds(rankCtx);
+  ofcclPrepareDone(rankCtx); // TODO: 测性能的时候保持这里，cheat一下，省下启动kernel的时间。同时配合ofccl里，不要激进地主动退出。
+  // ofcclFinalizeRankCtx7StartHostThrds(rankCtx);
 
   // TODO: if we support multi size, 我们可以对所有size都warm up；或者保留现在的方式，但是要保证选取了正确的comm。
   // warmup还是需要开，不然ofccl性能拉胯。
