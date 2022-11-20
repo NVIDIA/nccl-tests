@@ -20,6 +20,10 @@ size_t sendBytesList[AGG_ITERS];
 size_t recvBytesList[AGG_ITERS];
 // ncclDataType_t typeList[AGG_ITERS] = {ncclInt32, ncclFloat};
 ncclDataType_t typeList[AGG_ITERS] = {ncclInt32, ncclFloat};
+int idxList[8][AGG_ITERS] = {
+  {0, 1},
+  {1, 0}
+};
 
 #if NCCL_MAJOR >= 2
   ncclDataType_t test_types[ncclNumTypes] = {
@@ -598,6 +602,8 @@ testResult_t completeColl(struct threadArgs* args) {
 
 testResult_t BenchTime(struct threadArgs* args, ncclDataType_t type, ncclRedOp_t op, int root, int in_place) {
   size_t count = args->nbytes / wordSize(type);
+  int cudaDev;
+  cudaGetDevice(&cudaDev);
 
   Barrier(args);
 
@@ -605,7 +611,9 @@ testResult_t BenchTime(struct threadArgs* args, ncclDataType_t type, ncclRedOp_t
   auto start = std::chrono::high_resolution_clock::now();
   for (int iter = 0; iter < iters; iter++) {
     if (agg_iters>1) NCCLCHECK(ncclGroupStart());
-    for (int aiter = 0; aiter < agg_iters; aiter++) {
+    // for (int aiter = 0; aiter < agg_iters; aiter++) {
+    for (int aiter_idx = 0; aiter_idx < agg_iters; aiter_idx++) {
+      int aiter = idxList[cudaDev][aiter_idx];
       args->nbytes = sendBytesList[aiter];
       args->sendBytes = args->nbytes;
       TESTCHECK(startColl(args, typeList[aiter], op, root, in_place, iter*agg_iters+aiter));
