@@ -262,7 +262,7 @@ testResult_t CheckData(struct threadArgs* args, ncclDataType_t type, ncclRedOp_t
 
   *wrongElts = 0;
   for (int i=0; i < args->nGpus; i++) *wrongElts += wrongPerGpu[i];
-  cudaFree(wrongPerGpu);
+  cudaFreeHost(wrongPerGpu);
 
   if (args->reportErrors && *wrongElts) args->errors[0]++;
   return testSuccess;
