@@ -969,6 +969,8 @@ testResult_t run() {
     errors[t] = bw_count[t] = 0;
   }
 
+  fflush(stdout);
+
   const char* timeStr = report_cputime ? "cputime" : "time";
   PRINT("#\n");
   PRINT("# %10s  %12s  %8s  %6s  %6s           out-of-place                       in-place          \n", "", "", "", "", "");
