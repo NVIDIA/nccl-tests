@@ -1129,7 +1129,7 @@ int main(int argc, char *argv[]) {
       iters = (int)strtol(optarg, NULL, 0);
       break;
     case 'M':
-      multi_iters = (int)strtol(optarg, NULL, 0);
+      // multi_iters = (int)strtol(optarg, NULL, 0);
       break;
     case 'm':
 #if NCCL_MAJOR > 2 || (NCCL_MAJOR >= 2 && NCCL_MINOR >= 2)
