@@ -7,19 +7,14 @@ export NCCL_ALGO=Ring
 # export NCCL_MAX_NCHANNELS=1
 # export NCCL_MIN_NCHANNELS=1
 # export NCCL_NTHREADS=64
-export MY_NUM_DEV=2
-# export CUDA_VISIBLE_DEVICES=0,1,4,5
-export SHOW_ALL_PREPARED_COLL=0
-export NITER=4
-export NBYTES=8K
-export WARMITER=2
-export MITER=4
+
+export CHECK=0
 
 export TRAVERSE_TIMES=10
-export TOLERANT_FAIL_CHECK_SQ_CNT=500
+export TOLERANT_FAIL_CHECK_SQ_CNT=5000
 export CNT_BEFORE_QUIT=5
 export TOLERANT_UNPROGRESSED_CNT=50000
-export BASE_CTX_SWITCH_THRESHOLD=100
+export BASE_CTX_SWITCH_THRESHOLD=80
 
 echo TRAVERSE_TIMES=$TRAVERSE_TIMES
 echo TOLERANT_FAIL_CHECK_SQ_CNT=$TOLERANT_FAIL_CHECK_SQ_CNT
@@ -28,18 +23,38 @@ echo TOLERANT_UNPROGRESSED_CNT=$TOLERANT_UNPROGRESSED_CNT
 echo BASE_CTX_SWITCH_THRESHOLD=$BASE_CTX_SWITCH_THRESHOLD
 
 if [ -z $BINARY ];then
-    BINARY="NORMAL"
+    BINARY="DEBUG"
     BINARY="MS"
+    BINARY="PERF"
 fi
 
-if [ "$BINARY" == "NORMAL" ];then
+if [ "$BINARY" == "DEBUG" ];then
     target="./build/ofccl_all_reduce_perf"
+    export MY_NUM_DEV=8
+    # export CUDA_VISIBLE_DEVICES=0,1,4,5
+    export SHOW_ALL_PREPARED_COLL=1
+    export NITER=4
+    export NBYTES=8K
+    export WARMITER=2
+    export MITER=4
+elif [ "$BINARY" == "PERF" ];then
+    target="./build/ofccl_all_reduce_perf"
+    export MY_NUM_DEV=2
+    export CUDA_VISIBLE_DEVICES=0,1,4,5
+    export SHOW_ALL_PREPARED_COLL=0
+    export NITER=4
+    export NBYTES=8K
+    export WARMITER=2
+    export MITER=4
 elif [ "$BINARY" == "MS" ];then
     target="./build/ofccl_all_reduce_ms_perf"
-    export NITER=200
     export MY_NUM_DEV=8
+    # export CUDA_VISIBLE_DEVICES=0,1,4,5
+    export NITER=200
     export SHOW_ALL_PREPARED_COLL=1
     export WARMITER=0
+    export NBYTES=8K
+    export MITER=4
 fi
 
 
@@ -48,7 +63,7 @@ if [ -z $RUN_TYPE ];then
 fi
 
 if [ "$RUN_TYPE" == "PURE" ];then
-    cmd="$target -b $NBYTES -e $NBYTES -f 2 -t $MY_NUM_DEV -g 1 -n $NITER -w $WARMITER -c 0 -M $MITER"
+    cmd="$target -b $NBYTES -e $NBYTES -f 2 -t $MY_NUM_DEV -g 1 -n $NITER -w $WARMITER -c $CHECK -M $MITER"
 elif [ "$RUN_TYPE" == "GDB" ];then
     cmd="cuda-gdb $target"
 elif [ "$RUN_TYPE" == "NSYS" ];then
@@ -56,5 +71,5 @@ elif [ "$RUN_TYPE" == "NSYS" ];then
 fi
 
 echo cmd=$cmd
-$cmd
+$cmd #> /home/panlichen/work2/ofccl/log/ofccl.log
 
