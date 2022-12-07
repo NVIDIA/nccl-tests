@@ -1,12 +1,15 @@
 clear
 
+export DEBUG_CC=0
+export DEBUG_ENQ=0
+
 cd /home/panlichen/work2/nccl-tests
 export LD_LIBRARY_PATH=/home/panlichen/work2/ofccl/build/lib
 export NCCL_PROTO=Simple
 export NCCL_ALGO=Ring
-export NCCL_MAX_NCHANNELS=1
-export NCCL_MIN_NCHANNELS=1
-export NCCL_NTHREADS=64
+# export NCCL_MAX_NCHANNELS=1
+# export NCCL_MIN_NCHANNELS=1
+# export NCCL_NTHREADS=64
 
 export CHECK=0
 
@@ -40,10 +43,11 @@ if [ "$BINARY" == "DEBUG" ];then
     export MY_NUM_DEV=8
     # export CUDA_VISIBLE_DEVICES=0,1,4,5
     export SHOW_ALL_PREPARED_COLL=1
-    export NITER=4
+    export NITER=10
     export NBYTES=1G
-    export WARMITER=2
+    export WARMITER=0
     export MITER=4
+    export CHECK=0
 elif [ "$BINARY" == "PERF" ];then
     target="./build/ofccl_all_reduce_perf"
     export MY_NUM_DEV=8
@@ -67,12 +71,14 @@ fi
 
 if [ -z $RUN_TYPE ];then
     RUN_TYPE="PURE"
+    # RUN_TYPE="GDB"
 fi
 
 if [ "$RUN_TYPE" == "PURE" ];then
     cmd="$target -b $NBYTES -e $NBYTES -f 2 -t $MY_NUM_DEV -g 1 -n $NITER -w $WARMITER -c $CHECK -M $MITER"
 elif [ "$RUN_TYPE" == "GDB" ];then
     cmd="cuda-gdb $target"
+    # set args -b 8M -e 8M -f 2 -t 2 -g 1 -n 1 -w 0 -c 0
 elif [ "$RUN_TYPE" == "NSYS" ];then
     cmd="nsys profile -f true --trace=cuda,cudnn,cublas,osrt,nvtx -o /home/panlichen/work2/ofccl/log/nsys/$NSYS_FILE $target -b 64M -e 64M -f 2 -t $MY_NUM_DEV -g 1 -n 1 -w 0 -c 0"
 fi
