@@ -16,7 +16,8 @@ export CHECK=0
 export TRAVERSE_TIMES=10
 export TOLERANT_UNPROGRESSED_CNT=10000
 export BASE_CTX_SWITCH_THRESHOLD=80
-export BOUNS_SWITCH_4_PROCESSED_COLL=100
+export BOUNS_SWITCH_4_PROCESSED_COLL=0
+export DEV_TRY_ROUND=10
 
 # export ENABLE_VQ=1
 # export TOLERANT_FAIL_CHECK_SQ_CNT=5000
@@ -26,6 +27,7 @@ echo TRAVERSE_TIMES=$TRAVERSE_TIMES
 echo TOLERANT_UNPROGRESSED_CNT=$TOLERANT_UNPROGRESSED_CNT
 echo BASE_CTX_SWITCH_THRESHOLD=$BASE_CTX_SWITCH_THRESHOLD
 echo BOUNS_SWITCH_4_PROCESSED_COLL=$BOUNS_SWITCH_4_PROCESSED_COLL
+echo DEV_TRY_ROUND=$DEV_TRY_ROUND
 
 if [ ! -z $BINARY ];then
     echo TOLERANT_FAIL_CHECK_SQ_CNT=$TOLERANT_FAIL_CHECK_SQ_CNT
@@ -40,13 +42,13 @@ fi
 
 if [ "$BINARY" == "DEBUG" ];then
     target="./build/ofccl_all_reduce_perf"
-    export MY_NUM_DEV=8
+    export MY_NUM_DEV=2
     # export CUDA_VISIBLE_DEVICES=0,1,4,5
     export SHOW_ALL_PREPARED_COLL=1
-    export NITER=10
-    export NBYTES=1G
+    export NITER=1
+    export NBYTES=1M
     export WARMITER=0
-    export MITER=4
+    export MITER=1
     export CHECK=0
 elif [ "$BINARY" == "PERF" ];then
     target="./build/ofccl_all_reduce_perf"
