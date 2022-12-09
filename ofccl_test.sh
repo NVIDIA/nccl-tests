@@ -7,9 +7,9 @@ cd /home/panlichen/work2/nccl-tests
 export LD_LIBRARY_PATH=/home/panlichen/work2/ofccl/build/lib
 export NCCL_PROTO=Simple
 export NCCL_ALGO=Ring
-# export NCCL_MAX_NCHANNELS=1
-# export NCCL_MIN_NCHANNELS=1
-# export NCCL_NTHREADS=64
+export NCCL_MAX_NCHANNELS=1
+export NCCL_MIN_NCHANNELS=1
+export NCCL_NTHREADS=64
 
 export CHECK=0
 
@@ -36,19 +36,19 @@ fi
 
 if [ -z $BINARY ];then
     BINARY="DEBUG"
-    BINARY="MS"
+    # BINARY="MS"
     # BINARY="PERF"
 fi
 
 if [ "$BINARY" == "DEBUG" ];then
     target="./build/ofccl_all_reduce_perf"
-    export MY_NUM_DEV=2
+    export MY_NUM_DEV=8
     # export CUDA_VISIBLE_DEVICES=0,1,4,5
-    export SHOW_ALL_PREPARED_COLL=1
-    export NITER=1
-    export NBYTES=1M
+    export SHOW_ALL_PREPARED_COLL=0
+    export NITER=40
+    export NBYTES=128M
     export WARMITER=0
-    export MITER=1
+    export MITER=2
     export CHECK=0
 elif [ "$BINARY" == "PERF" ];then
     target="./build/ofccl_all_reduce_perf"
@@ -86,5 +86,5 @@ elif [ "$RUN_TYPE" == "NSYS" ];then
 fi
 
 echo cmd=$cmd
-$cmd #> /home/panlichen/work2/ofccl/log/ofccl.log
+$cmd > /home/panlichen/work2/ofccl/log/ofccl.log
 
