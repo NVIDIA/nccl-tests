@@ -853,7 +853,7 @@ testResult_t run() {
   MPI_Comm_size(MPI_COMM_WORLD, &totalProcs);
   MPI_Comm_rank(MPI_COMM_WORLD, &proc);
   uint64_t hostHashs[totalProcs];
-  hostHashs[proc] = getHostHash(hostname);
+  hostHashs[proc] = getHostHash();
   MPI_Allgather(MPI_IN_PLACE, 0, MPI_DATATYPE_NULL, hostHashs, sizeof(uint64_t), MPI_BYTE, MPI_COMM_WORLD);
   for (int p=0; p<totalProcs; p++) {
     if (p == proc) break;

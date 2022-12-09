@@ -173,14 +173,64 @@ static void getHostName(char* hostname, int maxlen) {
 
 #include <stdint.h>
 
-static uint64_t getHostHash(const char* string) {
-  // Based on DJB2, result = result * 33 + char
+
+static void getHostName(char* hostname, int maxlen, const char delim) {
+  if (gethostname(hostname, maxlen) != 0) {
+    strncpy(hostname, "unknown", maxlen);
+    return;
+  }
+  int i = 0;
+  while ((hostname[i] != delim) && (hostname[i] != '\0') && (i < maxlen-1)) i++;
+  hostname[i] = '\0';
+  return;
+}
+
+static uint64_t getHash(const char* string, int n) {
+  // Based on DJB2a, result = result * 33 ^ char
   uint64_t result = 5381;
-  for (int c = 0; string[c] != '\0'; c++){
-    result = ((result << 5) + result) + string[c];
+  for (int c = 0; c < n; c++) {
+    result = ((result << 5) + result) ^ string[c];
   }
   return result;
 }
+
+/* Generate a hash of the unique identifying string for this host
+ * that will be unique for both bare-metal and container instances
+ * Equivalent of a hash of;
+ *
+ * $(hostname)$(cat /proc/sys/kernel/random/boot_id)
+ *
+ * This string can be overridden by using the NCCL_HOSTID env var.
+ */
+#define HOSTID_FILE "/proc/sys/kernel/random/boot_id"
+static uint64_t getHostHash(void) {
+  char hostHash[1024];
+  char *hostId;
+
+  // Fall back is the full hostname if something fails
+  (void) getHostName(hostHash, sizeof(hostHash), '\0');
+  int offset = strlen(hostHash);
+
+  if ((hostId = getenv("NCCL_HOSTID")) != NULL) {
+    strncpy(hostHash, hostId, sizeof(hostHash));
+  } else {
+    FILE *file = fopen(HOSTID_FILE, "r");
+    if (file != NULL) {
+      char *p;
+      if (fscanf(file, "%ms", &p) == 1) {
+        strncpy(hostHash+offset, p, sizeof(hostHash)-offset-1);
+        free(p);
+      }
+    }
+    fclose(file);
+  }
+
+  // Make sure the string is terminated
+  hostHash[sizeof(hostHash)-1]='\0';
+
+  return getHash(hostHash, strlen(hostHash));
+}
+
 
 static size_t wordSize(ncclDataType_t type) {
   switch(type) {
