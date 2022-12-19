@@ -16,6 +16,8 @@
 #include <pthread.h>
 #include "nccl1_compat.h"
 
+#define OFTEST_LOG(PRE, FMT, args...) printf("(testlog) [%s:%d] <%s> " #PRE " " FMT "\n", __FILE__, __LINE__, __func__, args)
+
 #define CUDACHECK(cmd) do {                         \
   cudaError_t err = cmd;                            \
   if( err != cudaSuccess ) {                        \

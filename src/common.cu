@@ -652,6 +652,9 @@ testResult_t BenchTime(struct threadArgs* args, ncclDataType_t type, ncclRedOp_t
   double deltaSec = std::chrono::duration_cast<std::chrono::duration<double>>(delta).count();
   deltaSec = deltaSec/(iters*agg_iters);
   if (cudaGraphLaunches >= 1) deltaSec = deltaSec/cudaGraphLaunches;
+  // int cudaDev;
+  // cudaGetDevice(&cudaDev);
+  // OFTEST_LOG(TEST, "Rank<%d>, time = %lfus", cudaDev, deltaSec * 1.0E6);
   Allreduce(args, &deltaSec, average);
 
 #if CUDART_VERSION >= 11030
@@ -673,6 +676,50 @@ testResult_t BenchTime(struct threadArgs* args, ncclDataType_t type, ncclRedOp_t
   static __thread int rep = 0;
   rep++;
   if (datacheck) {
+      // Initialize sendbuffs, recvbuffs and expected
+      TESTCHECK(args->collTest->initData(args, type, op, root, rep, in_place));
+
+#if CUDART_VERSION >= 11030
+      if (cudaGraphLaunches >= 1) {
+        // Begin cuda graph capture for data check
+        for (int i=0; i<args->nGpus; i++) {
+          CUDACHECK(cudaStreamBeginCapture(args->streams[i], args->nThreads > 1 ? cudaStreamCaptureModeThreadLocal : cudaStreamCaptureModeGlobal));
+        }
+      }
+#endif
+
+      //test validation in single itertion, should ideally be included into the multi-iteration run
+      TESTCHECK(startColl(args, type, op, root, in_place, 0));
+
+#if CUDART_VERSION >= 11030
+      if (cudaGraphLaunches >= 1) {
+        // End cuda graph capture
+        for (int i=0; i<args->nGpus; i++) {
+          CUDACHECK(cudaStreamEndCapture(args->streams[i], graphs+i));
+        }
+        // Instantiate cuda graph
+        for (int i=0; i<args->nGpus; i++) {
+          CUDACHECK(cudaGraphInstantiate(graphExec+i, graphs[i], NULL, NULL, 0));
+        }
+        // Launch cuda graph
+        for (int i=0; i<args->nGpus; i++) {
+          CUDACHECK(cudaGraphLaunch(graphExec[i], args->streams[i]));
+        }
+      }
+#endif
+
+      TESTCHECK(completeColl(args));
+
+#if CUDART_VERSION >= 11030
+      if (cudaGraphLaunches >= 1) {
+        //destroy cuda graph
+        for (int i=0; i<args->nGpus; i++) {
+          CUDACHECK(cudaGraphExecDestroy(graphExec[i]));
+          CUDACHECK(cudaGraphDestroy(graphs[i]));
+        }
+      }
+#endif
+
       TESTCHECK(CheckData(args, type, op, root, in_place, &maxDelta));
 
       //aggregate delta from all threads and procs
@@ -733,8 +780,7 @@ testResult_t TimeTest(struct threadArgs* args, ncclDataType_t type, const char* 
       setupArgs(size, type, args);
       print_line_header(max(args->sendBytes, args->expectedBytes), args->nbytes / wordSize(type), typeName, opName, root);
       TESTCHECK(BenchTime(args, type, op, root, 0));
-      // TODO: 实测是否恢复？
-      // TESTCHECK(BenchTime(args, type, op, root, 1));
+      TESTCHECK(BenchTime(args, type, op, root, 1));
       PRINT("\n");
   }
   return testSuccess;

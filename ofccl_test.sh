@@ -59,6 +59,7 @@ elif [ "$BINARY" == "PERF" ];then
     export NBYTES=8K
     export WARMITER=2
     export MITER=4
+    export CHECK=0
 elif [ "$BINARY" == "MS" ];then
     target="./build/ofccl_all_reduce_ms_perf"
     export MY_NUM_DEV=8
@@ -68,6 +69,7 @@ elif [ "$BINARY" == "MS" ];then
     export WARMITER=0
     export NBYTES=8K
     export MITER=4
+    export CHECK=0
 fi
 
 export NSYS_FILE="ofccl"

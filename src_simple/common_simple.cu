@@ -822,9 +822,13 @@ testResult_t BenchTime(struct threadArgs *args, ncclDataType_t type, ncclRedOp_t
   auto delta = std::chrono::high_resolution_clock::now() - start;
   double deltaSec =
       std::chrono::duration_cast<std::chrono::duration<double>>(delta).count();
-  deltaSec = deltaSec / (iters * agg_iters *multi_iters);
+  deltaSec = deltaSec / (iters * multi_iters);
   if (cudaGraphLaunches >= 1)
     deltaSec = deltaSec / cudaGraphLaunches;
+  // int cudaDev;
+  // cudaGetDevice(&cudaDev);
+  // OFTEST_LOG(TEST, "Rank<%d>, time = %lfus, iters * multi_iters = %d", cudaDev, deltaSec * 1.0E6, iters * multi_iters);
+
   Allreduce(args, &deltaSec, average);
 
   double algBw, busBw;
