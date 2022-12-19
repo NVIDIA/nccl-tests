@@ -19,7 +19,7 @@
 
 // #define DEBUG_PRINT 1
 
-// #define FULL_MS 1
+#define FULL_MS 1
 
 #ifdef FULL_MS
   #define MULTI_ITERS 161

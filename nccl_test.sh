@@ -1,8 +1,5 @@
 clear
 
-export DEBUG_CC=0
-export DEBUG_ENQ=0
-
 cd /home/panlichen/work2/nccl-tests
 export LD_LIBRARY_PATH=/home/panlichen/work2/ofccl/build/lib
 export NCCL_PROTO=Simple
@@ -11,47 +8,24 @@ export NCCL_ALGO=Ring
 # export NCCL_MIN_NCHANNELS=1
 # export NCCL_NTHREADS=64
 
-export CHECK=0
-
-export TRAVERSE_TIMES=10
-export TOLERANT_UNPROGRESSED_CNT=10000
-export BASE_CTX_SWITCH_THRESHOLD=80
-export BOUNS_SWITCH_4_PROCESSED_COLL=0
-export DEV_TRY_ROUND=10
-
-# export ENABLE_VQ=1 # volunteer quit
-# export TOLERANT_FAIL_CHECK_SQ_CNT=5000
-# export CNT_BEFORE_QUIT=5
-
-echo TRAVERSE_TIMES=$TRAVERSE_TIMES
-echo TOLERANT_UNPROGRESSED_CNT=$TOLERANT_UNPROGRESSED_CNT
-echo BASE_CTX_SWITCH_THRESHOLD=$BASE_CTX_SWITCH_THRESHOLD
-echo BOUNS_SWITCH_4_PROCESSED_COLL=$BOUNS_SWITCH_4_PROCESSED_COLL
-echo DEV_TRY_ROUND=$DEV_TRY_ROUND
-
-if [ ! -z $ENABLE_VQ ];then
-    echo TOLERANT_FAIL_CHECK_SQ_CNT=$TOLERANT_FAIL_CHECK_SQ_CNT
-    echo CNT_BEFORE_QUIT=$CNT_BEFORE_QUIT
-fi
-
 if [ -z $BINARY ];then
-    BINARY="DEBUG"
-    BINARY="MS"
+    # BINARY="DEBUG"
+    # BINARY="MS"
     BINARY="PERF"
 fi
 
 if [ "$BINARY" == "DEBUG" ];then
-    target="./build/ofccl_all_reduce_perf"
     export MY_NUM_DEV=8
-    # export CUDA_VISIBLE_DEVICES=0,1,4,5
-    export SHOW_ALL_PREPARED_COLL=0
-    export NITER=40
-    export NBYTES=128M
-    export WARMITER=0
-    export MITER=2
-    export CHECK=0
+    # target="./build/ofccl_all_reduce_perf"
+    # # export CUDA_VISIBLE_DEVICES=0,1,4,5
+    # export SHOW_ALL_PREPARED_COLL=0
+    # export NITER=40
+    # export NBYTES=128M
+    # export WARMITER=0
+    # export MITER=2
+    # export CHECK=0
 elif [ "$BINARY" == "PERF" ];then
-    target="./build/ofccl_all_reduce_perf"
+    target="./build/all_reduce_perf"
     export MY_NUM_DEV=8
     # export CUDA_VISIBLE_DEVICES=0,1,4,5
     export SHOW_ALL_PREPARED_COLL=0
@@ -60,18 +34,18 @@ elif [ "$BINARY" == "PERF" ];then
     export WARMITER=2
     export MITER=4
 elif [ "$BINARY" == "MS" ];then
-    target="./build/ofccl_all_reduce_ms_perf"
     export MY_NUM_DEV=8
-    # export CUDA_VISIBLE_DEVICES=0,1,4,5
-    export NITER=200
-    export SHOW_ALL_PREPARED_COLL=1
-    export WARMITER=0
-    export NBYTES=8K
-    export MITER=4
+    # target="./build/ofccl_all_reduce_ms_perf"
+    # # export CUDA_VISIBLE_DEVICES=0,1,4,5
+    # export NITER=200
+    # export SHOW_ALL_PREPARED_COLL=1
+    # export WARMITER=0
+    # export NBYTES=8K
+    # export MITER=4
 fi
 
-export NSYS_FILE="ofccl"
-export NCU_FILE="ofccl"
+export NSYS_FILE="nccl"
+export NCU_FILE="nccl"
 
 if [ -z $RUN_TYPE ];then
     RUN_TYPE="PURE"
