@@ -9,21 +9,21 @@ export NCCL_ALGO=Ring
 # export NCCL_NTHREADS=64
 
 if [ -z $BINARY ];then
-    # BINARY="DEBUG"
+    BINARY="DEBUG"
     # BINARY="MS"
-    BINARY="PERF"
+    # BINARY="PERF"
 fi
 
 if [ "$BINARY" == "DEBUG" ];then
+    target="./build/all_reduce_perf"
     export MY_NUM_DEV=8
-    # target="./build/ofccl_all_reduce_perf"
-    # # export CUDA_VISIBLE_DEVICES=0,1,4,5
-    # export SHOW_ALL_PREPARED_COLL=0
-    # export NITER=40
-    # export NBYTES=128M
-    # export WARMITER=0
-    # export MITER=2
-    # export CHECK=0
+    # export CUDA_VISIBLE_DEVICES=0,1,4,5
+    export SHOW_ALL_PREPARED_COLL=0
+    export NITER=16
+    export NBYTES=8K
+    export WARMITER=2
+    export MITER=1
+    export CHECK=0
 elif [ "$BINARY" == "PERF" ];then
     target="./build/all_reduce_perf"
     export MY_NUM_DEV=8

@@ -36,29 +36,29 @@ fi
 
 if [ -z $BINARY ];then
     BINARY="DEBUG"
-    BINARY="MS"
-    BINARY="PERF"
+    # BINARY="MS"
+    # BINARY="PERF"
 fi
 
 if [ "$BINARY" == "DEBUG" ];then
     target="./build/ofccl_all_reduce_perf"
-    export MY_NUM_DEV=8
+    export MY_NUM_DEV=2
     # export CUDA_VISIBLE_DEVICES=0,1,4,5
     export SHOW_ALL_PREPARED_COLL=0
-    export NITER=40
-    export NBYTES=128M
-    export WARMITER=0
-    export MITER=2
+    export NITER=16
+    export NBYTES=8K
+    export WARMITER=2
+    export MITER=1
     export CHECK=0
 elif [ "$BINARY" == "PERF" ];then
     target="./build/ofccl_all_reduce_perf"
     export MY_NUM_DEV=8
     # export CUDA_VISIBLE_DEVICES=0,1,4,5
     export SHOW_ALL_PREPARED_COLL=0
-    export NITER=4
+    export NITER=1
     export NBYTES=8K
     export WARMITER=2
-    export MITER=4
+    export MITER=16
     export CHECK=0
 elif [ "$BINARY" == "MS" ];then
     target="./build/ofccl_all_reduce_ms_perf"

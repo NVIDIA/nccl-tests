@@ -6,3 +6,5 @@
 .clangd
 
 .vscode
+
+test_result*/
