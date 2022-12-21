@@ -3,6 +3,7 @@ export NCCL_PROTO=Simple
 export NCCL_ALGO=Ring
 
 export DATE=221221
+export NCCL_ORDER=1
 
 for MY_NUM_DEV in 2 4 8
 do
@@ -10,12 +11,12 @@ do
     if [ $MY_NUM_DEV = 4 ]; then
         export CUDA_VISIBLE_DEVICES=0,1,4,5
     fi
-    export RES_DIR=test_result_${DATE}_${MY_NUM_DEV}cards
+    export RES_DIR=test_result_${DATE}_${NCCL_ORDER}_${MY_NUM_DEV}cards
     if [ ! -d "$RES_DIR" ]; then 
         mkdir $RES_DIR
     fi
 
-    for n in 16
+    for n in 32
     do
         for w in  2 
         do
@@ -26,7 +27,7 @@ do
                 export RES_PATH="./$RES_DIR/nccl_result_"$iter"_n"$n"_w"$w"_m"$m".txt"
                 ## Time
                 echo $(date +%F%n%T)>> $RES_PATH
-                    for a in 64 128 256 512 1K 2K 4K 8K 16K 32K 64K 128K 256K 512K 1M 2M 4M 8M #16M 32M 64M 128M 256M 512M 1G
+                    for a in 64 128 256 512 1K 2K 4K 8K 16K 32K 64K 128K 256K 512K 1M 2M 4M 8M 16M #32M 64M 128M 256M 512M 1G
                     do
                     ## Test
                     /home/panlichen/work2/nccl-tests/build/all_reduce_perf -b $a -e $a -f 2 -t $MY_NUM_DEV -g 1 -n $n -w $w -c 0 -m $m >> $RES_PATH
