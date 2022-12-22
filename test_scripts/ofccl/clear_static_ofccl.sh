@@ -11,7 +11,7 @@ do
   export OUTPUT_TIME_PATH="./$RES_DIR/result_statics_ofccl_"$cards"cards_time.txt" 
   echo  $(date +%F%n%T)>>$OUTPUT_BW_PATH
   echo  $(date +%F%n%T)>>$OUTPUT_TIME_PATH
-  for n in 32
+  for n in 8
   do
     for w in  2 
     do
