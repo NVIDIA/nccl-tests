@@ -811,10 +811,17 @@ testResult_t BenchTime(struct threadArgs *args, ncclDataType_t type, ncclRedOp_t
   Barrier(args);
 
   // Performance Benchmark
-  auto start = std::chrono::high_resolution_clock::now();
+  #ifdef NEW_TIMER
+    double deltaSec = 0.0;
+  #else
+    auto start = std::chrono::high_resolution_clock::now();
+  #endif
+
   for (int iter = 0; iter < iters; iter++) {
 
-    auto iter_start = std::chrono::high_resolution_clock::now();
+    #ifdef NEW_TIMER
+      auto iter_start = std::chrono::high_resolution_clock::now();
+    #endif
 
     for (int miter = 0; miter < multi_iters; miter++) {
       seenCqe[miter] = 0;
@@ -823,21 +830,29 @@ testResult_t BenchTime(struct threadArgs *args, ncclDataType_t type, ncclRedOp_t
     }
 
     TESTCHECK(completeColl(args));
+    
+    #ifdef NEW_TIMER
+      auto iter_delta = std::chrono::high_resolution_clock::now() - iter_start;
+      double iter_deltaSec = std::chrono::duration_cast<std::chrono::duration<double>>(iter_delta).count();
+      
+      int cudaDev;
+      cudaGetDevice(&cudaDev);
+      // OFTEST_LOG(TEST, "<%lu> Rank<%d>, done %dth BenchTime iter for %d multi_iters", pthread_self(), cudaDev, iter, multi_iters);
+      if (cudaDev == 0)
+        OFTEST_LOG(TEST, "Rank<%d>, iter=%d, time = %lfus", cudaDev, iter, iter_deltaSec * 1.0E6);
+    #endif
 
-    auto iter_delta = std::chrono::high_resolution_clock::now() - iter_start;
-    double iter_deltaSec =
-      std::chrono::duration_cast<std::chrono::duration<double>>(iter_delta).count();
-
-    int cudaDev;
-    cudaGetDevice(&cudaDev);
-    // OFTEST_LOG(TEST, "<%lu> Rank<%d>, done %dth BenchTime iter for %d multi_iters", pthread_self(), cudaDev, iter, multi_iters);
-    if (cudaDev == 0)
-      OFTEST_LOG(TEST, "Rank<%d>, iter=%d, time = %lfus", cudaDev, iter, iter_deltaSec * 1.0E6);
+    #ifdef NEW_TIMER
+      deltaSec += iter_deltaSec;
+    #endif
   }
 
-  auto delta = std::chrono::high_resolution_clock::now() - start;
-  double deltaSec =
-      std::chrono::duration_cast<std::chrono::duration<double>>(delta).count();
+  #ifndef NEW_TIMER
+    auto delta = std::chrono::high_resolution_clock::now() - start;
+    double deltaSec =
+        std::chrono::duration_cast<std::chrono::duration<double>>(delta).count();
+  #endif
+
   deltaSec = deltaSec / (iters * multi_iters);
   if (cudaGraphLaunches >= 1)
     deltaSec = deltaSec / cudaGraphLaunches;
