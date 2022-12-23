@@ -800,11 +800,21 @@ testResult_t BenchTime(struct threadArgs *args, ncclDataType_t type, ncclRedOp_t
 
   size_t count = args->nbytes / wordSize(type);
 
+  // Sync，参考nccl，把这个也加上吧。
+  for (int miter = 0; miter < multi_iters; miter++) {
+    seenCqe[miter] = 0;
+    TESTCHECK(startColl(args, type, op, root, in_place,
+                        0 * multi_iters + miter, miter, rankCtx));
+  }
+  TESTCHECK(completeColl(args));
+
   Barrier(args);
 
   // Performance Benchmark
   auto start = std::chrono::high_resolution_clock::now();
   for (int iter = 0; iter < iters; iter++) {
+
+    auto iter_start = std::chrono::high_resolution_clock::now();
 
     for (int miter = 0; miter < multi_iters; miter++) {
       seenCqe[miter] = 0;
@@ -814,9 +824,15 @@ testResult_t BenchTime(struct threadArgs *args, ncclDataType_t type, ncclRedOp_t
 
     TESTCHECK(completeColl(args));
 
-    // int cudaDev;
-    // cudaGetDevice(&cudaDev);
+    auto iter_delta = std::chrono::high_resolution_clock::now() - iter_start;
+    double iter_deltaSec =
+      std::chrono::duration_cast<std::chrono::duration<double>>(iter_delta).count();
+
+    int cudaDev;
+    cudaGetDevice(&cudaDev);
     // OFTEST_LOG(TEST, "<%lu> Rank<%d>, done %dth BenchTime iter for %d multi_iters", pthread_self(), cudaDev, iter, multi_iters);
+    if (cudaDev == 0)
+      OFTEST_LOG(TEST, "Rank<%d>, iter=%d, time = %lfus", cudaDev, iter, iter_deltaSec * 1.0E6);
   }
 
   auto delta = std::chrono::high_resolution_clock::now() - start;
@@ -825,9 +841,10 @@ testResult_t BenchTime(struct threadArgs *args, ncclDataType_t type, ncclRedOp_t
   deltaSec = deltaSec / (iters * multi_iters);
   if (cudaGraphLaunches >= 1)
     deltaSec = deltaSec / cudaGraphLaunches;
-  // int cudaDev;
-  // cudaGetDevice(&cudaDev);
-  // OFTEST_LOG(TEST, "Rank<%d>, time = %lfus, iters * multi_iters = %d", cudaDev, deltaSec * 1.0E6, iters * multi_iters);
+  int cudaDev;
+  cudaGetDevice(&cudaDev);
+  if (cudaDev == 0)
+    OFTEST_LOG(TEST, "Rank<%d>, time = %lfus, iters * multi_iters = %d", cudaDev, deltaSec * 1.0E6, iters * multi_iters);
 
   Allreduce(args, &deltaSec, average);
 

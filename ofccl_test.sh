@@ -45,7 +45,7 @@ if [ "$BINARY" == "DEBUG" ];then
     export MY_NUM_DEV=8
     # export CUDA_VISIBLE_DEVICES=0,1,4,5
     export SHOW_ALL_PREPARED_COLL=0
-    export NITER=8
+    export NITER=5
     export NBYTES=8K
     export WARMITER=2
     export MITER=1
@@ -55,10 +55,10 @@ elif [ "$BINARY" == "PERF" ];then
     export MY_NUM_DEV=8
     # export CUDA_VISIBLE_DEVICES=0,1,4,5
     export SHOW_ALL_PREPARED_COLL=0
-    export NITER=1
+    export NITER=8
     export NBYTES=8K
     export WARMITER=2
-    export MITER=16
+    export MITER=1
     export CHECK=0
 elif [ "$BINARY" == "MS" ];then
     target="./build/ofccl_all_reduce_ms_perf"
