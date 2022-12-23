@@ -8,3 +8,5 @@
 .vscode
 
 test_result*/
+*.xls
+*.out
