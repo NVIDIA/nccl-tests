@@ -42,18 +42,22 @@ fi
 
 if [ "$BINARY" == "DEBUG" ];then
     target="./build/ofccl_all_reduce_perf"
-    export MY_NUM_DEV=8
-    # export CUDA_VISIBLE_DEVICES=0,1,4,5
+    export MY_NUM_DEV=4
+    if [ $MY_NUM_DEV = 4 ]; then
+        export CUDA_VISIBLE_DEVICES=0,1,4,5
+    fi
     export SHOW_ALL_PREPARED_COLL=0
     export NITER=5
-    export NBYTES=8K
+    export NBYTES=256
     export WARMITER=2
     export MITER=1
     export CHECK=0
 elif [ "$BINARY" == "PERF" ];then
     target="./build/ofccl_all_reduce_perf"
     export MY_NUM_DEV=8
-    # export CUDA_VISIBLE_DEVICES=0,1,4,5
+    if [ $MY_NUM_DEV = 4 ]; then
+        export CUDA_VISIBLE_DEVICES=0,1,4,5
+    fi
     export SHOW_ALL_PREPARED_COLL=0
     export NITER=8
     export NBYTES=8K
@@ -63,7 +67,9 @@ elif [ "$BINARY" == "PERF" ];then
 elif [ "$BINARY" == "MS" ];then
     target="./build/ofccl_all_reduce_ms_perf"
     export MY_NUM_DEV=8
-    # export CUDA_VISIBLE_DEVICES=0,1,4,5
+    if [ $MY_NUM_DEV = 4 ]; then
+        export CUDA_VISIBLE_DEVICES=0,1,4,5
+    fi
     export NITER=200
     export SHOW_ALL_PREPARED_COLL=1
     export WARMITER=0
