@@ -42,28 +42,34 @@ fi
 
 if [ "$BINARY" == "DEBUG" ];then
     target="./build/ofccl_all_reduce_perf"
-    export MY_NUM_DEV=8
-    # export CUDA_VISIBLE_DEVICES=0,1,4,5
+    export MY_NUM_DEV=4
+    if [ $MY_NUM_DEV = 4 ]; then
+        export CUDA_VISIBLE_DEVICES=0,1,4,5
+    fi
     export SHOW_ALL_PREPARED_COLL=0
-    export NITER=8
-    export NBYTES=128K
+    export NITER=5
+    export NBYTES=256
     export WARMITER=2
     export MITER=1
     export CHECK=0
 elif [ "$BINARY" == "PERF" ];then
     target="./build/ofccl_all_reduce_perf"
     export MY_NUM_DEV=8
-    # export CUDA_VISIBLE_DEVICES=0,1,4,5
+    if [ $MY_NUM_DEV = 4 ]; then
+        export CUDA_VISIBLE_DEVICES=0,1,4,5
+    fi
     export SHOW_ALL_PREPARED_COLL=0
-    export NITER=1
+    export NITER=8
     export NBYTES=8K
     export WARMITER=2
-    export MITER=16
+    export MITER=1
     export CHECK=0
 elif [ "$BINARY" == "MS" ];then
     target="./build/ofccl_all_reduce_ms_perf"
     export MY_NUM_DEV=8
-    # export CUDA_VISIBLE_DEVICES=0,1,4,5
+    if [ $MY_NUM_DEV = 4 ]; then
+        export CUDA_VISIBLE_DEVICES=0,1,4,5
+    fi
     export NITER=200
     export SHOW_ALL_PREPARED_COLL=1
     export WARMITER=0
@@ -95,5 +101,5 @@ elif [ "$RUN_TYPE" == "NCU" ];then
 fi
 
 echo cmd=$cmd
-$cmd #> /home/panlichen/work2/ofccl/log/ofccl-2ms-coll-master.log
+$cmd #> /home/panlichen/work2/ofccl/log/ofccl.log
 

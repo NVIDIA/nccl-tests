@@ -166,11 +166,10 @@ testResult_t AllReduceRunTest(struct threadArgs* args, int root, ncclDataType_t 
   return testSuccess;
 }
 
-
-
-#pragma weak ncclTestEngine=allReduceEngine
 struct testEngine allReduceEngine = {
   AllReduceGetBuffSize,
   AllReduceRunTest,
   AllReduceGetCollByteCountList
 };
+
+#pragma weak ncclTestEngine=allReduceEngine

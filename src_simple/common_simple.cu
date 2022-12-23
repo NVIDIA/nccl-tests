@@ -103,6 +103,28 @@ static int average = 1;
 static thread_local CallBackArgs cbArgList[MAX_COLL_NUM];
 static thread_local int seenCqe[MAX_COLL_NUM];
 
+// bool StringToInteger(const std::string& str, int64_t* value) {
+//   char* end;
+//   int64_t v = std::strtoll(str.data(), &end, 10);
+//   if (end == str.data()) {
+//     return false;
+//   } else {
+//     *value = v;
+//     return true;
+//   }
+// }
+
+// static int64_t ParseIntegerFromEnv(const std::string& env_var, int64_t default_value) {
+//   const char* env_p = std::getenv(env_var.c_str());
+//   if (env_p == nullptr) { return default_value; }
+//   int64_t value;
+//   if (StringToInteger(env_p, &value)) {
+//     return value;
+//   } else {
+//     return default_value;
+//   }
+// }
+
 static double parsesize(const char *value) {
   long long int units;
   double size;
@@ -800,11 +822,31 @@ testResult_t BenchTime(struct threadArgs *args, ncclDataType_t type, ncclRedOp_t
 
   size_t count = args->nbytes / wordSize(type);
 
+  // Sync，参考nccl，把这个也加上吧。
+  for (int miter = 0; miter < multi_iters; miter++) {
+    seenCqe[miter] = 0;
+    TESTCHECK(startColl(args, type, op, root, in_place,
+                        0 * multi_iters + miter, miter, rankCtx));
+  }
+  TESTCHECK(completeColl(args));
+
   Barrier(args);
 
+  // int64_t NEW_TIMER = ParseIntegerFromEnv("NEW_TIMER", 0);
+  // int64_t SHOW_ITER_TIME = ParseIntegerFromEnv("SHOW_ITER_TIME", 0);
+
   // Performance Benchmark
-  auto start = std::chrono::high_resolution_clock::now();
+  #ifdef NEW_TIMER
+    double deltaSec = 0.0;
+  #else
+    auto start = std::chrono::high_resolution_clock::now();
+  #endif
+
   for (int iter = 0; iter < iters; iter++) {
+
+    #if defined(NEW_TIMER) || defined(SHOW_ITER_TIME)
+      auto iter_start = std::chrono::high_resolution_clock::now();
+    #endif
 
     for (int miter = 0; miter < multi_iters; miter++) {
       seenCqe[miter] = 0;
@@ -813,21 +855,49 @@ testResult_t BenchTime(struct threadArgs *args, ncclDataType_t type, ncclRedOp_t
     }
 
     TESTCHECK(completeColl(args));
+    
+    #if defined(NEW_TIMER) || defined(SHOW_ITER_TIME)
+      auto iter_delta = std::chrono::high_resolution_clock::now() - iter_start;
+      double iter_deltaSec = std::chrono::duration_cast<std::chrono::duration<double>>(iter_delta).count();
+      
+      int cudaDev;
+      cudaGetDevice(&cudaDev);
+      // OFTEST_LOG(TEST, "<%lu> Rank<%d>, done %dth BenchTime iter for %d multi_iters", pthread_self(), cudaDev, iter, multi_iters);
+      if (cudaDev == 0)
+        OFTEST_LOG(TEST, "Rank<%d>, iter=%d, time = %lfus", cudaDev, iter, iter_deltaSec * 1.0E6);
+    #endif
 
-    // int cudaDev;
-    // cudaGetDevice(&cudaDev);
-    // OFTEST_LOG(TEST, "<%lu> Rank<%d>, done %dth BenchTime iter for %d multi_iters", pthread_self(), cudaDev, iter, multi_iters);
+    #ifdef NEW_TIMER
+      deltaSec += iter_deltaSec;
+    #endif
   }
 
-  auto delta = std::chrono::high_resolution_clock::now() - start;
-  double deltaSec =
-      std::chrono::duration_cast<std::chrono::duration<double>>(delta).count();
+  #ifndef NEW_TIMER
+    auto delta = std::chrono::high_resolution_clock::now() - start;
+    double deltaSec =
+        std::chrono::duration_cast<std::chrono::duration<double>>(delta).count();
+  #endif
+
   deltaSec = deltaSec / (iters * multi_iters);
   if (cudaGraphLaunches >= 1)
     deltaSec = deltaSec / cudaGraphLaunches;
-  // int cudaDev;
-  // cudaGetDevice(&cudaDev);
-  // OFTEST_LOG(TEST, "Rank<%d>, time = %lfus, iters * multi_iters = %d", cudaDev, deltaSec * 1.0E6, iters * multi_iters);
+  
+  #ifdef SHOW_AVG_TIME
+    int cudaDev;
+    cudaGetDevice(&cudaDev);
+    if (cudaDev == 0)
+      OFTEST_LOG(TEST, "Rank<%d>, time = %lfus, iters * multi_iters = %d", cudaDev, deltaSec * 1.0E6, iters * multi_iters);
+
+    // int clockRate;
+    // cudaDeviceGetAttribute(&clockRate, cudaDevAttrClockRate, cudaDev);
+    // int memoryClockRate;
+    // cudaDeviceGetAttribute(&memoryClockRate, cudaDevAttrMemoryClockRate, cudaDev);
+    // OFTEST_LOG(TEST, "Rank<%d>, clockRate = %d, memoryClockRate = %d", cudaDev, clockRate, memoryClockRate);
+
+    // cudaDeviceProp prop;
+    // cudaGetDeviceProperties(&prop, cudaDev);
+    // OFTEST_LOG(TEST, "Rank<%d>, prop.clockRate = %d, prop.memoryClockRate = %d", cudaDev, prop.clockRate, prop.memoryClockRate);
+  #endif
 
   Allreduce(args, &deltaSec, average);
 
