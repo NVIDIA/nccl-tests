@@ -5,7 +5,6 @@ int main(int argc,char* argv[]){
     
     freopen(argv[1],"r",stdin);
     freopen(argv[2],"a",stdout);
-    cout << argv[1]<<" ofccl : "<<endl;
     int ranks = *(argv[3]) - '0';
     string str;
     stringstream ss;
@@ -28,10 +27,9 @@ int main(int argc,char* argv[]){
             getline(cin,line);        
         
     }
-    cout<<"ofccl test time:"<<endl;
     for(int i=0;i<a.size();i++)
         cout << a[i] <<endl;
-    cout <<"**********"<<endl;
+
     
     cout<<endl<<endl;
 }
