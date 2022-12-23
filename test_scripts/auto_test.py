@@ -11,13 +11,13 @@ os.environ['NCCL_ALGO'] = "RING"
 # 设置超参数
 # run
 DATE="221222"
-runNcclTest = False # 运行nccl测试
+runNcclTest = True # 运行nccl测试
 collectNcclResult  = True  # 统计nccl测试结果，写入xls
-runOfcclTest = False# 运行ofccl测试
+runOfcclTest = True# 运行ofccl测试
 collectOfcclResult = True # 统计ofccl测试结果，写入xls
 
 NCCL_ORDER="1"
-resultXlsName="result_"+DATA+"_"+NCCL_ORDER+".xls"
+resultXlsName="result_"+DATE+"_"+NCCL_ORDER+".xls"
 n = 2
 m = 3 #nccl
 w = 2
