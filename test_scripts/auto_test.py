@@ -17,12 +17,19 @@ runOfcclTest = True# 运行ofccl测试
 collectOfcclResult = True # 统计ofccl测试结果，写入xls
 
 NCCL_ORDER="1"
-resultXlsName="result_"+DATE+"_"+NCCL_ORDER+".xls"
-n = 2
-m = 3 #nccl
+host=os.environ.get("HOST")
+n = 8
+m = 1 #nccl
 w = 2
-M = 3 #ofccl
-NUM_DEV = 4#设备的卡数，实验用到的卡数写在循环里
+M = 1 #ofccl
+if host=="oneflow-15" or host=="oneflow-16":
+    NUM_DEV = 4#设备的总卡数，实验用到的卡数写在循环里
+    ncards = [2,4]
+else:
+    NUM_DEV = 8
+    ncards = [2,4,8]
+
+resultXlsName=host+"_"+DATE+"_"+NCCL_ORDER+"_M"+m+"_n"+n+"_w"+w+".xls"
 
 # static 
 os.system("g++ ./nccl/static_nccl.cpp -o ./nccl/static_nccl.out")
@@ -36,7 +43,7 @@ table = xlwt.Workbook()
 bwSheet = table.add_sheet('bw')
 tmSheet = table.add_sheet('time')
 cnt  = 0
-for MY_NUM_DEV in [2,4]:
+for MY_NUM_DEV in ncards:
 
     if 'CUDA_VISIBLE_DEVICES' in os.environ:
         del os.environ['CUDA_VISIBLE_DEVICES']
