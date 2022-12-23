@@ -5,12 +5,18 @@ import xlwt
 os.environ['LD_LIBRARY_PATH'] = "/home/panlichen/zrk/work/ofccl/build/lib"
 os.environ['NCCL_PROTO'] = "Simple"
 os.environ['NCCL_ALGO'] = "RING"
+
+os.environ['TRAVERSE_TIMES'] = "10"
+os.environ['TOLERANT_UNPROGRESSED_CNT'] = "10000"
+os.environ['BASE_CTX_SWITCH_THRESHOLD'] = "80"
+os.environ['BOUNS_SWITCH_4_PROCESSED_COLL'] = "0"
+os.environ['DEV_TRY_ROUND'] = "10"
 # test
 # f = os.popen("./nccl/run.sh")
 # print(f.readlines())
 # 设置超参数
 # run
-DATE="221222"
+DATE="221223"
 runNcclTest = True # 运行nccl测试
 collectNcclResult  = True  # 统计nccl测试结果，写入xls
 runOfcclTest = True# 运行ofccl测试
@@ -29,7 +35,7 @@ else:
     NUM_DEV = 8
     ncards = [2,4,8]
 
-resultXlsName=host+"_"+DATE+"_"+NCCL_ORDER+"_M"+m+"_n"+n+"_w"+w+".xls"
+resultXlsName=host+"_"+DATE+"_"+NCCL_ORDER+"_M"+str(m)+"n"+str(n)+"w"+str(w)+".xls"
 
 # static 
 os.system("g++ ./nccl/static_nccl.cpp -o ./nccl/static_nccl.out")
