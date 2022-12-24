@@ -16,13 +16,13 @@ fi
 
 if [ "$BINARY" == "DEBUG" ];then
     target="./build/all_reduce_perf"
-    export MY_NUM_DEV=8
+    export MY_NUM_DEV=2
     if [ $MY_NUM_DEV = 4 ]; then
         export CUDA_VISIBLE_DEVICES=0,1,4,5
     fi
     export SHOW_ALL_PREPARED_COLL=0
     export NITER=8
-    export NBYTES=8K
+    export NBYTES=64
     export WARMITER=2
     export MITER=1
     export CHECK=0

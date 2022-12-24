@@ -7,6 +7,6 @@
 
 .vscode
 
-test_result*/
+*_result*/
 *.xls
 *.out

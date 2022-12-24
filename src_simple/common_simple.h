@@ -20,8 +20,8 @@
 // #define DEBUG_PRINT 1
 
 // #define NEW_TIMER 1
-#define SHOW_ITER_TIME 1
-#define SHOW_AVG_TIME 1
+// #define SHOW_ITER_TIME 1
+// #define SHOW_AVG_TIME 1
 
 #define OFTEST_LOG(PRE, FMT, args...) printf("(testlog) [%s:%d] <%s> " #PRE " " FMT "\n", __FILE__, __LINE__, __func__, args)
 #define OFTEST_LOG1(PRE, FMT) printf("(testlog) [%s:%d] <%s> " #PRE " " FMT "\n", __FILE__, __LINE__, __func__)
