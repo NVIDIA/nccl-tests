@@ -22,7 +22,7 @@ if [ "$BINARY" == "DEBUG" ];then
     fi
     export SHOW_ALL_PREPARED_COLL=0
     export NITER=5
-    export NBYTES=4K
+    export NBYTES=64M
     export WARMITER=2
     export MITER=1
     export CHECK=0

@@ -6,7 +6,7 @@ export NCCL_ALGO=Ring
 # export NCCL_NTHREADS=64
 
 export DATE=221225
-export NCCL_ORDER=2
+export NCCL_ORDER=3
 
 export TRAVERSE_TIMES=10
 export TOLERANT_UNPROGRESSED_CNT=10000
@@ -22,7 +22,7 @@ do
     if [ $MY_NUM_DEV = 4 ]; then
         export CUDA_VISIBLE_DEVICES=0,1,4,5
     fi
-    export RES_DIR=run_result_${DATE}_${NCCL_ORDER}_${MY_NUM_DEV}cards
+    export RES_DIR=result_${DATE}_${NCCL_ORDER}_${MY_NUM_DEV}cards
     if [ ! -d "$RES_DIR" ]; then 
         mkdir $RES_DIR
     fi
