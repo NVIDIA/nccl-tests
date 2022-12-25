@@ -6,7 +6,7 @@ export NCCL_ALGO=Ring
 # export NCCL_NTHREADS=64
 
 export DATE=221225
-export NCCL_ORDER=1
+export NCCL_ORDER=4
 
 for MY_NUM_DEV in 2 4 8
 do

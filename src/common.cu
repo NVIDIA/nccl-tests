@@ -735,11 +735,13 @@ testResult_t BenchTime(struct threadArgs* args, ncclDataType_t type, ncclRedOp_t
   } else {
     sprintf(timeStr, "%7.2f", timeUsec);
   }
-  if (datacheck) {
-     PRINT("  %7s  %6.2f  %6.2f  %5.0le", timeStr, algBw, busBw, maxDelta);
-  } else {
-     PRINT("  %7s  %6.2f  %6.2f  %5s", timeStr, algBw, busBw, "N/A");
-  }
+  #ifndef NCCL_DEBUG_CLOCK
+    if (datacheck) {
+      PRINT("  %7s  %6.2f  %6.2f  %5.0le", timeStr, algBw, busBw, maxDelta);
+    } else {
+      PRINT("  %7s  %6.2f  %6.2f  %5s", timeStr, algBw, busBw, "N/A");
+    }
+  #endif
 
   args->bw[0] += busBw;
   args->bw_count[0]++;
@@ -778,7 +780,10 @@ testResult_t TimeTest(struct threadArgs* args, ncclDataType_t type, const char* 
   // Benchmark
   for (size_t size = args->minbytes; size<=args->maxbytes; size = ((args->stepfactor > 1) ? size*args->stepfactor : size+args->stepbytes)) {
       setupArgs(size, type, args);
-      print_line_header(max(args->sendBytes, args->expectedBytes), args->nbytes / wordSize(type), typeName, opName, root);
+
+      #ifndef NCCL_DEBUG_CLOCK
+        print_line_header(max(args->sendBytes, args->expectedBytes), args->nbytes / wordSize(type), typeName, opName, root);
+      #endif
       TESTCHECK(BenchTime(args, type, op, root, 0));
       // TESTCHECK(BenchTime(args, type, op, root, 1));
       PRINT("\n");
@@ -1030,13 +1035,16 @@ testResult_t run() {
 #endif
   is_main_thread = (proc == 0) ? 1 : 0;
 
-  PRINT("# nThread %d nGpus %d minBytes %ld maxBytes %ld step: %ld(%s) warmup iters: %d iters: %d validation: %d \n", nThreads, nGpus, minBytes, maxBytes,
-      (stepFactor > 1)?stepFactor:stepBytes, (stepFactor > 1)?"factor":"bytes", warmup_iters, iters, datacheck);
-  if (blocking_coll) PRINT("# Blocking Enabled: wait for completion and barrier after each collective \n");
-  if (parallel_init) PRINT("# Parallel Init Enabled: threads call into NcclInitRank concurrently \n");
-  PRINT("#\n");
+  #ifndef NCCL_DEBUG_CLOCK
+    PRINT("# nThread %d nGpus %d minBytes %ld maxBytes %ld step: %ld(%s) warmup iters: %d iters: %d validation: %d \n", nThreads, nGpus, minBytes, maxBytes,
+        (stepFactor > 1)?stepFactor:stepBytes, (stepFactor > 1)?"factor":"bytes", warmup_iters, iters, datacheck);
+    if (blocking_coll) PRINT("# Blocking Enabled: wait for completion and barrier after each collective \n");
+    if (parallel_init) PRINT("# Parallel Init Enabled: threads call into NcclInitRank concurrently \n");
+    PRINT("#\n");
 
-  PRINT("# Using devices\n");
+    PRINT("# Using devices\n");
+  #endif
+
 #define MAX_LINE 2048
   char line[MAX_LINE];
   int len = 0;
@@ -1051,20 +1059,21 @@ testResult_t run() {
     maxMem = std::min(maxMem, prop.totalGlobalMem);
   }
 
-#if MPI_SUPPORT
-  char *lines = (proc == 0) ? (char *)malloc(nProcs*MAX_LINE) : NULL;
-  // Gather all output in rank order to root (0)
-  MPI_Gather(line, MAX_LINE, MPI_BYTE, lines, MAX_LINE, MPI_BYTE, 0, MPI_COMM_WORLD);
-  if (proc == 0) {
-    for (int p = 0; p < nProcs; p++)
-      PRINT("%s", lines+MAX_LINE*p);
-    free(lines);
-  }
-  MPI_Allreduce(MPI_IN_PLACE, &maxMem, 1, MPI_LONG, MPI_MIN, MPI_COMM_WORLD);
-#else
-  PRINT("%s", line);
+#ifndef NCCL_DEBUG_CLOCK
+  #if MPI_SUPPORT
+    char *lines = (proc == 0) ? (char *)malloc(nProcs*MAX_LINE) : NULL;
+    // Gather all output in rank order to root (0)
+    MPI_Gather(line, MAX_LINE, MPI_BYTE, lines, MAX_LINE, MPI_BYTE, 0, MPI_COMM_WORLD);
+    if (proc == 0) {
+      for (int p = 0; p < nProcs; p++)
+        PRINT("%s", lines+MAX_LINE*p);
+      free(lines);
+    }
+    MPI_Allreduce(MPI_IN_PLACE, &maxMem, 1, MPI_LONG, MPI_MIN, MPI_COMM_WORLD);
+  #else
+    PRINT("%s", line);
+  #endif
 #endif
-
   // We need sendbuff, recvbuff, expected (when datacheck enabled), plus 1G for the rest.
   size_t memMaxBytes = (maxMem - (1<<30)) / (datacheck ? 3 : 2);
   if (maxBytes > memMaxBytes) {
@@ -1121,8 +1130,10 @@ testResult_t run() {
     errors[t] = bw_count[t] = 0;
   }
 
-  PRINT("#\n");
-  print_header();
+  #ifndef NCCL_DEBUG_CLOCK
+    PRINT("#\n");
+    print_header();
+  #endif
 
   int* sync = (int*)calloc(2, sizeof(int));
   int* barrier = (int*)calloc(2, sizeof(int));
@@ -1202,9 +1213,14 @@ testResult_t run() {
   double check_avg_bw = str ? atof(str) : -1;
   bw[0] /= bw_count[0];
 
-  PRINT("# Out of bounds values : %d %s\n", errors[0], errors[0] ? "FAILED" : "OK");
-  PRINT("# Avg bus bandwidth    : %g %s\n", bw[0], check_avg_bw == -1 ? "" : (bw[0] < check_avg_bw*(0.9) ? "FAILED" : "OK"));
-  PRINT("#\n");
+  #ifndef NCCL_DEBUG_CLOCK
+    PRINT("# Out of bounds values : %d %s\n", errors[0], errors[0] ? "FAILED" : "OK");
+    PRINT("# Avg bus bandwidth    : %g %s\n", bw[0], check_avg_bw == -1 ? "" : (bw[0] < check_avg_bw*(0.9) ? "FAILED" : "OK"));
+    PRINT("#\n");
+  #else
+    PRINT("\n");
+    PRINT("\n");
+  #endif
 #ifdef MPI_SUPPORT
   MPI_Finalize();
 #endif
