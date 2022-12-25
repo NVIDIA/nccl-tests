@@ -42,13 +42,13 @@ fi
 
 if [ "$BINARY" == "DEBUG" ];then
     target="./build/ofccl_all_reduce_perf"
-    export MY_NUM_DEV=2
+    export MY_NUM_DEV=8
     if [ $MY_NUM_DEV = 4 ]; then
         export CUDA_VISIBLE_DEVICES=0,1,4,5
     fi
     export SHOW_ALL_PREPARED_COLL=0
     export NITER=5
-    export NBYTES=128
+    export NBYTES=64M
     export WARMITER=2
     export MITER=1
     export CHECK=0

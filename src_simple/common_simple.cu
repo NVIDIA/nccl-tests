@@ -886,7 +886,7 @@ testResult_t BenchTime(struct threadArgs *args, ncclDataType_t type, ncclRedOp_t
     int cudaDev;
     cudaGetDevice(&cudaDev);
     if (cudaDev == 0)
-      OFTEST_LOG(TEST, "Rank<%d>, time = %lfus, iters * multi_iters = %d", cudaDev, deltaSec * 1.0E6, iters * multi_iters);
+      OFTEST_LOG(TEST, "Rank<%d>, time = %lf us, iters * multi_iters = %d", cudaDev, deltaSec * 1.0E6, iters * multi_iters);
 
     // int clockRate;
     // cudaDeviceGetAttribute(&clockRate, cudaDevAttrClockRate, cudaDev);

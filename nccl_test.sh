@@ -21,8 +21,8 @@ if [ "$BINARY" == "DEBUG" ];then
         export CUDA_VISIBLE_DEVICES=0,1,4,5
     fi
     export SHOW_ALL_PREPARED_COLL=0
-    export NITER=8
-    export NBYTES=64
+    export NITER=5
+    export NBYTES=4K
     export WARMITER=2
     export MITER=1
     export CHECK=0

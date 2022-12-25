@@ -780,7 +780,7 @@ testResult_t TimeTest(struct threadArgs* args, ncclDataType_t type, const char* 
       setupArgs(size, type, args);
       print_line_header(max(args->sendBytes, args->expectedBytes), args->nbytes / wordSize(type), typeName, opName, root);
       TESTCHECK(BenchTime(args, type, op, root, 0));
-      TESTCHECK(BenchTime(args, type, op, root, 1));
+      // TESTCHECK(BenchTime(args, type, op, root, 1));
       PRINT("\n");
   }
   return testSuccess;

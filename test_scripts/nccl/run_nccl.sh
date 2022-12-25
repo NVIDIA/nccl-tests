@@ -19,7 +19,7 @@ do
         mkdir $RES_DIR
     fi
 
-    for n in 8
+    for n in 5
     do
         for w in  2 
         do

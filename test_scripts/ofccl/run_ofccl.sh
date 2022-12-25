@@ -1,12 +1,12 @@
 export LD_LIBRARY_PATH=/home/panlichen/work2/ofccl/build/lib
 export NCCL_PROTO=Simple
 export NCCL_ALGO=Ring
-export NCCL_MAX_NCHANNELS=1
-export NCCL_MIN_NCHANNELS=1
+# export NCCL_MAX_NCHANNELS=1
+# export NCCL_MIN_NCHANNELS=1
 # export NCCL_NTHREADS=64
 
-export DATE=221224
-export NCCL_ORDER=1
+export DATE=221225
+export NCCL_ORDER=2
 
 export TRAVERSE_TIMES=10
 export TOLERANT_UNPROGRESSED_CNT=10000
