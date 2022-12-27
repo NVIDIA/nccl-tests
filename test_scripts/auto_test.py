@@ -18,16 +18,16 @@ os.environ['BOUNS_SWITCH_4_PROCESSED_COLL'] = "0"
 os.environ['DEV_TRY_ROUND'] = "10"
 
 # 设置超参数
-DATE="221227"
+DATE="221226"
 runNcclTest = False # 运行nccl测试,仅输出原始结果
-staticNccl = True
-collectNcclResult  = True # 统计nccl测试结果，写入xls
+staticNccl = False # 运行统计，输出中间结果
+collectNcclResult  = True # 收集nccl测试结果，写入xls
 
 
 runOfcclTest = False# 运行ofccl测试
-staticOfccl = True
-staticOfcclExtral = False # 对ofccl的额外输出进行统计
-collectOfcclResult = True# 统计ofccl测试结果，写入xls
+staticOfccl = False # 运行统计，输出中间结果
+staticOfcclExtral = True # 对ofccl的额外输出进行统计
+collectOfcclResult = True# 收集ofccl测试结果，写入xls
 
 
 NCCL_ORDER="1"
@@ -229,7 +229,8 @@ for MY_NUM_DEV in ncards:
             content3 = f3.read()
         times = content3.split()
         for i in range(0,25):
-            tmSheet.write(2+cnt*30+i, 15, xlwt.Formula('R'+str(3+i+cnt*30)+'- O'+str(3+i+cnt*30) ),style )
+            tmSheet.write(2+cnt*30+i, 14, xlwt.Formula('( V'+str(3+i+cnt*30)+'+W'+str(3+i+cnt*30)+'+X'+str(3+i+cnt*30)+'+Y'+str(3+i+cnt*30)+'+Z'+str(3+i+cnt*30)+' )/5' ),style )
+            tmSheet.write(2+cnt*30+i, 15, xlwt.Formula('R'+str(3+i+cnt*30)+'-O'+str(3+i+cnt*30) ),style )
             tmSheet.write(2+cnt*30+i,16,times[2+125*cnt+i],style)
             tmSheet.write(2+cnt*30+i,17,times[2+125*cnt+25+i],style)
             tmSheet.write(2+cnt*30+i,18,times[2+125*cnt+50+i],style)
