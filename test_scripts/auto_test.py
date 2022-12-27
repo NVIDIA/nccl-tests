@@ -1,6 +1,11 @@
 import os 
 import xlrd
 import xlwt
+# 设置字体大小
+style = xlwt.XFStyle()
+font = xlwt.Font()
+font.height = 20*16
+style.font = font
 # 设置环境变量
 os.environ['LD_LIBRARY_PATH'] = "/home/panlichen/zrk/work/ofccl/build/lib"
 os.environ['NCCL_PROTO'] = "Simple"
@@ -11,20 +16,23 @@ os.environ['TOLERANT_UNPROGRESSED_CNT'] = "10000"
 os.environ['BASE_CTX_SWITCH_THRESHOLD'] = "80"
 os.environ['BOUNS_SWITCH_4_PROCESSED_COLL'] = "0"
 os.environ['DEV_TRY_ROUND'] = "10"
-# test
-# f = os.popen("./nccl/run.sh")
-# print(f.readlines())
+
 # 设置超参数
-# run
-DATE="221223"
-runNcclTest = True # 运行nccl测试
-collectNcclResult  = True  # 统计nccl测试结果，写入xls
-runOfcclTest = True# 运行ofccl测试
-collectOfcclResult = True # 统计ofccl测试结果，写入xls
+DATE="221226"
+runNcclTest = False # 运行nccl测试,仅输出原始结果
+staticNccl = False
+collectNcclResult  = True # 统计nccl测试结果，写入xls
+
+
+runOfcclTest = False# 运行ofccl测试
+staticOfccl = True
+staticOfcclExtral = True # 对ofccl的额外输出进行统计
+collectOfcclResult = True# 统计ofccl测试结果，写入xls
+
 
 NCCL_ORDER="1"
 host=os.environ.get("HOST")
-n = 8
+n = 5
 m = 1 #nccl
 w = 2
 M = 1 #ofccl
@@ -40,14 +48,19 @@ resultXlsName=host+"_"+DATE+"_"+NCCL_ORDER+"_M"+str(m)+"n"+str(n)+"w"+str(w)+".x
 # static 
 os.system("g++ ./nccl/static_nccl.cpp -o ./nccl/static_nccl.out")
 os.system("g++ ./nccl/static_time.cpp -o ./nccl/static_time.out")
-os.system("g++ ./ofccl/clear_static_ofccl_time.cpp -o ./ofccl/clear_static_ofccl_time.out")
-os.system("g++ ./ofccl/clear_static_ofccl.cpp -o ./ofccl/clear_static_ofccl.out")
-
+os.system("g++ ./ofccl/static_ofccl_time.cpp -o ./ofccl/static_ofccl_time.out")
+os.system("g++ ./ofccl/static_ofccl_bw.cpp -o ./ofccl/static_ofccl_bw.out")
+os.system("g++ ./ofccl/static_ofccl_QE.cpp -o ./ofccl/static_ofccl_QE.out")
 
 
 table = xlwt.Workbook()
 bwSheet = table.add_sheet('bw')
 tmSheet = table.add_sheet('time')
+# 列宽
+for i in range(30):
+    bwSheet.col(i).width = 13 * 256
+    tmSheet.col(i).width = 16 * 256
+
 cnt  = 0
 for MY_NUM_DEV in ncards:
 
@@ -65,24 +78,24 @@ for MY_NUM_DEV in ncards:
     NCCL_OUTPUT_TIME_PATH=NCCL_RES_DIR+"/result_statics_nccl_"+str(MY_NUM_DEV)+"cards_time.txt"   
     
 
-    if runNcclTest == True:
+    if staticNccl == True:
 
         os.system("echo  $(date +%F%n%T)>>"+NCCL_OUTPUT_BW_PATH)
         os.system("echo  $(date +%F%n%T)>>"+NCCL_OUTPUT_TIME_PATH)
 
-        for iter in [1,2,3]:
-            NCCL_RES_PATH = NCCL_RES_DIR+"/nccl_result_"+str(iter)+"_n"+str(n)+"_w"+str(w)+"_m"+str(m)+".txt"
-            
+    for iter in [1,2,3]:
+        NCCL_RES_PATH = NCCL_RES_DIR+"/nccl_result_"+str(iter)+"_n"+str(n)+"_w"+str(w)+"_m"+str(m)+".txt"
+        if runNcclTest:
             os.system("echo $(date +%F%n%T)>> "+NCCL_RES_PATH)
             for a in ["64" ,"128", "256", "512", "1K", "2K", "4K", "8K", "16K", "32K", "64K", "128K", "256K", "512K", "1M", "2M", "4M", "8M", "16M", "32M", "64M", "128M", "256M", "512M", "1G"]:
                 os.system("../build/all_reduce_perf -b "+str(a)+" -e "+str(a)+" -f 2 -t " +str(MY_NUM_DEV)+" -g 1 -n "+str(n)+" -w "+str(w)+" -c 0 -m "+str(m) +" >>"+ NCCL_RES_PATH)
-
+        if staticNccl:    
             os.system("./nccl/static_nccl.out " +NCCL_RES_PATH+" " +NCCL_OUTPUT_BW_PATH+" "+str(MY_NUM_DEV)) 
             os.system("./nccl/static_time.out " +NCCL_RES_PATH+" " +NCCL_OUTPUT_TIME_PATH+" "+str(MY_NUM_DEV)) 
                    
     if collectNcclResult == True :
         # bus
-        bwSheet.write(cnt*30,0,str(MY_NUM_DEV)+'卡')
+        bwSheet.write(cnt*30,0,str(MY_NUM_DEV)+'卡',style)
 
         with open(NCCL_OUTPUT_BW_PATH) as f:
             content = f.read()
@@ -90,39 +103,39 @@ for MY_NUM_DEV in ncards:
 
         axis_y =  ["64" ,"128", "256", "512", "1K", "2K", "4K", "8K", "16K", "32K", "64K", "128K", "256K", "512K", "1M", "2M", "4M", "8M", "16M", "32M", "64M", "128M", "256M", "512M", "1G"]
         for a in range(0,25):
-            bwSheet.write(2+a+cnt*30,0,axis_y[a])                 
+            bwSheet.write(2+a+cnt*30,0,axis_y[a],style)                 
         #
         for k in [0,1,2]:
-            bwSheet.write(1+cnt*30,1+k,'nccl-algbw'+str(k))
+            bwSheet.write(1+cnt*30,1+k,'nccl-algbw'+str(k),style)
             for i in range(0,25):
-                bwSheet.write(2+i+cnt*30,1+k,bw[i+k*50+2])
+                bwSheet.write(2+i+cnt*30,1+k,bw[i+k*50+2],style)
 
-            bwSheet.write(1+cnt*30,1+15+k,'nccl-busbw'+str(k))
+            bwSheet.write(1+cnt*30,12+k,'nccl-busbw'+str(k),style)
             for i in range(0,25):
-                bwSheet.write(2+i+cnt*30,1+15+k,bw[i+k*50+25+2])
+                bwSheet.write(2+i+cnt*30,12+k,bw[i+k*50+25+2],style)
         # avg
-        bwSheet.write(1+cnt*30, 4, 'avg-algbw')
-        bwSheet.write(1+cnt*30, 19, 'avg-busbw')
+        bwSheet.write(1+cnt*30, 4, 'avg-algbw',style)
+        bwSheet.write(1+cnt*30, 15, 'avg-busbw',style)
         for i in range(0,25):
-            bwSheet.write(2+i+cnt*30, 4, xlwt.Formula('SUM(B'+str(2+i+cnt*30+1)+',C'+str(2+i+cnt*30+1)+',D'+str(2+i+cnt*30+1)+')/3') )
-            bwSheet.write(2+i+cnt*30, 19, xlwt.Formula('SUM(Q'+str(2+i+cnt*30+1)+',R'+str(2+i+cnt*30+1)+',S'+str(2+i+cnt*30+1)+')/3')) 
+            bwSheet.write(2+i+cnt*30, 4, xlwt.Formula('SUM(B'+str(2+i+cnt*30+1)+',C'+str(2+i+cnt*30+1)+',D'+str(2+i+cnt*30+1)+')/3'),style )
+            bwSheet.write(2+i+cnt*30, 15, xlwt.Formula('SUM(M'+str(2+i+cnt*30+1)+',N'+str(2+i+cnt*30+1)+',O'+str(2+i+cnt*30+1)+')/3'),style) 
         
         # time  
         with open(NCCL_OUTPUT_TIME_PATH) as f2:
             content2 = f2.read()
         times = content2.split()
 
-        tmSheet.write(cnt*30,0,str(MY_NUM_DEV)+'卡')
+        tmSheet.write(cnt*30,0,str(MY_NUM_DEV)+'卡',style)
         for a in range(0,25):
-            tmSheet.write(2+a+cnt*30,0,axis_y[a])
+            tmSheet.write(2+a+cnt*30,0,axis_y[a],style)
         for k in [0,1,2]:
-            tmSheet.write(1+cnt*30,1+k,'nccl-'+str(k))
+            tmSheet.write(1+cnt*30,1+k,'nccl-'+str(k),style)
             for i in range(0,25):
-                tmSheet.write(2+i+cnt*30,1+k,times[i+k*25+2])
+                tmSheet.write(2+i+cnt*30,1+k,times[i+k*25+2],style)
         # avg 
-        tmSheet.write(1+cnt*30, 4, 'avg-nccl')
+        tmSheet.write(1+cnt*30, 4, 'avg-nccl',style)
         for i in range(0,25):
-            tmSheet.write(2+i+cnt*30, 4, xlwt.Formula('SUM(B'+str(2+i+cnt*30+1)+',C'+str(2+i+cnt*30+1)+',D'+str(2+i+cnt*30+1)+')/3') )
+            tmSheet.write(2+i+cnt*30, 4, xlwt.Formula('SUM(B'+str(2+i+cnt*30+1)+',C'+str(2+i+cnt*30+1)+',D'+str(2+i+cnt*30+1)+')/3') ,style)
         
 
     #OFCCL      
@@ -133,20 +146,26 @@ for MY_NUM_DEV in ncards:
     # 统计结果    
     OFCCL_OUTPUT_BW_PATH=OFCCL_RES_DIR+"/result_statics_ofccl_"+str(MY_NUM_DEV)+"cards.txt"  
     OFCCL_OUTPUT_TIME_PATH=OFCCL_RES_DIR+"/result_statics_ofccl_"+str(MY_NUM_DEV)+"cards_time.txt"  
+    OFCCL_OUTPUT_QE_PATH=OFCCL_RES_DIR+"/result_statics_ofccl_"+str(MY_NUM_DEV)+"cards_QE.txt"  
 
-    if runOfcclTest == True: 
+    if staticOfccl == True: 
         os.system("echo  $(date +%F%n%T)>>"+OFCCL_OUTPUT_BW_PATH)
         os.system("echo  $(date +%F%n%T)>>"+OFCCL_OUTPUT_TIME_PATH)
+    if staticOfcclExtral:
+        os.system("echo  $(date +%F%n%T)>>"+OFCCL_OUTPUT_QE_PATH)    
 
-        for iter in [1,2,3]:
-            OFCCL_RES_PATH = OFCCL_RES_DIR+"/ofccl_result_"+str(iter)+"_n"+str(n)+"_w"+str(w)+"_M"+str(M)+".txt"
-            
+    for iter in [1,2,3]:
+        OFCCL_RES_PATH = OFCCL_RES_DIR+"/ofccl_result_"+str(iter)+"_n"+str(n)+"_w"+str(w)+"_M"+str(M)+".txt"
+        if runOfcclTest:
             os.system("echo $(date +%F%n%T)>> "+OFCCL_RES_PATH)
             for a in ["64" ,"128", "256", "512", "1K", "2K", "4K", "8K", "16K", "32K", "64K", "128K", "256K", "512K", "1M", "2M", "4M", "8M", "16M", "32M", "64M", "128M", "256M", "512M", "1G"]:
                 os.system("../build/ofccl_all_reduce_perf  -b "+str(a)+" -e "+str(a)+" -f 2 -t " +str(MY_NUM_DEV)+" -g 1 -n "+str(n)+" -w "+str(w)+" -c 0 -M "+str(M) +" >>"+ OFCCL_RES_PATH)
+        if staticOfccl:
+            os.system("./ofccl/static_ofccl_bw.out " +OFCCL_RES_PATH+" " +OFCCL_OUTPUT_BW_PATH) 
+            os.system("./ofccl/static_ofccl_time.out " +OFCCL_RES_PATH+" " + OFCCL_OUTPUT_TIME_PATH)
+        if staticOfcclExtral:
+            os.system("./ofccl/static_ofccl_QE.out " +OFCCL_RES_PATH+" " + OFCCL_OUTPUT_QE_PATH)
 
-            os.system("./ofccl/clear_static_ofccl.out " +OFCCL_RES_PATH+" " +OFCCL_OUTPUT_BW_PATH+" "+str(MY_NUM_DEV)) 
-            os.system("./ofccl/clear_static_ofccl_time.out " +OFCCL_RES_PATH+" " + OFCCL_OUTPUT_TIME_PATH+" "+str(MY_NUM_DEV)) 
 
     if collectOfcclResult == True:
         
@@ -155,19 +174,19 @@ for MY_NUM_DEV in ncards:
         bw = content2.split()
         #bus        
         for k in [0,1,2]:
-            bwSheet.write(1+cnt*30,5+k,'ofccl-algbw'+str(k))
+            bwSheet.write(1+cnt*30,5+k,'ofccl-algbw'+str(k),style)
             for i in range(0,25):
-                bwSheet.write(2+i+cnt*30,5+k,bw[i+k*50+2])
+                bwSheet.write(2+i+cnt*30,5+k,bw[i+k*50+2],style)
 
-            bwSheet.write(1+cnt*30,5+15+k,'ofccl-busbw'+str(k))
+            bwSheet.write(1+cnt*30,16+k,'ofccl-busbw'+str(k),style)
             for i in range(0,25):
-                bwSheet.write(2+i+cnt*30,5+15+k,bw[i+k*50+25+2])
+                bwSheet.write(2+i+cnt*30,16+k,bw[i+k*50+25+2],style)
         # avg
-        bwSheet.write(1+cnt*30, 4+4, 'avg-algbw')
-        bwSheet.write(1+cnt*30, 19+4, 'avg-busbw')
+        bwSheet.write(1+cnt*30,8, 'avg-algbw',style)
+        bwSheet.write(1+cnt*30, 19, 'avg-busbw',style)
         for i in range(0,25):
-            bwSheet.write(2+i+cnt*30, 4+4, xlwt.Formula('SUM(F'+str(2+i+cnt*30+1)+',G'+str(2+i+cnt*30+1)+',H'+str(2+i+cnt*30+1)+')/3') )
-            bwSheet.write(2+i+cnt*30, 19+4, xlwt.Formula('SUM(U'+str(2+i+cnt*30+1)+',V'+str(2+i+cnt*30+1)+',W'+str(2+i+cnt*30+1)+')/3')) 
+            bwSheet.write(2+i+cnt*30, 8, xlwt.Formula('SUM(F'+str(2+i+cnt*30+1)+',G'+str(2+i+cnt*30+1)+',H'+str(2+i+cnt*30+1)+')/3') ,style)
+            bwSheet.write(2+i+cnt*30, 19, xlwt.Formula('SUM(Q'+str(2+i+cnt*30+1)+',R'+str(2+i+cnt*30+1)+',S'+str(2+i+cnt*30+1)+')/3'),style) 
         
         # time  
         with open(OFCCL_OUTPUT_TIME_PATH) as f2:
@@ -175,22 +194,48 @@ for MY_NUM_DEV in ncards:
         times = content2.split()
 
         for k in [0,1,2]:
-            tmSheet.write(1+cnt*30,5+k,'OFccl-'+str(k))
+            tmSheet.write(1+cnt*30,5+k,'ofccl-'+str(k),style)
             for i in range(0,25):
-                tmSheet.write(2+i+cnt*30,5+k,times[i+k*25+2])
+                tmSheet.write(2+i+cnt*30,5+k,times[i+k*25+2],style)
         # avg 
-        tmSheet.write(1+cnt*30, 4+4, 'avg-OFCCL')
+        tmSheet.write(1+cnt*30, 4+4, 'avg-ofccl',style)
         for i in range(0,25):
-            tmSheet.write(2+i+cnt*30, 4+4, xlwt.Formula('SUM(F'+str(2+i+cnt*30+1)+',G'+str(2+i+cnt*30+1)+',H'+str(2+i+cnt*30+1)+')/3') )
+            tmSheet.write(2+i+cnt*30, 4+4, xlwt.Formula('SUM(F'+str(2+i+cnt*30+1)+',G'+str(2+i+cnt*30+1)+',H'+str(2+i+cnt*30+1)+')/3') ,style)
 
     if collectNcclResult and collectOfcclResult:
-        bwSheet.write(1+cnt*30, 9, '(ofccl-nccl)/nccl')
-        bwSheet.write(1+cnt*30, 24, '(ofccl-nccl)/nccl')
-        tmSheet.write(1+cnt*30, 9, '(ofccl-nccl)/nccl')
+        bwSheet.write(1+cnt*30, 9, '(ofccl-nccl)/nccl',style)
+        bwSheet.write(1+cnt*30, 20, '(ofccl-nccl)/nccl',style)
+        tmSheet.write(1+cnt*30, 9, 'ofccl-nccl',style)
+        tmSheet.write(1+cnt*30, 10, '(ofccl-nccl)/nccl',style)
         for i in range(0,25):
-            bwSheet.write(2+i+cnt*30, 9, xlwt.Formula('(I'+str(2+i+cnt*30+1)+'-E'+str(2+i+cnt*30+1)+')/E'+str(2+i+cnt*30+1)) )
-            bwSheet.write(2+i+cnt*30, 24, xlwt.Formula('(X'+str(2+i+cnt*30+1)+'-T'+str(2+i+cnt*30+1)+')/T'+str(2+i+cnt*30+1) ))
-            tmSheet.write(2+i+cnt*30, 9, xlwt.Formula('(I'+str(2+i+cnt*30+1)+'-E'+str(2+i+cnt*30+1)+')/E'+str(2+i+cnt*30+1) ) )
+            bwSheet.write(2+i+cnt*30, 9, xlwt.Formula('(I'+str(2+i+cnt*30+1)+'-E'+str(2+i+cnt*30+1)+')/E'+str(2+i+cnt*30+1)) ,style)
+            bwSheet.write(2+i+cnt*30, 20, xlwt.Formula('(T'+str(2+i+cnt*30+1)+'-P'+str(2+i+cnt*30+1)+')/P'+str(2+i+cnt*30+1) ),style)
+            tmSheet.write(2+i+cnt*30, 9, xlwt.Formula('I'+str(2+i+cnt*30+1)+'-E'+str(2+i+cnt*30+1) ),style )
+            tmSheet.write(2+i+cnt*30, 10, xlwt.Formula('(I'+str(2+i+cnt*30+1)+'-E'+str(2+i+cnt*30+1)+')/E'+str(2+i+cnt*30+1) ),style )
+
+    # time 各个列的标题
+    if staticOfcclExtral:
+        tmSheet.write(1+cnt*30, 13,'nccl IO',style )
+        tmSheet.write(1+cnt*30, 14,'nccl kern',style )
+        tmSheet.write(1+cnt*30, 15,'ofccl-nccl kern',style )
+        tmSheet.write(1+cnt*30, 16,'before after get sqe',style )
+        tmSheet.write(1+cnt*30, 17,'AfterSqe TO BeforeCqe',style )
+        tmSheet.write(1+cnt*30, 18,'before after put cqe',style )
+        tmSheet.write(1+cnt*30, 19,'beforeSqe TO afterCqe',style )
+        tmSheet.write(1+cnt*30, 20,'occl rank0 time',style )
+        tmSheet.write(1+cnt*30, 21,'nccl kern ori',style )
+
+        with open(OFCCL_OUTPUT_QE_PATH) as f3:
+            content3 = f3.read()
+        times = content3.split()
+        for i in range(0,25):
+            tmSheet.write(2+cnt*30+i,16,times[2+125*cnt+i],style)
+            tmSheet.write(2+cnt*30+i,17,times[2+125*cnt+25+i],style)
+            tmSheet.write(2+cnt*30+i,18,times[2+125*cnt+50+i],style)
+            tmSheet.write(2+cnt*30+i,19,times[2+125*cnt+75+i],style)
+            tmSheet.write(2+cnt*30+i,20,times[2+125*cnt+100+i],style)
+
+
 
     cnt = cnt+1
 
