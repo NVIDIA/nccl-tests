@@ -51,6 +51,7 @@ os.system("g++ ./nccl/static_time.cpp -o ./nccl/static_time.out")
 os.system("g++ ./ofccl/static_ofccl_time.cpp -o ./ofccl/static_ofccl_time.out")
 os.system("g++ ./ofccl/static_ofccl_bw.cpp -o ./ofccl/static_ofccl_bw.out")
 os.system("g++ ./ofccl/static_ofccl_QE.cpp -o ./ofccl/static_ofccl_QE.out")
+os.system("g++ ./ofccl/static_ofccl_QE_ori.cpp -o ./ofccl/static_ofccl_QE_ori.out")
 
 
 table = xlwt.Workbook()
@@ -232,6 +233,11 @@ for MY_NUM_DEV in ncards:
         tmSheet.write(1+cnt*30, 39,'before after put cqe ori',style )
         tmSheet.write(1+cnt*30, 45,'beforeSqe TO afterCqe ori',style )
 
+        y = 64
+        for i in range(0,25):
+            tmSheet.write(2+i+cnt*30,12,y,style)
+            y = y*2    
+
         with open(OFCCL_OUTPUT_QE_PATH) as f3:
             content3 = f3.read()
         times = content3.split()
@@ -239,7 +245,8 @@ for MY_NUM_DEV in ncards:
             content4 = f4.read()
         times4 = content4.split()
         for i in range(0,25):
-            tmSheet.write(2+cnt*30+i, 14, xlwt.Formula('( V'+str(3+i+cnt*30)+'+W'+str(3+i+cnt*30)+'+X'+str(3+i+cnt*30)+'+Y'+str(3+i+cnt*30)+'+Z'+str(3+i+cnt*30)+' )/5' ),style )
+            tmSheet.write(2+cnt*30+i, 13, xlwt.Formula('E'+str(3+i+cnt*30)+'-O'+str(3+i+cnt*30) ),style )
+            tmSheet.write(2+cnt*30+i, 14, xlwt.Formula('AVERAGEA(V'+str(3+i+cnt*30)+':Z'+str(3+i+cnt*30)+' )' ),style )
             tmSheet.write(2+cnt*30+i, 15, xlwt.Formula('R'+str(3+i+cnt*30)+'-O'+str(3+i+cnt*30) ),style )
             tmSheet.write(2+cnt*30+i,16,times[2+125*cnt+i],style)
             tmSheet.write(2+cnt*30+i,17,times[2+125*cnt+25+i],style)
