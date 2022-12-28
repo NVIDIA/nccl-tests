@@ -7,6 +7,7 @@ font = xlwt.Font()
 font.height = 20*16
 style.font = font
 # 设置环境变量
+#os.environ['LD_LIBRARY_PATH'] = "/home/panlichen/work2/ofccl/build/lib"
 os.environ['LD_LIBRARY_PATH'] = "/home/panlichen/zrk/work/ofccl/build/lib"
 os.environ['NCCL_PROTO'] = "Simple"
 os.environ['NCCL_ALGO'] = "RING"
@@ -18,7 +19,6 @@ os.environ['BOUNS_SWITCH_4_PROCESSED_COLL'] = "0"
 os.environ['DEV_TRY_ROUND'] = "10"
 
 # 设置超参数
-DATE="221226"
 runNcclTest = False # 运行nccl测试,仅输出原始结果
 staticNccl = False # 运行统计，输出中间结果
 collectNcclResult  = True # 收集nccl测试结果，写入xls
@@ -29,7 +29,7 @@ staticOfccl = False # 运行统计，输出中间结果
 staticOfcclExtral = True # 对ofccl的额外输出进行统计
 collectOfcclResult = True# 收集ofccl测试结果，写入xls
 
-
+DATE="221226"
 NCCL_ORDER="1"
 host=os.environ.get("HOST")
 n = 5
@@ -147,12 +147,14 @@ for MY_NUM_DEV in ncards:
     OFCCL_OUTPUT_BW_PATH=OFCCL_RES_DIR+"/result_statics_ofccl_"+str(MY_NUM_DEV)+"cards.txt"  
     OFCCL_OUTPUT_TIME_PATH=OFCCL_RES_DIR+"/result_statics_ofccl_"+str(MY_NUM_DEV)+"cards_time.txt"  
     OFCCL_OUTPUT_QE_PATH=OFCCL_RES_DIR+"/result_statics_ofccl_"+str(MY_NUM_DEV)+"cards_QE.txt"  
+    OFCCL_OUTPUT_QE_ORI_PATH=OFCCL_RES_DIR+"/result_statics_ofccl_"+str(MY_NUM_DEV)+"cards_QE_ori.txt" 
 
     if staticOfccl == True: 
         os.system("echo  $(date +%F%n%T)>>"+OFCCL_OUTPUT_BW_PATH)
         os.system("echo  $(date +%F%n%T)>>"+OFCCL_OUTPUT_TIME_PATH)
     if staticOfcclExtral:
-        os.system("echo  $(date +%F%n%T)>>"+OFCCL_OUTPUT_QE_PATH)    
+        os.system("echo  $(date +%F%n%T)>>"+OFCCL_OUTPUT_QE_PATH)
+        os.system("echo  $(date +%F%n%T)>>"+OFCCL_OUTPUT_QE_ORI_PATH)    
 
     for iter in [1,2,3]:
         OFCCL_RES_PATH = OFCCL_RES_DIR+"/ofccl_result_"+str(iter)+"_n"+str(n)+"_w"+str(w)+"_M"+str(M)+".txt"
@@ -165,6 +167,7 @@ for MY_NUM_DEV in ncards:
             os.system("./ofccl/static_ofccl_time.out " +OFCCL_RES_PATH+" " + OFCCL_OUTPUT_TIME_PATH)
         if staticOfcclExtral:
             os.system("./ofccl/static_ofccl_QE.out " +OFCCL_RES_PATH+" " + OFCCL_OUTPUT_QE_PATH)
+            os.system("./ofccl/static_ofccl_QE_ori.out " +OFCCL_RES_PATH+" " + OFCCL_OUTPUT_QE_ORI_PATH)
 
 
     if collectOfcclResult == True:
@@ -224,10 +227,17 @@ for MY_NUM_DEV in ncards:
         tmSheet.write(1+cnt*30, 19,'beforeSqe TO afterCqe',style )
         tmSheet.write(1+cnt*30, 20,'occl rank0 time',style )
         tmSheet.write(1+cnt*30, 21,'nccl kern ori',style )
+        tmSheet.write(1+cnt*30, 27,'before after get sqe ori',style )
+        tmSheet.write(1+cnt*30, 33,'AfterSqe TO BeforeCqe ori',style )
+        tmSheet.write(1+cnt*30, 39,'before after put cqe ori',style )
+        tmSheet.write(1+cnt*30, 45,'beforeSqe TO afterCqe ori',style )
 
         with open(OFCCL_OUTPUT_QE_PATH) as f3:
             content3 = f3.read()
         times = content3.split()
+        with open(OFCCL_OUTPUT_QE_ORI_PATH) as f4:
+            content4 = f4.read()
+        times4 = content4.split()
         for i in range(0,25):
             tmSheet.write(2+cnt*30+i, 14, xlwt.Formula('( V'+str(3+i+cnt*30)+'+W'+str(3+i+cnt*30)+'+X'+str(3+i+cnt*30)+'+Y'+str(3+i+cnt*30)+'+Z'+str(3+i+cnt*30)+' )/5' ),style )
             tmSheet.write(2+cnt*30+i, 15, xlwt.Formula('R'+str(3+i+cnt*30)+'-O'+str(3+i+cnt*30) ),style )
@@ -236,6 +246,12 @@ for MY_NUM_DEV in ncards:
             tmSheet.write(2+cnt*30+i,18,times[2+125*cnt+50+i],style)
             tmSheet.write(2+cnt*30+i,19,times[2+125*cnt+75+i],style)
             tmSheet.write(2+cnt*30+i,20,times[2+125*cnt+100+i],style)
+            for j in range(0,5):
+                tmSheet.write(2+cnt*30+i,27+j,times4[2+500*cnt+i*5+j],style)
+                tmSheet.write(2+cnt*30+i,33+j,times4[2+500*cnt+125+i*5+j],style)
+                tmSheet.write(2+cnt*30+i,39+j,times4[2+500*cnt+250+i*5+j],style)
+                tmSheet.write(2+cnt*30+i,45+j,times4[2+500*cnt+375+i*5+j],style)
+
 
 
 
