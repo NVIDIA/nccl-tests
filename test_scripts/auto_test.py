@@ -7,8 +7,8 @@ font = xlwt.Font()
 font.height = 20*16
 style.font = font
 # 设置环境变量
-#os.environ['LD_LIBRARY_PATH'] = "/home/panlichen/work2/ofccl/build/lib"
-os.environ['LD_LIBRARY_PATH'] = "/home/panlichen/zrk/work/ofccl/build/lib"
+os.environ['LD_LIBRARY_PATH'] = "/home/panlichen/work2/ofccl/build/lib"
+# os.environ['LD_LIBRARY_PATH'] = "/home/panlichen/zrk/work/ofccl/build/lib"
 os.environ['NCCL_PROTO'] = "Simple"
 os.environ['NCCL_ALGO'] = "RING"
 
@@ -19,17 +19,17 @@ os.environ['BOUNS_SWITCH_4_PROCESSED_COLL'] = "0"
 os.environ['DEV_TRY_ROUND'] = "10"
 
 # 设置超参数
-runNcclTest = False # 运行nccl测试,仅输出原始结果
-staticNccl = False # 运行统计，输出中间结果
+runNcclTest = True # 运行nccl测试,仅输出原始结果
+staticNccl = True # 运行统计，输出中间结果
 collectNcclResult  = True # 收集nccl测试结果，写入xls
 
 
-runOfcclTest = False# 运行ofccl测试
-staticOfccl = False # 运行统计，输出中间结果
+runOfcclTest = True# 运行ofccl测试
+staticOfccl = True # 运行统计，输出中间结果
 staticOfcclExtral = True # 对ofccl的额外输出进行统计
 collectOfcclResult = True# 收集ofccl测试结果，写入xls
 
-DATE="221226"
+DATE="221229"
 NCCL_ORDER="1"
 host=os.environ.get("HOST")
 n = 5
@@ -51,6 +51,7 @@ os.system("g++ ./nccl/static_time.cpp -o ./nccl/static_time.out")
 os.system("g++ ./ofccl/static_ofccl_time.cpp -o ./ofccl/static_ofccl_time.out")
 os.system("g++ ./ofccl/static_ofccl_bw.cpp -o ./ofccl/static_ofccl_bw.out")
 os.system("g++ ./ofccl/static_ofccl_QE.cpp -o ./ofccl/static_ofccl_QE.out")
+os.system("g++ ./ofccl/static_ofccl_QE_ori.cpp -o ./ofccl/static_ofccl_QE_ori.out")
 
 
 table = xlwt.Workbook()
