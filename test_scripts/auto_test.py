@@ -30,7 +30,7 @@ staticOfcclExtral = True # 对ofccl的额外输出进行统计
 collectOfcclResult = True# 收集ofccl测试结果，写入xls
 
 DATE="221229"
-NCCL_ORDER="1"
+NCCL_ORDER="3"
 host=os.environ.get("HOST")
 n = 5
 m = 1 #nccl
