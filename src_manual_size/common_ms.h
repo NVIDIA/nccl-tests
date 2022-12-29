@@ -28,6 +28,8 @@
   #define MULTI_ITERS 2
 #endif
 
+// #define IN_ORDER 1
+
 #define OFTEST_LOG(PRE, FMT, args...) printf("(testlog) [%s:%d] <%s> " #PRE " " FMT "\n", __FILE__, __LINE__, __func__, args)
 #define OFTEST_LOG1(PRE, FMT) printf("(testlog) [%s:%d] <%s> " #PRE " " FMT "\n", __FILE__, __LINE__, __func__)
 #define OFTEST_LOG0(PRE) printf("(testlog) [%s:%d] <%s> " #PRE "\n", __FILE__, __LINE__, __func__)

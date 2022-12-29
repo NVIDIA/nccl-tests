@@ -48,7 +48,7 @@ if [ "$BINARY" == "DEBUG" ];then
     fi
     export SHOW_ALL_PREPARED_COLL=0
     export NITER=5
-    export NBYTES=64M
+    export NBYTES=64
     export WARMITER=2
     export MITER=1
     export CHECK=0
@@ -70,7 +70,7 @@ elif [ "$BINARY" == "MS" ];then
     if [ $MY_NUM_DEV = 4 ]; then
         export CUDA_VISIBLE_DEVICES=0,1,4,5
     fi
-    export NITER=200
+    export NITER=4
     export SHOW_ALL_PREPARED_COLL=1
     export WARMITER=0
     export NBYTES=8K
