@@ -20,12 +20,12 @@ os.environ['DEV_TRY_ROUND'] = "10"
 
 # 设置超参数
 runNcclTest = False # 运行nccl测试,仅输出原始结果
-staticNccl = False # 运行统计，输出中间结果
-collectNcclResult  = True # 收集nccl测试结果，写入xls
+staticNccl = True # 运行统计，输出中间结果
+collectNcclResult  =True # 收集nccl测试结果，写入xls
 
 
 runOfcclTest = False# 运行ofccl测试
-staticOfccl = False # 运行统计，输出中间结果
+staticOfccl = True # 运行统计，输出中间结果
 staticOfcclExtral = True # 对ofccl的额外输出进行统计
 collectOfcclResult = True# 收集ofccl测试结果，写入xls
 
@@ -52,11 +52,13 @@ os.system("g++ ./ofccl/static_ofccl_time.cpp -o ./ofccl/static_ofccl_time.out")
 os.system("g++ ./ofccl/static_ofccl_bw.cpp -o ./ofccl/static_ofccl_bw.out")
 os.system("g++ ./ofccl/static_ofccl_QE.cpp -o ./ofccl/static_ofccl_QE.out")
 os.system("g++ ./ofccl/static_ofccl_QE_ori.cpp -o ./ofccl/static_ofccl_QE_ori.out")
+os.system("g++ ./ofccl/static_ofccl_totalCnt.cpp -o ./ofccl/static_ofccl_totalCnt.out")
 
 
 table = xlwt.Workbook()
 bwSheet = table.add_sheet('bw')
 tmSheet = table.add_sheet('time')
+cntSheet = table.add_sheet('totalCnt')
 # 列宽
 for i in range(30):
     bwSheet.col(i).width = 13 * 256
@@ -149,6 +151,7 @@ for MY_NUM_DEV in ncards:
     OFCCL_OUTPUT_TIME_PATH=OFCCL_RES_DIR+"/result_statics_ofccl_"+str(MY_NUM_DEV)+"cards_time.txt"  
     OFCCL_OUTPUT_QE_PATH=OFCCL_RES_DIR+"/result_statics_ofccl_"+str(MY_NUM_DEV)+"cards_QE.txt"  
     OFCCL_OUTPUT_QE_ORI_PATH=OFCCL_RES_DIR+"/result_statics_ofccl_"+str(MY_NUM_DEV)+"cards_QE_ori.txt" 
+    OFCCL_OUTPUT_TOTALCNT_PATH=OFCCL_RES_DIR+"/result_statics_ofccl_"+str(MY_NUM_DEV)+"cards_totalCnt.txt"
 
     if staticOfccl == True: 
         os.system("echo  $(date +%F%n%T)>>"+OFCCL_OUTPUT_BW_PATH)
@@ -169,6 +172,7 @@ for MY_NUM_DEV in ncards:
         if staticOfcclExtral:
             os.system("./ofccl/static_ofccl_QE.out " +OFCCL_RES_PATH+" " + OFCCL_OUTPUT_QE_PATH)
             os.system("./ofccl/static_ofccl_QE_ori.out " +OFCCL_RES_PATH+" " + OFCCL_OUTPUT_QE_ORI_PATH)
+            os.system("./ofccl/static_ofccl_totalCnt.out "+OFCCL_RES_PATH+" " + OFCCL_OUTPUT_TOTALCNT_PATH)
 
 
     if collectOfcclResult == True:
@@ -259,6 +263,51 @@ for MY_NUM_DEV in ncards:
                 tmSheet.write(2+cnt*30+i,39+j,times4[2+500*cnt+250+i*5+j],style)
                 tmSheet.write(2+cnt*30+i,45+j,times4[2+500*cnt+375+i*5+j],style)
 
+        # cntsheet
+        cntSheet.write(cnt*30,0,str(MY_NUM_DEV)+'卡',style)
+        axis_y =  ["64" ,"128", "256", "512", "1K", "2K", "4K", "8K", "16K", "32K", "64K", "128K", "256K", "512K", "1M", "2M", "4M", "8M", "16M", "32M", "64M", "128M", "256M", "512M", "1G"]
+        for a in range(0,25):
+            cntSheet.write(2+a+cnt*30,0,axis_y[a],style)
+
+        cntSheet.write(1+cnt*30,1,"totalCtxSaveCnt_avg",style)
+        cntSheet.write(1+cnt*30,2,"totalCtxLoadCnt_avg",style)
+        cntSheet.write(1+cnt*30,3,"totalProgressed7SwithchCnt_avg",style)
+        cntSheet.write(1+cnt*30,4,"totalUnprogressedQuitCnt_avg",style)
+        cntSheet.write(1+cnt*30,6,"totalCtxSaveCnt",style)
+        cntSheet.write(1+cnt*30,24,"totalCtxLoadCnt",style)
+        cntSheet.write(1+cnt*30,42,"totalProgressed7SwithchCnt",style)
+        cntSheet.write(1+cnt*30,60,"totalUnprogressedQuitCnt",style)
+
+        with  open(OFCCL_OUTPUT_TOTALCNT_PATH) as f:
+            line = f.readline()
+            # save
+            for i in range(0,25): 
+                numbers = line.split()
+                cntSheet.write(i+2+cnt*30,1,numbers[0])
+                for j in range(1,len(numbers)):
+                    cntSheet.write(i+2+cnt*30,5+j,numbers[j])
+                line = f.readline()
+            # load
+            for i in range(0,25): 
+                numbers = line.split()
+                cntSheet.write(i+2+cnt*30,2,numbers[0])
+                for j in range(1,len(numbers)):
+                    cntSheet.write(i+2+cnt*30,23+j,numbers[j])
+                line = f.readline()
+            # totalProgressed7SwithchCnt
+            for i in range(0,25): 
+                numbers = line.split()
+                cntSheet.write(i+2+cnt*30,3,numbers[0])
+                for j in range(1,len(numbers)):
+                    cntSheet.write(i+2+cnt*30,41+j,numbers[j])
+                line = f.readline()
+            # totalUnprogressedQuitCnt
+            for i in range(0,25): 
+                numbers = line.split()
+                cntSheet.write(i+2+cnt*30,4,numbers[0])
+                for j in range(1,len(numbers)):
+                    cntSheet.write(i+2+cnt*30,59+j,numbers[j])
+                line = f.readline()
 
 
 
