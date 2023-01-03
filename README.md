@@ -29,9 +29,9 @@ Run on 8 GPUs (`-g 8`), scanning from 8 Bytes to 128MBytes :
 $ ./build/all_reduce_perf -b 8 -e 128M -f 2 -g 8
 ```
 
-Run with MPI on 40 processes (potentially on multiple nodes) with 4 GPUs each :
+Run with MPI on 10 processes (potentially on multiple nodes) with 4 GPUs each, for a total of 40 GPUs:
 ```shell
-$ mpirun -np 40 ./build/all_reduce_perf -b 8 -e 128M -f 2 -g 4
+$ mpirun -np 10 ./build/all_reduce_perf -b 8 -e 128M -f 2 -g 4
 ```
 
 ### Performance
