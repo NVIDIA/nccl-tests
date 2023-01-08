@@ -1,7 +1,7 @@
 clear
 
-export DEBUG_CC=0
-export DEBUG_ENQ=0
+export DEBUG_CC=1
+export DEBUG_ENQ=1
 
 cd /home/panlichen/work2/nccl-tests
 export LD_LIBRARY_PATH=/home/panlichen/work2/ofccl/build/lib
@@ -95,7 +95,7 @@ if [ "$RUN_TYPE" == "PURE" ];then
     cmd="$target -b $NBYTES -e $NBYTES -f 2 -t $MY_NUM_DEV -g 1 -n $NITER -w $WARMITER -c $CHECK -M $MITER"
 elif [ "$RUN_TYPE" == "GDB" ];then
     cmd="cuda-gdb $target"
-    # set args -b 8M -e 8M -f 2 -t 2 -g 1 -n 1 -w 0 -c 0
+    # set args -b 64 -e 64 -f 2 -t 2 -g 1 -n 1 -w 0 -c 0
 elif [ "$RUN_TYPE" == "NSYS" ];then
     cmd="nsys profile -f true --trace=cuda,cudnn,cublas,osrt,nvtx -o /home/panlichen/work2/ofccl/log/nsys/$NSYS_FILE $target -b $NBYTES -e $NBYTES -f 2 -t $MY_NUM_DEV -g 1 -n $NITER -w $WARMITER -c $CHECK -M $MITER"
 elif [ "$RUN_TYPE" == "NCU" ];then
