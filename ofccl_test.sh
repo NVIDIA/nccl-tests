@@ -18,6 +18,10 @@ export TOLERANT_UNPROGRESSED_CNT=10000
 export BASE_CTX_SWITCH_THRESHOLD=80
 export BOUNS_SWITCH_4_PROCESSED_COLL=0
 export DEV_TRY_ROUND=10
+export DEBUG_FILE="/home/panlichen/work2/ofccl/log/oneflow_cpu_rank_"
+
+rm -rf /home/panlichen/work2/ofccl/log
+mkdir -p /home/panlichen/work2/ofccl/log
 
 # export ENABLE_VQ=1 # volunteer quit
 # export TOLERANT_FAIL_CHECK_SQ_CNT=5000
@@ -28,6 +32,7 @@ echo TOLERANT_UNPROGRESSED_CNT=$TOLERANT_UNPROGRESSED_CNT
 echo BASE_CTX_SWITCH_THRESHOLD=$BASE_CTX_SWITCH_THRESHOLD
 echo BOUNS_SWITCH_4_PROCESSED_COLL=$BOUNS_SWITCH_4_PROCESSED_COLL
 echo DEV_TRY_ROUND=$DEV_TRY_ROUND
+echo DEBUG_FILE=$DEBUG_FILE
 
 if [ ! -z $ENABLE_VQ ];then
     echo TOLERANT_FAIL_CHECK_SQ_CNT=$TOLERANT_FAIL_CHECK_SQ_CNT
@@ -51,7 +56,7 @@ if [ "$BINARY" == "DEBUG" ];then
     fi
     export SHOW_ALL_PREPARED_COLL=0
     export NITER=5
-    export NBYTES=64
+    export NBYTES=2
     export WARMITER=2
     export MITER=1
     export CHECK=0
