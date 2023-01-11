@@ -1,5 +1,7 @@
 clear
 
+export MY_NUM_DEV=$1
+
 export DEBUG_CC=1
 export DEBUG_ENQ=1
 
@@ -47,7 +49,6 @@ fi
 
 if [ "$BINARY" == "DEBUG" ];then
     target="./build/ofccl_all_reduce_perf"
-    export MY_NUM_DEV=2
     if [ $MY_NUM_DEV = 4 ]; then
         export CUDA_VISIBLE_DEVICES=0,1,4,5
     fi
@@ -62,7 +63,6 @@ if [ "$BINARY" == "DEBUG" ];then
     export CHECK=0
 elif [ "$BINARY" == "PERF" ];then
     target="./build/ofccl_all_reduce_perf"
-    export MY_NUM_DEV=8
     if [ $MY_NUM_DEV = 4 ]; then
         export CUDA_VISIBLE_DEVICES=0,1,4,5
     fi
@@ -74,7 +74,6 @@ elif [ "$BINARY" == "PERF" ];then
     export CHECK=0
 elif [ "$BINARY" == "MS" ];then
     target="./build/ofccl_all_reduce_ms_perf"
-    export MY_NUM_DEV=4
     if [ $MY_NUM_DEV = 4 ]; then
         export CUDA_VISIBLE_DEVICES=0,1,4,5
     fi
@@ -96,8 +95,42 @@ if [ -z $RUN_TYPE ];then
     # RUN_TYPE="NCU"
 fi
 
+# typedef enum { ncclInt8       = 0, ncclChar       = 0,
+#                ncclUint8      = 1,
+#                ncclInt32      = 2, ncclInt        = 2,
+#                ncclUint32     = 3,
+#                ncclInt64      = 4,
+#                ncclUint64     = 5,
+#                ncclFloat16    = 6, ncclHalf       = 6,
+#                ncclFloat32    = 7, ncclFloat      = 7,
+#                ncclFloat64    = 8, ncclDouble     = 8,
+# #if defined(__CUDA_BF16_TYPES_EXIST__)
+#                ncclBfloat16   = 9,
+#                ncclNumTypes   = 10
+# #else
+#                ncclNumTypes   = 9
+# #endif
+# } ncclDataType_t;
+
+# 用这个：
+# const char *test_typenames[ncclNumTypes] = {"int8",
+#                                             "uint8",
+#                                             "int32",
+#                                             "uint32",
+#                                             "int64",
+#                                             "uint64",
+#                                             "half",
+#                                             "float",
+#                                             "double"
+# #if defined(__CUDA_BF16_TYPES_EXIST__) &&                                      \
+#     NCCL_VERSION_CODE >= NCCL_VERSION(2, 10, 0)
+#                                             ,
+#                                             "bfloat16"
+# #endif
+# };
+
 if [ "$RUN_TYPE" == "PURE" ];then
-    cmd="$target -b $NBYTES -e $NBYTES -f 2 -t $MY_NUM_DEV -g 1 -n $NITER -w $WARMITER -c $CHECK -M $MITER"
+    cmd="$target -d half -b $NBYTES -e $NBYTES -f 2 -t $MY_NUM_DEV -g 1 -n $NITER -w $WARMITER -c $CHECK -M $MITER"
 elif [ "$RUN_TYPE" == "GDB" ];then
     cmd="cuda-gdb $target"
     # set args -b 64 -e 64 -f 2 -t 2 -g 1 -n 1 -w 0 -c 0
