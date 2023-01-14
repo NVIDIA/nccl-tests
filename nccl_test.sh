@@ -1,5 +1,7 @@
 clear
 
+export MY_NUM_DEV=$1
+
 cd /home/panlichen/work2/nccl-tests
 export LD_LIBRARY_PATH=/home/panlichen/work2/ofccl/build/lib
 export NCCL_PROTO=Simple
@@ -14,33 +16,40 @@ if [ -z $BINARY ];then
     # BINARY="PERF"
 fi
 
-if [ "$BINARY" == "DEBUG" ];then
+FUNC=$2
+
+if [ "$FUNC" == "AR" ]; then
     target="./build/all_reduce_perf"
-    export MY_NUM_DEV=2
+elif [ "$FUNC" == "AG" ]; then
+    target="./build/all_gather_perf"
+elif [ "$FUNC" == "RS" ]; then
+    target="./build/reduce_scatter_perf"
+elif [ "$FUNC" == "R" ]; then
+    target="./build/reduce_perf"
+elif [ "$FUNC" == "B" ]; then
+    target="./build/broadcast_perf"
+fi
+
+
+if [ "$BINARY" == "DEBUG" ];then
     if [ $MY_NUM_DEV = 4 ]; then
         export CUDA_VISIBLE_DEVICES=0,1,4,5
     fi
-    export SHOW_ALL_PREPARED_COLL=0
     export NITER=5
-    export NBYTES=64
+    export NBYTES=1G
     export WARMITER=2
     export MITER=1
     export CHECK=0
 elif [ "$BINARY" == "PERF" ];then
-    target="./build/all_reduce_perf"
-    export MY_NUM_DEV=8
     if [ $MY_NUM_DEV = 4 ]; then
         export CUDA_VISIBLE_DEVICES=0,1,4,5
     fi
-    export SHOW_ALL_PREPARED_COLL=0
     export NITER=4
     export NBYTES=8K
     export WARMITER=2
     export MITER=4
     export CHECK=0
 elif [ "$BINARY" == "MS" ];then
-    export MY_NUM_DEV=8
-    # target="./build/ofccl_all_reduce_ms_perf"
     if [ $MY_NUM_DEV = 4 ]; then
         export CUDA_VISIBLE_DEVICES=0,1,4,5
     fi

@@ -9,11 +9,12 @@ cd /home/panlichen/work2/nccl-tests
 export LD_LIBRARY_PATH=/home/panlichen/work2/ofccl/build/lib
 export NCCL_PROTO=Simple
 export NCCL_ALGO=Ring
-# export NCCL_MAX_NCHANNELS=1
-# export NCCL_MIN_NCHANNELS=1
-# export NCCL_NTHREADS=64
+export NCCL_MAX_NCHANNELS=1
+export NCCL_MIN_NCHANNELS=1
+export NCCL_NTHREADS=64
 
 export CHECK=0
+export SHOW_ALL_PREPARED_COLL=0
 
 export TRAVERSE_TIMES=10
 export TOLERANT_UNPROGRESSED_CNT=10000
@@ -43,6 +44,23 @@ if [ ! -z $ENABLE_VQ ];then
     echo CNT_BEFORE_QUIT=$CNT_BEFORE_QUIT
 fi
 
+FUNC=$2
+if [ -z $FUNC ]; then
+    FUNC="AR"
+fi
+
+if [ "$FUNC" == "AR" ]; then
+    target="./build/ofccl_all_reduce_perf"
+elif [ "$FUNC" == "AG" ]; then
+    target="./build/ofccl_all_gather_perf"
+elif [ "$FUNC" == "RS" ]; then
+    target="./build/ofccl_reduce_scatter_perf"
+elif [ "$FUNC" == "R" ]; then
+    target="./build/ofccl_reduce_perf"
+elif [ "$FUNC" == "B" ]; then
+    target="./build/ofccl_broadcast_perf"
+fi
+
 if [ -z $BINARY ];then
     BINARY="DEBUG"
     # BINARY="MS"
@@ -50,30 +68,24 @@ if [ -z $BINARY ];then
 fi
 
 if [ "$BINARY" == "DEBUG" ];then
-    target="./build/ofccl_all_reduce_perf"
     if [ $MY_NUM_DEV = 4 ]; then
         export CUDA_VISIBLE_DEVICES=0,1,4,5
     fi
     if [ $MY_NUM_DEV = 2 ]; then
         export CUDA_VISIBLE_DEVICES=4,5
     fi
-    export SHOW_ALL_PREPARED_COLL=0
     export NITER=5
-    export NBYTES=64
+    export NBYTES=1G
     export WARMITER=2
     export MITER=1
-    export CHECK=0
 elif [ "$BINARY" == "PERF" ];then
-    target="./build/ofccl_all_reduce_perf"
     if [ $MY_NUM_DEV = 4 ]; then
         export CUDA_VISIBLE_DEVICES=0,1,4,5
     fi
-    export SHOW_ALL_PREPARED_COLL=0
     export NITER=8
     export NBYTES=8K
     export WARMITER=2
     export MITER=1
-    export CHECK=0
 elif [ "$BINARY" == "MS" ];then
     target="./build/ofccl_all_reduce_ms_perf"
     if [ $MY_NUM_DEV = 4 ]; then
@@ -132,7 +144,7 @@ fi
 # };
 
 if [ "$RUN_TYPE" == "PURE" ];then
-    cmd="$target -d half -b $NBYTES -e $NBYTES -f 2 -t $MY_NUM_DEV -g 1 -n $NITER -w $WARMITER -c $CHECK -M $MITER"
+    cmd="$target -b $NBYTES -e $NBYTES -f 2 -t $MY_NUM_DEV -g 1 -n $NITER -w $WARMITER -c $CHECK -M $MITER" #  -d half
 elif [ "$RUN_TYPE" == "GDB" ];then
     cmd="cuda-gdb $target"
     # set args -b 64 -e 64 -f 2 -t 2 -g 1 -n 1 -w 0 -c 0
