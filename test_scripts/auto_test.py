@@ -33,7 +33,7 @@ buffer_sizes = ["64", "128", "256", "512", "1K", "2K", "4K", "8K", "16K", "32K",
 
 TINY_TEST = 0
 
-DATE="230106"
+DATE="230114"
 NCCL_ORDER="1"
 host=os.environ.get("HOST")
 n = 5

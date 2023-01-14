@@ -9,9 +9,9 @@ cd /home/panlichen/work2/nccl-tests
 export LD_LIBRARY_PATH=/home/panlichen/work2/ofccl/build/lib
 export NCCL_PROTO=Simple
 export NCCL_ALGO=Ring
-export NCCL_MAX_NCHANNELS=1
-export NCCL_MIN_NCHANNELS=1
-export NCCL_NTHREADS=64
+# export NCCL_MAX_NCHANNELS=1
+# export NCCL_MIN_NCHANNELS=1
+# export NCCL_NTHREADS=64
 
 export CHECK=0
 export SHOW_ALL_PREPARED_COLL=0
