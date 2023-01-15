@@ -5,6 +5,12 @@ export MY_NUM_DEV=$1
 export DEBUG_CC=1
 export DEBUG_ENQ=1
 
+unset DEBUG_CC
+unset DEBUG_ENQ
+
+export DEBUG_NT=1
+unset DEBUG_NT
+
 cd /home/panlichen/work2/nccl-tests
 export LD_LIBRARY_PATH=/home/panlichen/work2/ofccl/build/lib
 export NCCL_PROTO=Simple

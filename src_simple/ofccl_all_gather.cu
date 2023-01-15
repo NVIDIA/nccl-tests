@@ -88,7 +88,7 @@ testResult_t AllGatherRunColl(void* sendbuff, void* recvbuff, int collId, CallBa
 
 testResult_t AllGatherPrepare(size_t count, ncclDataType_t datatype, ncclRedOp_t op, int root, ncclComm* comm, int collId, ofcclRankCtx_t rankCtx) {
 
-  NCCLCHECK(ofcclPrepareAllGather(count, datatype, op, comm, collId, rankCtx));
+  NCCLCHECK(ofcclPrepareAllGather(count, datatype, comm, collId, rankCtx));
   // OFTEST_LOG(TEST, "tid<%lu> invoke ofcclPrepareAllGather with count=%lu, collId=%d", pthread_self(), count, collId);
   return testSuccess;
 }

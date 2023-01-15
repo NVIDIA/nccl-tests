@@ -36,7 +36,7 @@ if [ "$BINARY" == "DEBUG" ];then
         export CUDA_VISIBLE_DEVICES=0,1,4,5
     fi
     export NITER=5
-    export NBYTES=1G
+    export NBYTES=64M
     export WARMITER=2
     export MITER=1
     export CHECK=0
