@@ -666,7 +666,7 @@ testResult_t prepareColl(struct threadArgs *args, ncclDataType_t type,
           &op, &u64, type, ncclScalarHostImmediate, comm));
     }
 #endif
-    TESTCHECK(args->collTest->prepareColl(count, type, op, comm, miter, rankCtx));
+    TESTCHECK(args->collTest->prepareColl(count, type, op, root, comm, miter, rankCtx));
 
 #if NCCL_VERSION_CODE >= NCCL_VERSION(2, 11, 0)
     if (opIndex >= ncclNumOps) {

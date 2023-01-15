@@ -90,7 +90,7 @@ struct testColl {
       ncclRedOp_t op, int root, int rep, int in_place);
   void (*getBw)(size_t count, int typesize, double sec, double* algBw, double* busBw, int nranks);
   testResult_t (*runColl)(void* sendbuff, void* recvbuff, int collId, CallBackArgs *args, ofcclRankCtx_t rankCtx);
-  testResult_t (*prepareColl)(size_t count, ncclDataType_t datatype, ncclRedOp_t op, ncclComm* comm, int collId, ofcclRankCtx_t rankCtx);
+  testResult_t (*prepareColl)(size_t count, ncclDataType_t datatype, ncclRedOp_t op, int root, ncclComm* comm, int collId, ofcclRankCtx_t rankCtx);
 };
 extern struct testColl allReduceTest;
 extern struct testColl allGatherTest;

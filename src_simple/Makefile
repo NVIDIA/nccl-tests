@@ -89,7 +89,7 @@ $(info CARDNAME $(NVCUFLAGS))
 DST_DIR := $(BUILDDIR)
 SRC_FILES := $(wildcard *.cu)
 OBJ_FILES := $(SRC_FILES:%.cu=${DST_DIR}/%.o)
-BIN_FILES_LIST := ofccl_all_reduce ofccl_all_gather ofccl_reduce_scatter
+BIN_FILES_LIST := ofccl_all_reduce ofccl_all_gather ofccl_reduce_scatter ofccl_reduce
 BIN_FILES := $(BIN_FILES_LIST:%=${DST_DIR}/%_perf)
 
 build: ${BIN_FILES}

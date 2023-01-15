@@ -96,7 +96,7 @@ testResult_t AllReduceRunColl(void* sendbuff, void* recvbuff, int collId, CallBa
   return testSuccess;
 }
 
-testResult_t AllReducePrepare(size_t count, ncclDataType_t datatype, ncclRedOp_t op, ncclComm* comm, int collId, ofcclRankCtx_t rankCtx) {
+testResult_t AllReducePrepare(size_t count, ncclDataType_t datatype, ncclRedOp_t op, int root, ncclComm* comm, int collId, ofcclRankCtx_t rankCtx) {
 
   NCCLCHECK(ofcclPrepareAllReduce(count, datatype, op, comm, collId, rankCtx));
   // OFTEST_LOG(TEST, "tid<%lu> invoke ofcclPrepareAllReduce with count=%lu, collId=%d", pthread_self(), count, collId);
