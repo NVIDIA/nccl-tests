@@ -6,36 +6,37 @@ int main(int argc,char* argv[]){
     freopen(argv[1],"r",stdin);
     freopen(argv[2],"a",stdout);
 
-    int ranks = *(argv[3]) - '0';
-    string str;
-    stringstream ss;
+   string inputLine;
     vector<string> a;
     vector<string> b;
-    string line;
-    // time
-    getline(cin,line);
+    string ss="bandwidth";
+    string str = "N/A";
+    int cnt = 0;
+    while(getline(cin, inputLine)){
+        if (inputLine.find(str,0)  == -1)
+            continue;
 
-    for(int t =0;t < 25;t++){
-        for(int i = 0;i < (7+ranks);i++)
-            getline(cin,line);
+        stringstream line;
+        line << inputLine;
+        string tmp;
+        stack<string> ss;
+        while(line >> tmp){
+            ss.push(tmp);
+        }
+        ss.pop();
+        b.push_back(ss.top());
+        ss.pop();
+        a.push_back(ss.top());
         
-        for(int i =0;i < 6;i++)
-            cin >> str;
-
-        a.push_back(str);
-        cin >> str;
-        b.push_back(str);
-
-        
-        for(int i = 0;i < 4;i++)
-            getline(cin,line);        
-        
+        if(++cnt == 25)
+            break;
     }
 
-    for(int i=0;i<a.size();i++)
-        cout << a[i] <<endl;
+    for(auto a1:a)
+        cout<<a1<<endl;
+
     cout <<endl;
-    for(int i=0;i<b.size();i++)
-        cout << b[i] <<endl;
-    cout<<endl<<endl;
+    for(auto b1:b)
+        cout<<b1<<endl;
+    cout << endl;
 }
