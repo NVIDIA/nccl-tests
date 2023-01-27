@@ -1,5 +1,5 @@
 import os 
-import xlrd
+
 import xlwt
 # 设置字体大小
 style = xlwt.XFStyle()
@@ -19,8 +19,8 @@ os.environ['BOUNS_SWITCH_4_PROCESSED_COLL'] = "0"
 os.environ['DEV_TRY_ROUND'] = "10"
 
 # 设置超参数
-runNcclTest = False # 运行nccl测试,仅输出原始结果
-staticNccl = False # 运行统计，输出中间结果
+runNcclTest = True # 运行nccl测试,仅输出原始结果
+staticNccl = True # 运行统计，输出中间结果
 collectNcclResult  = True# 收集nccl测试结果，写入xls
 
 
