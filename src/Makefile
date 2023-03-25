@@ -11,7 +11,7 @@ DEBUG ?= 0
 
 CUDA_LIB ?= $(CUDA_HOME)/lib64
 CUDA_INC ?= $(CUDA_HOME)/include
-NVCC = $(CUDA_HOME)/bin/nvcc
+NVCC ?= $(CUDA_HOME)/bin/nvcc
 CUDARTLIB ?= cudart
 
 CUDA_VERSION = $(strip $(shell which $(NVCC) >/dev/null && $(NVCC) --version | grep release | sed 's/.*release //' | sed 's/\,.*//'))
