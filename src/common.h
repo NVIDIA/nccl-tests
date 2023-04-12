@@ -111,13 +111,12 @@ private:
   bool persistanceMode;
   const char* timeStr;
   bool isMainThreadFlag;
-  bool isMainThread();
 public:
-  void init(std::string csvName_, const char* timeStr_);
+  Reporter(std::string csvName_, const char* timeStr_, bool isMain);
   void parameters(long bytes, long elements, const char* typeName, const char* opName, int rootName);
   void result(const char* time, float algBw, float busBw, long wrongElts);
-  void SetIsMainThread(bool isMain);
   void newStep();
+  bool isMainThread();
   ~Reporter();
 };
 

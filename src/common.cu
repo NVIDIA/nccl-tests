@@ -86,15 +86,10 @@ static int average = 1;
 static std::string resultsFile;
 
 //TODO: implement metaInfo method to peint metadata (device info etc.)
-bool Reporter::isMainThread(){
-  return isMainThreadFlag;
-}
-void Reporter::init(std::string csvName_, const char* timeStr_){
+Reporter::Reporter(std::string csvName_, const char* timeStr_, bool isMain_): csvName { csvName_ }, timeStr {timeStr_}, isMainThreadFlag { isMain_ } {
   if (!isMainThread()){
     return;
   }
-  timeStr = timeStr_;
-  csvName = csvName_;
   persistanceMode = csvName != "";
 
   if (persistanceMode){
@@ -192,8 +187,8 @@ void Reporter::newStep(){
   }
 }
 
-void Reporter::SetIsMainThread(bool isMain){
-  isMainThreadFlag = isMain;
+bool Reporter::isMainThread(){
+  return isMainThreadFlag;
 }
 
 Reporter::~Reporter(){
@@ -999,8 +994,6 @@ testResult_t run() {
   MPI_Comm_rank(mpi_comm, &ncclProc);
 #endif
   is_main_thread = is_main_proc = (proc == 0) ? 1 : 0;
-  Reporter reporter {};
-  reporter.SetIsMainThread(is_main_thread);
 
   PRINT("# nThread %d nGpus %d minBytes %ld maxBytes %ld step: %ld(%s) warmup iters: %d iters: %d agg iters: %d validation: %d graph: %d\n",
         nThreads, nGpus, minBytes, maxBytes,
@@ -1104,7 +1097,7 @@ testResult_t run() {
   fflush(stdout);
 
   const char* timeStr = report_cputime ? "cputime" : "time";
-  reporter.init(resultsFile, timeStr);
+  Reporter reporter {resultsFile, timeStr, is_main_thread==1};
 
   struct testThread threads[nThreads];
   memset(threads, 0, sizeof(struct testThread)*nThreads);
