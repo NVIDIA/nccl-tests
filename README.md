@@ -66,10 +66,10 @@ All tests support the same set of arguments :
   * `-z,--blocking <0/1>` Make NCCL collective blocking, i.e. have CPUs wait and sync after each collective. Default : 0.
   * `-G,--cudagraph <num graph launches>` Capture iterations as a CUDA graph and then replay specified number of times. Default : 0.
 * Saving results
-  * `-R,--results_file` Define path for CSV file to persist nccl-tests result along with CLI arguments. Directory has to exist! Default: "" (Do not save to CSV file).
+  * `-F,--results_file` Define path for CSV file to persist nccl-tests result along with CLI arguments. Directory has to exist! Default: "" (Do not save to CSV file).
 
 ## CSV format
-Use `-R data.csv` to persist to CSV format, the use tools like [pandas](https://pandas.pydata.org/) to analyse the results.
+Use `-F data.csv` to persist to CSV format, the use tools like [pandas](https://pandas.pydata.org/) to analyse the results.
 ```
 import pandas as pd
 df = pd.read_csv("data.csv", header=[0, 1, 2])
