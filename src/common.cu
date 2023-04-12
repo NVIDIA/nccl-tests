@@ -139,19 +139,19 @@ void Reporter::init(std::string csvName_, const char* timeStr_){
   }
 }
 
-void Reporter::parameters(long bytes, long elements, const char* typeName, const char* opName, const char* rootName){
+void Reporter::parameters(long bytes, long elements, const char* typeName, const char* opName, int rootName){
   if (!isMainThread()){
     return;
   }
 
   char parameters[1000];
   
-  const char stdoutFormat[1000] { "%12li  %12li  %8s  %6s  %6s" };
+  const char stdoutFormat[1000] { "%12li  %12li  %8s  %6s  %6i" };
   snprintf( parameters, 1000, stdoutFormat, bytes, elements, typeName, opName, rootName );
   std::cout << parameters;
 
   if (persistanceMode){
-    const char csvFormat[1000] { "%li, %li, %s, %s, %s" };
+    const char csvFormat[1000] { "%li, %li, %s, %s, %i" };
     snprintf( parameters, 1000, csvFormat, bytes, elements, typeName, opName, rootName );
     outf << parameters;
     outf.flush();
@@ -722,9 +722,7 @@ testResult_t TimeTest(struct threadArgs* args, ncclDataType_t type, const char* 
   // Benchmark
   for (size_t size = args->minbytes; size<=args->maxbytes; size = ((args->stepfactor > 1) ? size*args->stepfactor : size+args->stepbytes)) {
       setupArgs(size, type, args);
-      char rootName[100];
-      sprintf(rootName, "%6i", root); //TODO: remove 6i
-      args->reporter->parameters(max(args->sendBytes, args->expectedBytes), args->nbytes / wordSize(type), typeName, opName, rootName);
+      args->reporter->parameters(max(args->sendBytes, args->expectedBytes), args->nbytes / wordSize(type), typeName, opName, root);
       TESTCHECK(BenchTime(args, type, op, root, 0));
       TESTCHECK(BenchTime(args, type, op, root, 1));
       args->reporter->newStep();

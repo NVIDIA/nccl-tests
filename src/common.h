@@ -114,7 +114,7 @@ private:
   bool isMainThread();
 public:
   void init(std::string csvName_, const char* timeStr_);
-  void parameters(long bytes, long elements, const char* typeName, const char* opName, const char* rootName);
+  void parameters(long bytes, long elements, const char* typeName, const char* opName, int rootName);
   void result(const char* time, float algBw, float busBw, long wrongElts);
   void SetIsMainThread(bool isMain);
   void newStep();
