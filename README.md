@@ -66,10 +66,10 @@ All tests support the same set of arguments :
   * `-z,--blocking <0/1>` Make NCCL collective blocking, i.e. have CPUs wait and sync after each collective. Default : 0.
   * `-G,--cudagraph <num graph launches>` Capture iterations as a CUDA graph and then replay specified number of times. Default : 0.
 * Saving results
-  * `-F,--results_file` Define path for CSV file to persist nccl-tests result along with CLI arguments. Directory has to exist! Default: "" (Do not save to CSV file).
+  * `-F,--output_file` Export results to CSV file on rank 0. Directory has to exist! Default: "" (Do not save to CSV file - print to stdout). It will overwrite file if it already exists.
 
-## CSV format
-Use `-F data.csv` to persist to CSV format, the use tools like [pandas](https://pandas.pydata.org/) to analyse the results.
+## CSV integration with Pandas
+CSV files generated with the `-F` option can be used directly in [pandas](https://pandas.pydata.org/) to analyse the results. Here is an example printing the time column:
 ```
 import pandas as pd
 df = pd.read_csv("data.csv", header=[0, 1, 2])

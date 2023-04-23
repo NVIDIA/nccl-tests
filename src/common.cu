@@ -1,4 +1,4 @@
-  /*************************************************************************
+/*************************************************************************
  * Copyright (c) 2016-2022, NVIDIA CORPORATION. All rights reserved.
  *
  * See LICENSE.txt for license information
@@ -90,47 +90,38 @@ Reporter::Reporter(std::string csvName_, const char* timeStr_, bool isMain_): cs
   if (!isMainThread()){
     return;
   }
-  persistanceMode = csvName != "";
-
-  if (persistanceMode){
-    printf("#\n# Writting results to file: %s\n#\n", csvName.c_str());
-    outf = std::ofstream { csvName };
-  }
+  saveToCSV = csvName != "";
 
   char columnsMeta[1000];
-  const char stdoutFormatMeta[1000] { "# %10s  %12s  %8s  %6s  %6s           out-of-place                       in-place          " };
-  snprintf( columnsMeta, 1000, stdoutFormatMeta, "", "", "", "", "" );
-  std::cout << columnsMeta << std::endl;
+  char columnsName[1000];
 
-  if (persistanceMode){
+  if (saveToCSV){
+    printf("#\n# Writing results to file: %s\n#\n", csvName.c_str());
+    outf = std::ofstream { csvName };
+
     const char csvFormatMeta[1000] { ",,,,,out-of-place,out-of-place,out-of-place,out-of-place,in-place,in-place,in-place,in-place,,,,,,,,,,,,,,,,,,,\n" };
     snprintf( columnsMeta, 1000, csvFormatMeta);
     outf << columnsMeta;
-    outf.flush();
-  }
 
-  char columnsName[1000];
-
-  const char stdoutFormatName[1000] { "# %10s  %12s  %8s  %6s  %6s  %7s  %6s  %6s %6s  %7s  %6s  %6s %6s" };
-  snprintf( columnsName, 1000, stdoutFormatName, "size", "count", "type", "redop", "root", timeStr, "algbw", "busbw", "#wrong", timeStr, "algbw", "busbw", "#wrong" );
-  std::cout << columnsName << std::endl;
-
-  if (persistanceMode){
     const char csvFormatName[1000] {"size, count, type, redop, root, %s, algbw, busbw, #wrong, %s, algbw, busbw, #wrong, nthreads, ngpus, minbytes, maxbytes, stepbytes, stepfactor, check, warmup_iters, iters, agg_iters, op, datatype, root, parallel_init, blocking, stream_null, timeout, cudagraph, report_cputime\n"};
     snprintf( columnsName, 1000, csvFormatName, timeStr, timeStr );
     outf << columnsName;
-    outf.flush();
-  }
 
-  char columnsUnits[1000];
-
-  const char stdoutFormat[1000] { "# %10s  %12s  %8s  %6s  %6s  %7s  %6s  %6s  %5s  %7s  %6s  %6s  %5s" };
-  snprintf( columnsUnits, 1000, stdoutFormat, "(B)", "(elements)", "", "", "", "(us)", "(GB/s)", "(GB/s)", "", "(us)", "(GB/s)", "(GB/s)", "" );
-  std::cout << columnsUnits << std::endl;
-
-  if (persistanceMode){
     outf << "(B), (elements),,,,(us),(GB/s),(GB/s),,(us),(GB/s),(GB/s),,,,,,,,,,,,,,,,,,,,\n";
     outf.flush();
+  } else {
+    const char stdoutFormatMeta[1000] { "# %10s  %12s  %8s  %6s  %6s           out-of-place                       in-place          " };
+    snprintf( columnsMeta, 1000, stdoutFormatMeta, "", "", "", "", "" );
+    std::cout << columnsMeta << std::endl;
+
+    const char stdoutFormatName[1000] { "# %10s  %12s  %8s  %6s  %6s  %7s  %6s  %6s %6s  %7s  %6s  %6s %6s" };
+    snprintf( columnsName, 1000, stdoutFormatName, "size", "count", "type", "redop", "root", timeStr, "algbw", "busbw", "#wrong", timeStr, "algbw", "busbw", "#wrong" );
+    std::cout << columnsName << std::endl;
+
+    char columnsUnits[1000];
+    const char stdoutFormat[1000] { "# %10s  %12s  %8s  %6s  %6s  %7s  %6s  %6s  %5s  %7s  %6s  %6s  %5s" };
+    snprintf( columnsUnits, 1000, stdoutFormat, "(B)", "(elements)", "", "", "", "(us)", "(GB/s)", "(GB/s)", "", "(us)", "(GB/s)", "(GB/s)", "" );
+    std::cout << columnsUnits << std::endl;
   }
 }
 
@@ -140,16 +131,16 @@ void Reporter::parameters(long bytes, long elements, const char* typeName, const
   }
 
   char parameters[1000];
-  
-  const char stdoutFormat[1000] { "%12li  %12li  %8s  %6s  %6i" };
-  snprintf( parameters, 1000, stdoutFormat, bytes, elements, typeName, opName, rootName );
-  std::cout << parameters;
 
-  if (persistanceMode){
+  if (saveToCSV){
     const char csvFormat[1000] { "%li, %li, %s, %s, %i" };
     snprintf( parameters, 1000, csvFormat, bytes, elements, typeName, opName, rootName );
     outf << parameters;
     outf.flush();
+  } else {
+    const char stdoutFormat[1000] { "%12li  %12li  %8s  %6s  %6i" };
+    snprintf( parameters, 1000, stdoutFormat, bytes, elements, typeName, opName, rootName );
+    std::cout << parameters;
   }
 }
 
@@ -160,15 +151,15 @@ void Reporter::result(const char* time, float algBw, float busBw, long wrongElts
 
   char result[1000];
 
-  const char stdoutFormat[1000] { "  %7s  %6.2f  %6.2f  %5li" };
-  snprintf( result, 1000, stdoutFormat, time, algBw, busBw, wrongElts);
-  std::cout << result;
-
-  if (persistanceMode){
+  if (saveToCSV){
     const char csvFormat[1000] { ", %s, %f, %f, %li" };
     snprintf( result, 1000, csvFormat, time, algBw, busBw, wrongElts);
     outf << result;
     outf.flush();
+  } else {
+    const char stdoutFormat[1000] { "  %7s  %6.2f  %6.2f  %5li" };
+    snprintf( result, 1000, stdoutFormat, time, algBw, busBw, wrongElts);
+    std::cout << result;
   }
 }
 
@@ -177,13 +168,14 @@ void Reporter::newStep(){
     return;
   }
 
-  std::cout << "\n";
-  if (persistanceMode){
+  if (saveToCSV){
     const char csvFormat [1000] {",%i,%i,%lu,%lu,%lu,%lu,%i,%i,%i,%i,%s,%s,%i,%i,%i,%i,%i,%i,%i\n"};
     char result[1000];
     snprintf( result, 1000, csvFormat, nThreads, nGpus, minBytes, maxBytes, stepBytes, stepFactor, datacheck, warmup_iters, iters, agg_iters, test_opnames[ncclop], test_typenames[nccltype], ncclroot, parallel_init, blocking_coll, streamnull, timeout, cudaGraphLaunches, report_cputime);
     outf << result;
     outf.flush();
+  } else {
+    std::cout << "\n";
   }
 }
 
@@ -195,7 +187,7 @@ Reporter::~Reporter(){
   if (!isMainThread()){
     return;
   }
-  if (persistanceMode){
+  if (saveToCSV){
     outf << "\n";
     outf.close();
   }
@@ -825,7 +817,7 @@ int main(int argc, char* argv[]) {
     {"cudagraph", required_argument, 0, 'G'},
     {"report_cputime", required_argument, 0, 'C'},
     {"average", required_argument, 0, 'a'},
-    {"results_file", required_argument, 0, 'F'},
+    {"output_file", required_argument, 0, 'F'},
     {"help", no_argument, 0, 'h'},
     {}
   };
@@ -949,7 +941,7 @@ int main(int argc, char* argv[]) {
             "[-G,--cudagraph <num graph launches>] \n\t"
             "[-C,--report_cputime <0/1>] \n\t"
             "[-a,--average <0/1/2/3> report average iteration time <0=RANK0/1=AVG/2=MIN/3=MAX>] \n\t"
-            "[-F,--results_file <path to CSV file where results will be persisted (directory has to exist!)> ] \n\t"
+            "[-F,--output_file <CSV file path> Export results to CSV file on rank 0. Directory has to exist! Default: "" (Do not save to CSV file - print to stdout). It will overwrite file if it already exists. ] \n\t"
             "[-h,--help]\n",
           basename(argv[0]));
         return 0;
@@ -1047,7 +1039,6 @@ testResult_t run() {
 #ifdef MPI_SUPPORT
   MPI_Bcast(&ncclId, sizeof(ncclId), MPI_BYTE, 0, mpi_comm);
 #endif
-
   int gpus[nGpus*nThreads];
   cudaStream_t streams[nGpus*nThreads];
   void* sendbuffs[nGpus*nThreads];
@@ -1132,7 +1123,7 @@ testResult_t run() {
     threads[t].args.reporter = &reporter;
 
     threads[t].func = parallel_init ? threadInit : threadRunTests;
-    
+
     if (t)
       TESTCHECK(threadLaunch(threads+t));
     else

@@ -108,7 +108,7 @@ class Reporter {
 private:
   std::ofstream outf;
   std::string csvName;
-  bool persistanceMode;
+  bool saveToCSV;
   const char* timeStr;
   bool isMainThreadFlag;
 public:
