@@ -1121,9 +1121,7 @@ testResult_t run() {
     threads[t].args.reportErrors = datacheck;
 
     threads[t].args.reporter = &reporter;
-
     threads[t].func = parallel_init ? threadInit : threadRunTests;
-
     if (t)
       TESTCHECK(threadLaunch(threads+t));
     else
