@@ -7,7 +7,6 @@
 #include "cuda_runtime.h"
 #include "common.h"
 
-thread_local int threadNum = -1;
 
 void AlltoAllvGetCollByteCount(size_t *sendcount, size_t *recvcount, size_t *paramcount, size_t *sendInplaceOffset, size_t *recvInplaceOffset, size_t count, int nranks) {
   *sendcount = (count/nranks)*nranks; 
@@ -49,8 +48,9 @@ void AlltoAllvGetBw(size_t count, int typesize, double sec, double* algBw, doubl
 }
 
 testResult_t AlltoAllvRunColl(void* sendbuff, void* recvbuff, size_t count, ncclDataType_t type, ncclRedOp_t op, int root, ncclComm_t comm, cudaStream_t stream) {
-  int nRanks;
+  int nRanks, myRank;
   NCCLCHECK(ncclCommCount(comm, &nRanks));
+  NCCLCHECK(ncclCommUserRank(comm, &myRank));
   size_t rankOffset = count * wordSize(type);
 
 #if NCCL_MAJOR < 2 || NCCL_MINOR < 7
@@ -61,8 +61,7 @@ testResult_t AlltoAllvRunColl(void* sendbuff, void* recvbuff, size_t count, nccl
 
 
   for (int r=0; r<nRanks; r++) {
-    int count_mod = (count-threadNum-r-1) % count; //modify the count variable to to be strictly less than count, but depend on both the peer rank and the sending thread number
-
+    int count_mod = (count-myRank-r-1) % count; //modify the count variable to to be strictly less than count, but depend on both the peer rank and the sending rank
     NCCLCHECK(ncclSend(((char*)sendbuff)+r*rankOffset, count_mod, type, r, comm, stream));
     NCCLCHECK(ncclRecv(((char*)recvbuff)+r*rankOffset, count_mod, type, r, comm, stream));
   }
@@ -88,7 +87,6 @@ void AlltoAllvGetBuffSize(size_t *sendcount, size_t *recvcount, size_t count, in
 
 testResult_t AlltoAllvRunTest(struct threadArgs* args, int root, ncclDataType_t type, const char* typeName, ncclRedOp_t op, const char* opName) {
   args->collTest = &AlltoAllvTest;
-  threadNum = args->thread;
   ncclDataType_t *run_types;
   const char **run_typenames;
   int type_count;
