@@ -7,6 +7,8 @@
 #include "cuda_runtime.h"
 #include "common.h"
 
+thread_local int threadNum = -1;
+
 void AlltoAllvGetCollByteCount(size_t *sendcount, size_t *recvcount, size_t *paramcount, size_t *sendInplaceOffset, size_t *recvInplaceOffset, size_t count, int nranks) {
   *sendcount = (count/nranks)*nranks; 
   *recvcount = (count/nranks)*nranks; 
@@ -16,8 +18,6 @@ void AlltoAllvGetCollByteCount(size_t *sendcount, size_t *recvcount, size_t *par
 }
 
 testResult_t AlltoAllvInitData(struct threadArgs* args, ncclDataType_t type, ncclRedOp_t op, int root, int rep, int in_place) {
-  
-  //Can maybe introduce heterogeneity in data size by conditioning sendcnt and recvcont on rank here?
   
   size_t sendcount = args->sendBytes / wordSize(type);
   size_t recvcount = args->expectedBytes / wordSize(type);
@@ -59,10 +59,15 @@ testResult_t AlltoAllvRunColl(void* sendbuff, void* recvbuff, size_t count, nccl
 #else
   NCCLCHECK(ncclGroupStart());
 
+
   for (int r=0; r<nRanks; r++) {
-    NCCLCHECK(ncclSend(((char*)sendbuff)+r*rankOffset, count, type, r, comm, stream));
-    NCCLCHECK(ncclRecv(((char*)recvbuff)+r*rankOffset, count, type, r, comm, stream));
+    int count_mod = (count-threadNum-r-1) % count; //modify the count variable to to be strictly less than count, but depend on both the peer rank and the sending thread number
+
+    NCCLCHECK(ncclSend(((char*)sendbuff)+r*rankOffset, count_mod, type, r, comm, stream));
+    NCCLCHECK(ncclRecv(((char*)recvbuff)+r*rankOffset, count_mod, type, r, comm, stream));
   }
+
+
   NCCLCHECK(ncclGroupEnd());
   return testSuccess;
 #endif
@@ -83,10 +88,10 @@ void AlltoAllvGetBuffSize(size_t *sendcount, size_t *recvcount, size_t count, in
 
 testResult_t AlltoAllvRunTest(struct threadArgs* args, int root, ncclDataType_t type, const char* typeName, ncclRedOp_t op, const char* opName) {
   args->collTest = &AlltoAllvTest;
+  threadNum = args->thread;
   ncclDataType_t *run_types;
   const char **run_typenames;
   int type_count;
-
   if ((int)type != -1) {
     type_count = 1;
     run_types = &type;
