@@ -9,11 +9,11 @@
 
 
 void AlltoAllvGetCollByteCount(size_t *sendcount, size_t *recvcount, size_t *paramcount, size_t *sendInplaceOffset, size_t *recvInplaceOffset, size_t count, int nranks) {
-  *sendcount = (count/nranks)*nranks; 
-  *recvcount = (count/nranks)*nranks; 
+  *sendcount = (count/nranks)*nranks; //each rank in a2av should be able to send up to count to all of the others combined. 
+  *recvcount = (count/nranks)*nranks; //each rank in a2av should be able to receive up to count from all of its peers.
   *sendInplaceOffset = 0;
   *recvInplaceOffset = 0;
-  *paramcount = count/nranks;
+  *paramcount = count/nranks; //each rank in a2av gets one even chunk to send out.
 }
 
 testResult_t AlltoAllvInitData(struct threadArgs* args, ncclDataType_t type, ncclRedOp_t op, int root, int rep, int in_place) {
@@ -24,13 +24,16 @@ testResult_t AlltoAllvInitData(struct threadArgs* args, ncclDataType_t type, ncc
 
   for (int i=0; i<args->nGpus; i++) {
     CUDACHECK(cudaSetDevice(args->gpus[i]));
-    int rank = ((args->proc*args->nThreads + args->thread)*args->nGpus + i);
-    CUDACHECK(cudaMemset(args->recvbuffs[i], 0, args->expectedBytes));
+    CUDACHECK(cudaMemset(args->recvbuffs[i], 0, args->expectedBytes)); //zeroes out the receive buffer of each GPU with total size (recvcount*wordSize(type))
+    CUDACHECK(cudaMemcpy(args->expected[i], args->recvbuffs[i], args->expectedBytes, cudaMemcpyDefault)); //copies the zeroed out receive buffer to the expected buffer
+    int rank = ((args->proc*args->nThreads + args->thread)*args->nGpus + i); //current rank
     void* data = in_place ? args->recvbuffs[i] : args->sendbuffs[i];
-    TESTCHECK(InitData(data, sendcount, 0, type, ncclSum, 33*rep + rank, 1, 0));
+    TESTCHECK(InitData(data, sendcount, 0, type, ncclSum, 33*rep + rank, 1, 0)); //initializes the sendbuffer data for this rank 
     for (int j=0; j<nranks; j++) {
-      size_t partcount = sendcount/nranks;
-      TESTCHECK(InitData((char*)args->expected[i] + j*partcount*wordSize(type), partcount, rank*partcount, type, ncclSum, 33*rep + j, 1, 0));
+      //j == peer rank 
+      size_t partcount = sendcount/nranks; //create chunk definition to use in offsetting the data initialization
+      size_t partcount_mod = (partcount - j - rank - 1) % partcount; //imbalance the count of data to initialize same way we do in the test
+      TESTCHECK(InitData((char*)args->expected[i] + j*partcount*wordSize(type), partcount_mod, rank*partcount, type, ncclSum, 33*rep + j, 1, 0));
     }
     CUDACHECK(cudaDeviceSynchronize());
   }
