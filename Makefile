@@ -7,9 +7,9 @@
 BUILDDIR ?= build
 override BUILDDIR := $(abspath $(BUILDDIR))
 
-.PHONY : all clean
+.PHONY: all clean
 
-default : src.build
+default: src.build
 
 TARGETS=src
 
