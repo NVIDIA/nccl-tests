@@ -14,40 +14,50 @@ testResult_t parseParamFile(int nranks, std::vector<std::vector<double>> &imbala
   if (!paramFile.is_open()) {
     PRINT("\nUNABLE TO OPEN PARAMS FILE\n");
     return testInternalError;
-    exit(-1);
   }
 
   std::string row;
+  int rowidx = 0;
   while(std::getline(paramFile,row)){ //iterate over every row
-
     std::vector<double> values; //values from this line
     std::stringstream rowstream(row);
     std::string value;
-    while(std::getline(rowstream,value,',')){ //go over the row and get each value
+    double rowsum = 0;
+    while(std::getline(rowstream,value,',')){ //go over the row and get each value  
       double dval = std::stod(value);
       if(dval<0 || dval>1) {
-        PRINT("\nINVALID PARAMS FILE, PARAMETER OUT OF 0:1 RANGE\n");
+        PRINT("\nINVALID PARAMS FILE, PARAMETER OUT OF 0:1 RANGE, ROW NUMBER: %i \n", rowidx);
         return testInternalError;
-        exit(-1);
-      } //ensure that the value is between 0 and 1 (inclusive)
-
+      } //ensure that the value is between 0 and 1 (necessary for probability distribution)
+      rowsum += dval;
       values.push_back(dval);
     }
-    if(values.size()!=nranks) return testInternalError; //ensure that this row has the right amount of values
+    if(rowsum!=1.0){
+      PRINT("\nINVALID PARAMS FILE, SUM OF ROW %i IS NOT 1\n", rowidx);
+      return testInternalError;
+    } //ensure that this row is a valid distribution
+    if(values.size()!=nranks) {
+      PRINT("\nINVALID PARAMS FILE, ROW %i DOES NOT HAVE CORRECT NUMBER OF VALUES\n", rowidx);
+      return testInternalError;
+    }//ensure that this row has the right amount of values
     paramFile_data.push_back(values);
+    rowidx++;
   }
 
-  if(paramFile_data.size()!=nranks) return testInternalError; //ensure we have the right amount of rows
+  if(paramFile_data.size()!=nranks) {
+    PRINT("\nINVALID PARAMS FILE, DOES NOT HAVE CORRECT NUMBER OF ROWS\n");
+    return testInternalError;
+  } //ensure we have the right amount of rows
   
   imbalancingFactors = paramFile_data; //store the data in the global variable
   return testSuccess;
 } 
 void AlltoAllvGetCollByteCount(size_t *sendcount, size_t *recvcount, size_t *paramcount, size_t *sendInplaceOffset, size_t *recvInplaceOffset, size_t count, int nranks) {
-  *sendcount = (count/nranks)*nranks; //each rank in a2av should be able to send up to count to all of the others combined. 
-  *recvcount = (count/nranks)*nranks; //each rank in a2av should be able to receive up to count from all of its peers.
+  *sendcount = (count/nranks)*nranks; //Total send count rounded to a multiple of ranks 
+  *recvcount = (count/nranks)*nranks; //Total recv count rounded to a multiple of ranks
   *sendInplaceOffset = 0;
   *recvInplaceOffset = 0;
-  *paramcount = count/nranks; //each rank in a2av gets one even chunk to send out.
+  *paramcount = (count/nranks); //each rank in a2av can send up to 1/nranks data.
 }
 
 testResult_t AlltoAllvInitData(struct threadArgs* args, ncclDataType_t type, ncclRedOp_t op, int root, int rep, int in_place) {
@@ -67,7 +77,6 @@ testResult_t AlltoAllvInitData(struct threadArgs* args, ncclDataType_t type, ncc
     TESTCHECK(InitData(data, sendcount, 0, type, ncclSum, 33*rep + rank, 1, 0)); //initializes the sendbuffer data for this rank 
     for (int j=0; j<nranks; j++) { 
       size_t partcount = sendcount/nranks; //create chunk definition to use in offsetting the data initialization
-      // size_t partcount_mod = (partcount - j - rank - 1) % partcount; //imbalance the count of data to initialize same way we do in the test
       size_t partcount_mod = partcount * imbalancingFactors[j][rank]; //imbalance the count of data to initialize same way we do in the test
 
       TESTCHECK(InitData((char*)args->expected[i] + j*partcount*wordSize(type), partcount_mod, rank*partcount, type, ncclSum, 33*rep + j, 1, 0));
