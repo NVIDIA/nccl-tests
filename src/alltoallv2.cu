@@ -5,11 +5,12 @@
 #include "cuda_runtime.h"
 #include "common.h"
 
+int CHECK = 0;
 
-testResult_t parseParamFile(int nranks, std::vector<std::vector<double>> &imbalancingFactors){
+testResult_t parseParamFile(int nranks, std::vector<std::vector<double>> &imbalancingFactors, char filename[64]){
   //Open param csv
   std::vector<std::vector<double>> paramFile_data;
-  std::ifstream paramFile("alltoallv_param.csv");
+  std::ifstream paramFile(filename);
 
   if (!paramFile.is_open()) {
     PRINT("\nUNABLE TO OPEN PARAMS FILE\n");
@@ -22,22 +23,16 @@ testResult_t parseParamFile(int nranks, std::vector<std::vector<double>> &imbala
     std::vector<double> values; //values from this line
     std::stringstream rowstream(row);
     std::string value;
-    double rowsum = 0;
     while(std::getline(rowstream,value,',')){ //go over the row and get each value  
       double dval = std::stod(value);
       if(dval<0 || dval>1) {
         PRINT("\nINVALID PARAMS FILE, PARAMETER OUT OF 0:1 RANGE, ROW NUMBER: %i \n", rowidx);
         return testInternalError;
       } //ensure that the value is between 0 and 1 (necessary for probability distribution)
-      rowsum += dval;
       values.push_back(dval);
     }
-    if(rowsum!=1.0){
-      PRINT("\nINVALID PARAMS FILE, SUM OF ROW %i IS NOT 1\n", rowidx);
-      return testInternalError;
-    } //ensure that this row is a valid distribution
     if(values.size()!=nranks) {
-      PRINT("\nINVALID PARAMS FILE, ROW %i DOES NOT HAVE CORRECT NUMBER OF VALUES\n", rowidx);
+      PRINT("\nINVALID PARAMS FILE, ROW %i DOES NOT HAVE CORRECT NUMBER OF VALUES, HAS %lu ENTRIES, NEEDS %i ENTRIES\n", rowidx, values.size(), nranks);
       return testInternalError;
     }//ensure that this row has the right amount of values
     paramFile_data.push_back(values);
@@ -66,7 +61,8 @@ testResult_t AlltoAllvInitData(struct threadArgs* args, ncclDataType_t type, ncc
   int nranks = args->nProcs*args->nThreads*args->nGpus;
   //parse the param file
   std::vector<std::vector<double>> imbalancingFactors;
-  testResult_t parseSuccess = parseParamFile(nranks, imbalancingFactors);
+  testResult_t parseSuccess = parseParamFile(nranks, imbalancingFactors, args->param_file);
+  CHECK = 1;
   if(parseSuccess != testSuccess) return parseSuccess;
   for (int i=0; i<args->nGpus; i++) {
     CUDACHECK(cudaSetDevice(args->gpus[i]));
@@ -101,10 +97,14 @@ testResult_t AlltoAllvRunColl(void* sendbuff, void* recvbuff, size_t count, nccl
   NCCLCHECK(ncclCommCount(comm, &nRanks));
   NCCLCHECK(ncclCommUserRank(comm, &myRank));
   std::vector<std::vector<double>> imbalancingFactors;
-  testResult_t parseSuccess = parseParamFile(nRanks, imbalancingFactors); //parse the param file
+  struct threadArgs* args = (struct threadArgs*) (__builtin_frame_address(1));
+  testResult_t parseSuccess = parseParamFile(nRanks, imbalancingFactors, args->param_file); //parse the param file
   if(parseSuccess != testSuccess) return parseSuccess;
   size_t rankOffset = count * wordSize(type);
 
+  // Get the base address of the previous stack frame. 
+  // Since this function is only ever called from the startColl function, this will be the address of the startColl function's stack frame. 
+  // The beginning of that stack frame will be the threadargs struct.
 #if NCCL_MAJOR < 2 || NCCL_MINOR < 7
   printf("NCCL 2.7 or later is needed for alltoallv. This test was compiled with %d.%d.\n", NCCL_MAJOR, NCCL_MINOR);
   return testNcclError;

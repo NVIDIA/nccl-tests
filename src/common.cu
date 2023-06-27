@@ -59,6 +59,7 @@ int is_main_proc = 0;
 thread_local int is_main_thread = 0;
 
 // Command line parameter defaults
+static char param_file[64];
 static int nThreads = 1;
 static int nGpus = 1;
 static size_t minBytes = 32*1024*1024;
@@ -685,6 +686,7 @@ int main(int argc, char* argv[]) {
   double parsed;
   int longindex;
   static struct option longopts[] = {
+    {"param_file",optional_argument, 0, 'v'},
     {"nthreads", required_argument, 0, 't'},
     {"ngpus", required_argument, 0, 'g'},
     {"minbytes", required_argument, 0, 'b'},
@@ -711,12 +713,15 @@ int main(int argc, char* argv[]) {
 
   while(1) {
     int c;
-    c = getopt_long(argc, argv, "t:g:b:e:i:f:n:m:w:p:c:o:d:r:z:y:T:hG:C:a:", longopts, &longindex);
+    c = getopt_long(argc, argv, "v:t:g:b:e:i:f:n:m:w:p:c:o:d:r:z:y:T:hG:C:a:", longopts, &longindex);
 
     if (c == -1)
       break;
 
     switch(c) {
+      case 'v':
+        strcpy(param_file,optarg);
+        break;
       case 't':
         nThreads = strtol(optarg, NULL, 0);
         break;
@@ -983,6 +988,8 @@ testResult_t run() {
   memset(threads, 0, sizeof(struct testThread)*nThreads);
 
   for (int t=nThreads-1; t>=0; t--) {
+    strcpy(threads[t].args.param_file, param_file);
+
     threads[t].args.minbytes=minBytes;
     threads[t].args.maxbytes=maxBytes;
     threads[t].args.stepbytes=stepBytes;
