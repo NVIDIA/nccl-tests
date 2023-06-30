@@ -860,13 +860,18 @@ testResult_t run() {
     if (hostHashs[p] == hostHashs[proc]) localRank++;
   }
 
+  MPI_Comm mpi_comm = MPI_COMM_WORLD;
   char* str = getenv("NCCL_TESTS_SPLIT_MASK");
-  uint64_t mask = str ? strtoul(str, NULL, 16) : 0;
-  MPI_Comm mpi_comm;
-  color = proc & mask;
-  MPI_Comm_split(MPI_COMM_WORLD, color, proc, &mpi_comm);
-  MPI_Comm_size(mpi_comm, &ncclProcs);
-  MPI_Comm_rank(mpi_comm, &ncclProc);
+  if (str) {
+    uint64_t mask = strtoul(str, NULL, 16);
+    color = proc & mask;
+    MPI_Comm_split(MPI_COMM_WORLD, color, proc, &mpi_comm);
+    MPI_Comm_size(mpi_comm, &ncclProcs);
+    MPI_Comm_rank(mpi_comm, &ncclProc);
+  } else {
+    ncclProcs = totalProcs;
+    ncclProc = proc;
+  }
 #endif
   is_main_thread = is_main_proc = (proc == 0) ? 1 : 0;
 
