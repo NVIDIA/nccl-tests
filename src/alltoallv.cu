@@ -65,7 +65,7 @@ testResult_t AlltoAllvInitData(struct threadArgs* args, ncclDataType_t type, ncc
   int nranks = args->nProcs*args->nThreads*args->nGpus;
   //parse the param file
   std::vector<std::vector<double>> imbalancingFactors;
-  testResult_t parseSuccess = parseParamFile(nranks, imbalancingFactors, args->param_file);
+  testResult_t parseSuccess = parseParamFile(nranks, imbalancingFactors, args->setup_file);
   CHECK = 1;
   if(parseSuccess != testSuccess) return parseSuccess;
   for (int i=0; i<args->nGpus; i++) {
@@ -99,7 +99,7 @@ testResult_t AlltoAllvRunColl(void* sendbuff, void* recvbuff, size_t count, nccl
   NCCLCHECK(ncclCommCount(comm, &nRanks));
   NCCLCHECK(ncclCommUserRank(comm, &myRank));
   std::vector<std::vector<double>> imbalancingFactors; 
-  testResult_t parseSuccess = parseParamFile(nRanks, imbalancingFactors, args->param_file); //parse the param file
+  testResult_t parseSuccess = parseParamFile(nRanks, imbalancingFactors, args->setup_file); //parse the param file
   if(parseSuccess != testSuccess) return parseSuccess;
   size_t rankOffset = count * wordSize(type);
 

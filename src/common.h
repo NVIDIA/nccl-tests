@@ -110,7 +110,7 @@ struct testEngine {
 extern struct testEngine ncclTestEngine;
 
 struct threadArgs {
-  char param_file[64];
+  char setup_file[64];
 
   size_t nbytes;
   size_t minbytes;
