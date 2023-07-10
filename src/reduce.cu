@@ -39,7 +39,7 @@ void ReduceGetBw(size_t count, int typesize, double sec, double* algBw, double* 
   *busBw = baseBw;
 }
 
-testResult_t ReduceRunColl(void* sendbuff, void* recvbuff, size_t count, ncclDataType_t type, ncclRedOp_t op, int root, ncclComm_t comm, cudaStream_t stream) {
+testResult_t ReduceRunColl(void* sendbuff, void* recvbuff, size_t count, ncclDataType_t type, ncclRedOp_t op, int root, ncclComm_t comm, cudaStream_t stream, struct threadArgs* args) {
   NCCLCHECK(ncclReduce(sendbuff, recvbuff, count, type, op, root, comm, stream));
   return testSuccess;
 }

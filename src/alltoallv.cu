@@ -57,12 +57,11 @@ void AlltoAllvGetCollByteCount(size_t *sendcount, size_t *recvcount, size_t *par
   *recvcount = (count/nranks)*nranks; //Total recv count rounded to a multiple of ranks
   *sendInplaceOffset = 0;
   *recvInplaceOffset = 0;
-  *paramcount = (count/nranks);
+  *paramcount = (count/nranks); //Each rank can send a maximum of count/nranks data to each other rank
 }
 
 testResult_t AlltoAllvInitData(struct threadArgs* args, ncclDataType_t type, ncclRedOp_t op, int root, int rep, int in_place) {
-  size_t sendcount = args->sendBytes / wordSize(type);
-  size_t recvcount = args->expectedBytes / wordSize(type);
+  size_t maxchunk = args->nbytes / wordSize(type);
   int nranks = args->nProcs*args->nThreads*args->nGpus;
   //parse the param file
   std::vector<std::vector<double>> imbalancingFactors;
@@ -75,12 +74,10 @@ testResult_t AlltoAllvInitData(struct threadArgs* args, ncclDataType_t type, ncc
     CUDACHECK(cudaMemcpy(args->expected[i], args->recvbuffs[i], args->expectedBytes, cudaMemcpyDefault)); //copies the zeroed out receive buffer to the expected buffer
     int rank = ((args->proc*args->nThreads + args->thread)*args->nGpus + i); //current rank
     void* data = in_place ? args->recvbuffs[i] : args->sendbuffs[i];
-    TESTCHECK(InitData(data, sendcount, 0, type, ncclSum, 33*rep + rank, 1, 0)); //initializes the sendbuffer data for this rank 
+    TESTCHECK(InitData(data, maxchunk*nranks, 0, type, ncclSum, 33*rep + rank, 1, 0)); //initializes the sendbuffer data for this rank. Should be chunk size * nranks
     for (int j=0; j<nranks; j++) { 
-      size_t partcount = sendcount/nranks; //create chunk definition to use in offsetting the data initialization
-      size_t partcount_mod = partcount * imbalancingFactors[j][rank]; //imbalance the count of data to initialize same way we do in the test
-
-      TESTCHECK(InitData((char*)args->expected[i] + j*partcount*wordSize(type), partcount_mod, rank*partcount, type, ncclSum, 33*rep + j, 1, 0));
+      size_t partcount_mod = maxchunk * imbalancingFactors[j][rank]; //imbalance the count of data to initialize same way we do in the test
+      TESTCHECK(InitData((char*)args->expected[i] + j*maxchunk*wordSize(type), partcount_mod, rank*maxchunk, type, ncclSum, 33*rep + j, 1, 0));
     }
     CUDACHECK(cudaDeviceSynchronize());
   }
@@ -97,22 +94,15 @@ void AlltoAllvGetBw(size_t count, int typesize, double sec, double* algBw, doubl
   *busBw = baseBw * factor;
 }
 
-testResult_t AlltoAllvRunColl(void* sendbuff, void* recvbuff, size_t count, ncclDataType_t type, ncclRedOp_t op, int root, ncclComm_t comm, cudaStream_t stream) {
+testResult_t AlltoAllvRunColl(void* sendbuff, void* recvbuff, size_t count, ncclDataType_t type, ncclRedOp_t op, int root, ncclComm_t comm, cudaStream_t stream, struct threadArgs* args) {
   int nRanks, myRank;
   NCCLCHECK(ncclCommCount(comm, &nRanks));
   NCCLCHECK(ncclCommUserRank(comm, &myRank));
   std::vector<std::vector<double>> imbalancingFactors; 
-
-  // Since this function is only ever called from the startColl function, this builtin call will return the address of the startColl function's stack frame. 
-  // The beginning of that stack frame will be the threadargs struct, which contains the param filename.
-  struct threadArgs* args = (struct threadArgs*) (__builtin_frame_address(1));
   testResult_t parseSuccess = parseParamFile(nRanks, imbalancingFactors, args->param_file); //parse the param file
   if(parseSuccess != testSuccess) return parseSuccess;
   size_t rankOffset = count * wordSize(type);
 
-  // Get the base address of the previous stack frame. 
-  // Since this function is only ever called from the startColl function, this will be the address of the startColl function's stack frame. 
-  // The beginning of that stack frame will be the threadargs struct.
 #if NCCL_MAJOR < 2 || NCCL_MINOR < 7
   printf("NCCL 2.7 or later is needed for alltoallv. This test was compiled with %d.%d.\n", NCCL_MAJOR, NCCL_MINOR);
   return testNcclError;
