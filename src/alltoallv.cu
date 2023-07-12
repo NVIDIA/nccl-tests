@@ -13,12 +13,12 @@ int CHECK = 0;
  * @param imbalancingFactors The reference to the vector that will store the parsed data
  * @param filename The name of the parameter file to parse
 **/
-testResult_t parseParamFile(int nranks, std::vector<std::vector<double>> &imbalancingFactors, char filename[PATH_MAX]){
+testResult_t parseParamFile(int nranks, std::vector<std::vector<double>> &imbalancingFactors, const char filename[PATH_MAX]){
   std::vector<std::vector<double>> paramFile_data;
   std::ifstream paramFile(filename);
 
   if (!paramFile.is_open()) {
-    PRINT("\nUNABLE TO OPEN PARAMS FILE\n");
+    PRINT("\nUNABLE TO OPEN PARAMS FILE AT: %s\n", filename);
     return testInternalError;
   }
 
@@ -45,7 +45,7 @@ testResult_t parseParamFile(int nranks, std::vector<std::vector<double>> &imbala
   }
 
   if(paramFile_data.size()!=nranks) {
-    PRINT("\nINVALID PARAMS FILE, DOES NOT HAVE CORRECT NUMBER OF ROWS\n");
+    PRINT("\nINVALID PARAMS FILE, DOES NOT HAVE CORRECT NUMBER OF ROWS, HAS %i ROWS, NEEDS %i ROWS\n", paramFile_data.size(), nranks);
     return testInternalError;
   } //ensure we have the right amount of rows
   
