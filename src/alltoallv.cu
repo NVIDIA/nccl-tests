@@ -13,7 +13,7 @@ int CHECK = 0;
  * @param imbalancingFactors The reference to the vector that will store the parsed data
  * @param filename The name of the parameter file to parse
 **/
-testResult_t parseParamFile(int nranks, std::vector<std::vector<double>> &imbalancingFactors, char filename[64]){
+testResult_t parseParamFile(int nranks, std::vector<std::vector<double>> &imbalancingFactors, char filename[PATH_MAX]){
   std::vector<std::vector<double>> paramFile_data;
   std::ifstream paramFile(filename);
 
@@ -66,7 +66,6 @@ testResult_t AlltoAllvInitData(struct threadArgs* args, ncclDataType_t type, ncc
   //parse the param file
   std::vector<std::vector<double>> imbalancingFactors;
   testResult_t parseSuccess = parseParamFile(nranks, imbalancingFactors, args->setup_file);
-  CHECK = 1;
   if(parseSuccess != testSuccess) return parseSuccess;
   for (int i=0; i<args->nGpus; i++) {
     CUDACHECK(cudaSetDevice(args->gpus[i]));

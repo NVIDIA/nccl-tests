@@ -59,7 +59,7 @@ int is_main_proc = 0;
 thread_local int is_main_thread = 0;
 
 // Command line parameter defaults
-static char setup_file[64];
+static char setup_file[PATH_MAX];
 static int nThreads = 1;
 static int nGpus = 1;
 static size_t minBytes = 32*1024*1024;
