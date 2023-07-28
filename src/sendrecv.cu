@@ -8,6 +8,7 @@
 #include "common.h"
 
 void SendRecvGetCollByteCount(size_t *sendcount, size_t *recvcount, size_t *paramcount, size_t *sendInplaceOffset, size_t *recvInplaceOffset, size_t count, int nranks) {
+  printf("send recv\n");
   *sendcount = count;
   *recvcount = count;
   *sendInplaceOffset = 0;
