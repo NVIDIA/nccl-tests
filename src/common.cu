@@ -487,7 +487,7 @@ testResult_t BenchTime(struct threadArgs* args, ncclDataType_t type, ncclRedOp_t
   int64_t wrongElts = 0;
   static __thread int rep = 0;
   rep++;
-  if (datacheck) {
+  for (int c = 0; c < datacheck; c++) {
       // Initialize sendbuffs, recvbuffs and expected
       TESTCHECK(args->collTest->initData(args, type, op, root, rep, in_place));
 
@@ -536,8 +536,10 @@ testResult_t BenchTime(struct threadArgs* args, ncclDataType_t type, ncclRedOp_t
 
       //aggregate delta from all threads and procs
       long long wrongElts1 = wrongElts;
+      //if (wrongElts) fprintf(stderr, "\nERROR: Data corruption : rank %d size %ld wrongElts %ld\n", args->proc, args->expectedBytes, wrongElts);
       Allreduce(args, &wrongElts1, /*sum*/4);
       wrongElts = wrongElts1;
+      if (wrongElts) break;
   }
 
   double timeUsec = (report_cputime ? cputimeSec : deltaSec)*1.0E6;
@@ -809,7 +811,7 @@ int main(int argc, char* argv[]) {
             "[-m,--agg_iters <aggregated iteration count>] \n\t"
             "[-w,--warmup_iters <warmup iteration count>] \n\t"
             "[-p,--parallel_init <0/1>] \n\t"
-            "[-c,--check <0/1>] \n\t"
+            "[-c,--check <check iteration count>] \n\t"
 #if NCCL_VERSION_CODE >= NCCL_VERSION(2,11,0)
             "[-o,--op <sum/prod/min/max/avg/mulsum/all>] \n\t"
 #elif NCCL_VERSION_CODE >= NCCL_VERSION(2,10,0)
