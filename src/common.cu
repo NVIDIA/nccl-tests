@@ -924,6 +924,7 @@ testResult_t run() {
   }
 #ifdef MPI_SUPPORT
   MPI_Bcast(&ncclId, sizeof(ncclId), MPI_BYTE, 0, mpi_comm);
+  MPI_Barrier(MPI_COMM_WORLD); // Ensure Bcast is complete for HCOLL
 #endif
   int gpus[nGpus*nThreads];
   cudaStream_t streams[nGpus*nThreads];
