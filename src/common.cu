@@ -80,6 +80,7 @@ static int cudaGraphLaunches = 0;
 static int report_cputime = 0;
 // Report average iteration time: (0=RANK0,1=AVG,2=MIN,3=MAX)
 static int average = 1;
+static int per_coll_perf = 0;
 
 #define NUM_BLOCKS 32
 
@@ -326,7 +327,7 @@ testResult_t testStreamSynchronize(int ngpus, cudaStream_t* streams, ncclComm_t*
   return testSuccess;
 }
 
-testResult_t startColl(struct threadArgs* args, ncclDataType_t type, ncclRedOp_t opIndex, int root, int in_place, int iter) {
+testResult_t startColl(struct threadArgs* args, ncclDataType_t type, ncclRedOp_t opIndex, int root, int in_place, int iter, int record=0) {
   size_t count = args->nbytes / wordSize(type);
 
   // Try to change offset for each iteration so that we avoid cache effects and catch race conditions in ptrExchange
@@ -374,6 +375,8 @@ testResult_t startColl(struct threadArgs* args, ncclDataType_t type, ncclRedOp_t
     }
     #endif
 
+    if (record) CUDACHECK(cudaEventRecord(args->events[i*iter + iter], args->streams[i]));
+
     TESTCHECK(args->collTest->runColl(
           (void*)(in_place ? recvBuff + args->sendInplaceOffset*rank : sendBuff),
           (void*)(in_place ? recvBuff + args->recvInplaceOffset*rank : recvBuff),
@@ -402,7 +405,50 @@ testResult_t completeColl(struct threadArgs* args) {
   return testSuccess;
 }
 
-testResult_t BenchTime(struct threadArgs* args, ncclDataType_t type, ncclRedOp_t op, int root, int in_place) {
+testResult_t GetElapsedTimes(struct threadArgs* args, int eventIters) {
+  args->ms = (float*) malloc(sizeof(float)*args->nGpus*eventIters);
+  // Get timings
+  for (int i = 0; i < args->nGpus; i++) {
+    CUDACHECK(cudaSetDevice(args->gpus[i]));
+    for (int j = 0; j < eventIters-1; j++) {
+      CUDACHECK(cudaEventElapsedTime(&args->ms[i*j+j], args->events[i*j+j], args->events[i*j+j+1]));
+    }
+
+    // Last timing
+    int j = (eventIters-1);
+    CUDACHECK(cudaEventElapsedTime(&args->ms[i*j+j], args->events[i*j+j], args->finalEvents[i]));
+
+    CUDACHECK(cudaEventDestroy(args->finalEvents[i]));
+    for (int j = 0; j < eventIters; j++)
+      CUDACHECK(cudaEventDestroy(args->events[i*j+j]));
+  }
+  free(args->events);
+  free(args->finalEvents);
+  return testSuccess;
+}
+
+testResult_t RecordFinalEvents(struct threadArgs* args) {
+  for (int i = 0; i < args->nGpus; i++) {
+    CUDACHECK(cudaSetDevice(args->gpus[i]));
+    CUDACHECK(cudaEventRecord(args->finalEvents[i], args->streams[i]));
+  }
+  return testSuccess;
+}
+
+testResult_t InitEvents(struct threadArgs* args, int eventIters) {
+  args->events = (cudaEvent_t*) malloc(sizeof(cudaEvent_t*)*args->nGpus*eventIters);
+  args->finalEvents = (cudaEvent_t*) malloc(sizeof(cudaEvent_t)*args->nGpus);
+  for (int i = 0; i < args->nGpus; i++) {
+    CUDACHECK(cudaSetDevice(args->gpus[i]));
+    for (int j = 0; j < eventIters; j++) {
+      CUDACHECK(cudaEventCreate(&args->events[i*j + j]));
+    }
+    CUDACHECK(cudaEventCreate(args->finalEvents+i));
+  }
+  return testSuccess;
+}
+
+testResult_t BenchTime(struct threadArgs* args, ncclDataType_t type, ncclRedOp_t op, int root, int in_place, int record) {
   size_t count = args->nbytes / wordSize(type);
   if (datacheck) {
     // Initialize sendbuffs, recvbuffs and expected
@@ -414,6 +460,8 @@ testResult_t BenchTime(struct threadArgs* args, ncclDataType_t type, ncclRedOp_t
   TESTCHECK(completeColl(args));
 
   Barrier(args);
+
+  if (record) TESTCHECK(InitEvents(args, agg_iters*iters));
 
 #if CUDART_VERSION >= 11030
   cudaGraph_t graphs[args->nGpus];
@@ -435,10 +483,12 @@ testResult_t BenchTime(struct threadArgs* args, ncclDataType_t type, ncclRedOp_t
   for (int iter = 0; iter < iters; iter++) {
     if (agg_iters>1) NCCLCHECK(ncclGroupStart());
     for (int aiter = 0; aiter < agg_iters; aiter++) {
-      TESTCHECK(startColl(args, type, op, root, in_place, iter*agg_iters+aiter));
+      TESTCHECK(startColl(args, type, op, root, in_place, iter*agg_iters+aiter, record));
     }
     if (agg_iters>1) NCCLCHECK(ncclGroupEnd());
   }
+
+  if (record) TESTCHECK(RecordFinalEvents(args));
 
 #if CUDART_VERSION >= 11030
   if (cudaGraphLaunches >= 1) {
@@ -463,6 +513,8 @@ testResult_t BenchTime(struct threadArgs* args, ncclDataType_t type, ncclRedOp_t
 
   double cputimeSec = tim.elapsed()/(iters*agg_iters);
   TESTCHECK(completeColl(args));
+
+  if (record) TESTCHECK(GetElapsedTimes(args, iters*agg_iters));
 
   double deltaSec = tim.elapsed();
   deltaSec = deltaSec/(iters*agg_iters);
@@ -576,6 +628,29 @@ void setupArgs(size_t size, ncclDataType_t type, struct threadArgs* args) {
   args->recvInplaceOffset = recvInplaceOffset * wordSize(type);
 }
 
+void PrintPerCollPerf(struct threadArgs* args, ncclDataType_t type, ncclRedOp_t op, int root) {
+  int eventIters = agg_iters*iters;
+  size_t count = args->nbytes / wordSize(type);
+  double algBw, busBw;
+  char timeStr[100];
+  for (int i = 0; i < args->nGpus; i++) {
+    for (int j = 0; j < eventIters-1; j++) {
+      double timeSec = args->ms[i*j+j] / 1.0E3;
+      double timeUsec = timeSec*1.0E6;
+      if (timeUsec >= 10000.0) {
+        sprintf(timeStr, "%7.0f", timeUsec);
+      } else if (timeUsec >= 100.0) {
+        sprintf(timeStr, "%7.1f", timeUsec);
+      } else {
+        sprintf(timeStr, "%7.2f", timeUsec);
+      }
+      args->collTest->getBw(count, wordSize(type), timeSec, &algBw, &busBw, args->nProcs*args->nThreads*args->nGpus);
+      PRINT("\n%35sGpu%2d Coll%7d  %7s  %6.2f  %6.2f  %5s",
+        " ", args->gpus[i], j, timeStr, algBw, busBw, "N/A");
+    }
+  }
+}
+
 testResult_t TimeTest(struct threadArgs* args, ncclDataType_t type, const char* typeName, ncclRedOp_t op, const char* opName, int root) {
   // Sync to avoid first-call timeout
   Barrier(args);
@@ -600,8 +675,9 @@ testResult_t TimeTest(struct threadArgs* args, ncclDataType_t type, const char* 
       char rootName[100];
       sprintf(rootName, "%6i", root);
       PRINT("%12li  %12li  %8s  %6s  %6s", max(args->sendBytes, args->expectedBytes), args->nbytes / wordSize(type), typeName, opName, rootName);
-      TESTCHECK(BenchTime(args, type, op, root, 0));
-      TESTCHECK(BenchTime(args, type, op, root, 1));
+      TESTCHECK(BenchTime(args, type, op, root, 0, 0));
+      TESTCHECK(BenchTime(args, type, op, root, 1, per_coll_perf));
+      if (per_coll_perf) PrintPerCollPerf(args, type, op, root);
       PRINT("\n");
   }
   return testSuccess;
@@ -707,13 +783,14 @@ int main(int argc, char* argv[]) {
     {"cudagraph", required_argument, 0, 'G'},
     {"report_cputime", required_argument, 0, 'C'},
     {"average", required_argument, 0, 'a'},
+    {"per_coll_perf", required_argument, 0, 'A'},
     {"help", no_argument, 0, 'h'},
     {}
   };
 
   while(1) {
     int c;
-    c = getopt_long(argc, argv, "t:g:b:e:i:f:n:m:w:p:c:o:d:r:z:y:T:hG:C:a:", longopts, &longindex);
+    c = getopt_long(argc, argv, "t:g:b:e:i:f:n:m:w:p:c:o:d:r:z:y:T:hG:C:a:A", longopts, &longindex);
 
     if (c == -1)
       break;
@@ -797,6 +874,9 @@ int main(int argc, char* argv[]) {
       case 'a':
         average = (int)strtol(optarg, NULL, 0);
         break;
+      case 'A':
+        per_coll_perf = (int)strtol(optarg, NULL, 0);
+        break;
       case 'h':
       default:
         if (c != 'h') printf("invalid option '%c'\n", c);
@@ -827,6 +907,7 @@ int main(int argc, char* argv[]) {
             "[-G,--cudagraph <num graph launches>] \n\t"
             "[-C,--report_cputime <0/1>] \n\t"
             "[-a,--average <0/1/2/3> report average iteration time <0=RANK0/1=AVG/2=MIN/3=MAX>] \n\t"
+            "[-A,--per_coll_perf <0/1> Report performance per-collective (default: 0 disable)] \n\t"
             "[-h,--help]\n",
           basename(argv[0]));
         return 0;

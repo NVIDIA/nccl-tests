@@ -132,6 +132,9 @@ struct threadArgs {
   ncclUniqueId ncclId;
   ncclComm_t* comms;
   cudaStream_t* streams;
+  cudaEvent_t* events;
+  cudaEvent_t* finalEvents;
+  float*       ms;
 
   void** expected;
   size_t expectedBytes;
