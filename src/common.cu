@@ -1056,6 +1056,7 @@ testResult_t run() {
   PRINT("# Avg bus bandwidth    : %g %s\n", bw[0], check_avg_bw == -1 ? "" : (bw[0] < check_avg_bw*(0.9) ? "FAILED" : "OK"));
   PRINT("#\n");
 #ifdef MPI_SUPPORT
+  MPI_Comm_free(&mpi_comm);
   MPI_Finalize();
 #endif
 
