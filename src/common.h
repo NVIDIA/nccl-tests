@@ -92,7 +92,7 @@ struct testColl {
       ncclRedOp_t op, int root, int rep, int in_place);
   void (*getBw)(size_t count, int typesize, double sec, double* algBw, double* busBw, int nranks);
   testResult_t (*runColl)(void* sendbuff, void* recvbuff, size_t count, ncclDataType_t type,
-      ncclRedOp_t op, int root, ncclComm_t comm, cudaStream_t stream);
+      ncclRedOp_t op, int root, ncclComm_t comm, cudaStream_t stream, struct threadArgs* args);
 };
 extern struct testColl allReduceTest;
 extern struct testColl allGatherTest;
@@ -110,6 +110,8 @@ struct testEngine {
 extern struct testEngine ncclTestEngine;
 
 struct threadArgs {
+  char setup_file[PATH_MAX];
+
   size_t nbytes;
   size_t minbytes;
   size_t maxbytes;

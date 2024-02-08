@@ -59,6 +59,7 @@ int is_main_proc = 0;
 thread_local int is_main_thread = 0;
 
 // Command line parameter defaults
+static char setup_file[PATH_MAX];
 static int nThreads = 1;
 static int nGpus = 1;
 static size_t minBytes = 32*1024*1024;
@@ -373,11 +374,10 @@ testResult_t startColl(struct threadArgs* args, ncclDataType_t type, ncclRedOp_t
       NCCLCHECK(ncclRedOpCreatePreMulSum(&op, &u64, type, ncclScalarHostImmediate, args->comms[i]));
     }
     #endif
-
     TESTCHECK(args->collTest->runColl(
           (void*)(in_place ? recvBuff + args->sendInplaceOffset*rank : sendBuff),
           (void*)(in_place ? recvBuff + args->recvInplaceOffset*rank : recvBuff),
-        count, type, op, root, args->comms[i], args->streams[i]));
+        count, type, op, root, args->comms[i], args->streams[i], args));
 
     #if NCCL_VERSION_CODE >= NCCL_VERSION(2,11,0)
     if(opIndex >= ncclNumOps) {
@@ -687,6 +687,7 @@ int main(int argc, char* argv[]) {
   double parsed;
   int longindex;
   static struct option longopts[] = {
+    {"setup_file",optional_argument, 0, 's'},
     {"nthreads", required_argument, 0, 't'},
     {"ngpus", required_argument, 0, 'g'},
     {"minbytes", required_argument, 0, 'b'},
@@ -713,12 +714,15 @@ int main(int argc, char* argv[]) {
 
   while(1) {
     int c;
-    c = getopt_long(argc, argv, "t:g:b:e:i:f:n:m:w:p:c:o:d:r:z:y:T:hG:C:a:", longopts, &longindex);
+    c = getopt_long(argc, argv, "s:t:g:b:e:i:f:n:m:w:p:c:o:d:r:z:y:T:hG:C:a:", longopts, &longindex);
 
     if (c == -1)
       break;
 
     switch(c) {
+      case 's':
+        strcpy(setup_file,optarg);
+        break;
       case 't':
         nThreads = strtol(optarg, NULL, 0);
         break;
@@ -986,6 +990,8 @@ testResult_t run() {
   memset(threads, 0, sizeof(struct testThread)*nThreads);
 
   for (int t=nThreads-1; t>=0; t--) {
+    strcpy(threads[t].args.setup_file, setup_file);
+
     threads[t].args.minbytes=minBytes;
     threads[t].args.maxbytes=maxBytes;
     threads[t].args.stepbytes=stepBytes;
