@@ -16,6 +16,9 @@
 #include <pthread.h>
 #include "nccl1_compat.h"
 #include "timer.h"
+#include <string>
+#include <fstream>
+#include <iostream>
 
 // For nccl.h < 2.13 since we define a weak fallback
 extern "C" char const* ncclGetLastError(ncclComm_t comm);
@@ -101,6 +104,22 @@ extern struct testColl broadcastTest;
 extern struct testColl reduceTest;
 extern struct testColl alltoAllTest;
 
+class Reporter {
+private:
+  std::ofstream outf;
+  std::string csvName;
+  bool saveToCSV;
+  const char* timeStr;
+  bool isMainThreadFlag;
+public:
+  Reporter(std::string csvName_, const char* timeStr_, bool isMain);
+  void parameters(long bytes, long elements, const char* typeName, const char* opName, int rootName);
+  void result(const char* time, float algBw, float busBw, long wrongElts);
+  void newStep();
+  bool isMainThread();
+  ~Reporter();
+};
+
 struct testEngine {
   void (*getBuffSize)(size_t *sendcount, size_t *recvcount, size_t count, int nranks);
   testResult_t (*runTest)(struct threadArgs* args, int root, ncclDataType_t type,
@@ -142,6 +161,8 @@ struct threadArgs {
   int reportErrors;
 
   struct testColl* collTest;
+
+  Reporter* reporter;
 };
 
 typedef testResult_t (*threadFunc_t)(struct threadArgs* args);

@@ -65,6 +65,16 @@ All tests support the same set of arguments :
   * `-c,--check <check iteration count>` perform count iterations, checking correctness of results on each iteration. This can be quite slow on large numbers of GPUs. Default : 1.
   * `-z,--blocking <0/1>` Make NCCL collective blocking, i.e. have CPUs wait and sync after each collective. Default : 0.
   * `-G,--cudagraph <num graph launches>` Capture iterations as a CUDA graph and then replay specified number of times. Default : 0.
+* Saving results
+  * `-F,--output_file` Export results to CSV file on rank 0. Directory has to exist! Default: "" (Do not save to CSV file - print to stdout). It will overwrite file if it already exists.
+
+## CSV integration with Pandas
+CSV files generated with the `-F` option can be used directly in [pandas](https://pandas.pydata.org/) to analyse the results. Here is an example printing the time column:
+```
+import pandas as pd
+df = pd.read_csv("data.csv", header=[0, 1, 2])
+print(df[('out-of-place', ' time', '(us)')]) # NOTE: we are using hierarchical columns
+```
 
 ## Copyright
 
