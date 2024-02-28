@@ -80,6 +80,9 @@ static int cudaGraphLaunches = 0;
 static int report_cputime = 0;
 // Report average iteration time: (0=RANK0,1=AVG,2=MIN,3=MAX)
 static int average = 1;
+#if NCCL_VERSION_CODE >= NCCL_VERSION(2,19,0)
+static int local_register = 0;
+#endif
 
 #define NUM_BLOCKS 32
 
@@ -631,10 +634,22 @@ testResult_t threadInit(struct threadArgs* args) {
     NCCLCHECK(ncclCommInitRank(args->comms+i, nranks, args->ncclId, rank));
   }
   NCCLCHECK(ncclGroupEnd());
+#if NCCL_VERSION_CODE >= NCCL_VERSION(2,19,0)
+  void **sendRegHandles = (local_register) ? (void **)malloc(sizeof(*sendRegHandles)*args->nGpus) : NULL;
+  void **recvRegHandles = (local_register) ? (void **)malloc(sizeof(*recvRegHandles)*args->nGpus) : NULL;
+  for (int i=0; i<args->nGpus; i++) {
+    if (local_register) NCCLCHECK(ncclCommRegister(args->comms[i], args->sendbuffs[i], args->maxbytes, &sendRegHandles[i]));
+    if (local_register) NCCLCHECK(ncclCommRegister(args->comms[i], args->recvbuffs[i], args->maxbytes, &recvRegHandles[i]));
+  }
+#endif
 
   TESTCHECK(threadRunTests(args));
 
   for (int i=0; i<args->nGpus; i++) {
+#if NCCL_VERSION_CODE >= NCCL_VERSION(2,19,0)
+    if (local_register) NCCLCHECK(ncclCommDeregister(args->comms[i], sendRegHandles[i]));
+    if (local_register) NCCLCHECK(ncclCommDeregister(args->comms[i], recvRegHandles[i]));
+#endif
     NCCLCHECK(ncclCommDestroy(args->comms[i]));
   }
   return testSuccess;
@@ -651,9 +666,15 @@ testResult_t threadLaunch(struct testThread* thread) {
 }
 
 testResult_t AllocateBuffs(void **sendbuff, size_t sendBytes, void **recvbuff, size_t recvBytes, void **expected, size_t nbytes) {
+#if NCCL_VERSION_CODE >= NCCL_VERSION(2,19,0)
+    NCCLCHECK(ncclMemAlloc(sendbuff, nbytes));
+    NCCLCHECK(ncclMemAlloc(recvbuff, nbytes));
+    if (datacheck) NCCLCHECK(ncclMemAlloc(expected, recvBytes));
+#else
     CUDACHECK(cudaMalloc(sendbuff, nbytes));
     CUDACHECK(cudaMalloc(recvbuff, nbytes));
     if (datacheck) CUDACHECK(cudaMalloc(expected, recvBytes));
+#endif
     return testSuccess;
 }
 
@@ -707,13 +728,14 @@ int main(int argc, char* argv[]) {
     {"cudagraph", required_argument, 0, 'G'},
     {"report_cputime", required_argument, 0, 'C'},
     {"average", required_argument, 0, 'a'},
+    {"local_register", required_argument, 0, 'R'},
     {"help", no_argument, 0, 'h'},
     {}
   };
 
   while(1) {
     int c;
-    c = getopt_long(argc, argv, "t:g:b:e:i:f:n:m:w:p:c:o:d:r:z:y:T:hG:C:a:", longopts, &longindex);
+    c = getopt_long(argc, argv, "t:g:b:e:i:f:n:m:w:p:c:o:d:r:z:y:T:hG:C:a:R:", longopts, &longindex);
 
     if (c == -1)
       break;
@@ -797,6 +819,15 @@ int main(int argc, char* argv[]) {
       case 'a':
         average = (int)strtol(optarg, NULL, 0);
         break;
+      case 'R':
+#if NCCL_VERSION_CODE >= NCCL_VERSION(2,19,0)
+        if ((int)strtol(optarg, NULL, 0)) {
+          local_register = 1;
+        }
+#else
+        printf("Option -R (register) is not supported before NCCL 2.19. Ignoring\n");
+#endif
+        break;
       case 'h':
       default:
         if (c != 'h') printf("invalid option '%c'\n", c);
@@ -827,6 +858,7 @@ int main(int argc, char* argv[]) {
             "[-G,--cudagraph <num graph launches>] \n\t"
             "[-C,--report_cputime <0/1>] \n\t"
             "[-a,--average <0/1/2/3> report average iteration time <0=RANK0/1=AVG/2=MIN/3=MAX>] \n\t"
+            "[-R,--local_register <1/0> enable local buffer registration on send/recv buffers (default: disable)] \n\t"
             "[-h,--help]\n",
           basename(argv[0]));
         return 0;
@@ -949,6 +981,10 @@ testResult_t run() {
 
   //if parallel init is not selected, use main thread to initialize NCCL
   ncclComm_t* comms = (ncclComm_t*)malloc(sizeof(ncclComm_t)*nThreads*nGpus);
+#if NCCL_VERSION_CODE >= NCCL_VERSION(2,19,0)
+  void **sendRegHandles = NULL;
+  void **recvRegHandles = NULL;
+#endif
   if (!parallel_init) {
      if (ncclProcs == 1) {
        NCCLCHECK(ncclCommInitAll(comms, nGpus*nThreads, gpus));
@@ -960,6 +996,14 @@ testResult_t run() {
        }
        NCCLCHECK(ncclGroupEnd());
      }
+#if NCCL_VERSION_CODE >= NCCL_VERSION(2,19,0)
+     sendRegHandles = (local_register) ? (void **)malloc(sizeof(*sendRegHandles)*nThreads*nGpus) : NULL;
+     recvRegHandles = (local_register) ? (void **)malloc(sizeof(*recvRegHandles)*nThreads*nGpus) : NULL;
+     for (int i=0; i<nGpus*nThreads; i++) {
+       if (local_register) NCCLCHECK(ncclCommRegister(comms[i], sendbuffs[i], sendBytes, &sendRegHandles[i]));
+       if (local_register) NCCLCHECK(ncclCommRegister(comms[i], recvbuffs[i], recvBytes, &recvRegHandles[i]));
+     }
+#endif
   }
 
   int errors[nThreads];
@@ -1035,18 +1079,33 @@ testResult_t run() {
 #endif
 
   if (!parallel_init) {
-    for(int i=0; i<nGpus*nThreads; ++i)
+    for(int i=0; i<nGpus*nThreads; ++i) {
+#if NCCL_VERSION_CODE >= NCCL_VERSION(2,19,0)
+      if (local_register) NCCLCHECK(ncclCommDeregister(comms[i], sendRegHandles[i]));
+      if (local_register) NCCLCHECK(ncclCommDeregister(comms[i], recvRegHandles[i]));
+#endif
       NCCLCHECK(ncclCommDestroy(comms[i]));
+    }
     free(comms);
   }
 
   // Free off CUDA allocated memory
   for (int i=0; i<nGpus*nThreads; i++) {
+#if NCCL_VERSION_CODE >= NCCL_VERSION(2,19,0)
+    if (sendbuffs[i]) NCCLCHECK(ncclMemFree((char*)sendbuffs[i]));
+    if (recvbuffs[i]) NCCLCHECK(ncclMemFree((char*)recvbuffs[i]));
+    if (datacheck) NCCLCHECK(ncclMemFree(expected[i]));
+#else
     if (sendbuffs[i]) CUDACHECK(cudaFree((char*)sendbuffs[i]));
     if (recvbuffs[i]) CUDACHECK(cudaFree((char*)recvbuffs[i]));
     if (datacheck) CUDACHECK(cudaFree(expected[i]));
+#endif
   }
   CUDACHECK(cudaFreeHost(delta));
+#if NCCL_VERSION_CODE >= NCCL_VERSION(2,19,0)
+  free(sendRegHandles);
+  free(recvRegHandles);
+#endif
 
   envstr = getenv("NCCL_TESTS_MIN_BW");
   double check_avg_bw = envstr ? atof(envstr) : -1;
