@@ -1000,8 +1000,8 @@ testResult_t run() {
      sendRegHandles = (local_register) ? (void **)malloc(sizeof(*sendRegHandles)*nThreads*nGpus) : NULL;
      recvRegHandles = (local_register) ? (void **)malloc(sizeof(*recvRegHandles)*nThreads*nGpus) : NULL;
      for (int i=0; i<nGpus*nThreads; i++) {
-       if (local_register) NCCLCHECK(ncclCommRegister(comms[i], sendbuffs[i], sendBytes, &sendRegHandles[i]));
-       if (local_register) NCCLCHECK(ncclCommRegister(comms[i], recvbuffs[i], recvBytes, &recvRegHandles[i]));
+       if (local_register) NCCLCHECK(ncclCommRegister(comms[i], sendbuffs[i], maxBytes, &sendRegHandles[i]));
+       if (local_register) NCCLCHECK(ncclCommRegister(comms[i], recvbuffs[i], maxBytes, &recvRegHandles[i]));
      }
 #endif
   }
