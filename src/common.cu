@@ -286,51 +286,51 @@ testResult_t testEventSynchronize(int ngpus, cudaEvent_t* events, ncclComm_t* co
   timer tim;
 
   while (remaining) {
-   int idle = 1;
-   for (int i=0; i<ngpus; i++) {
-     if (done[i]) continue;
+    int idle = 1;
+    for (int i=0; i<ngpus; i++) {
+      if (done[i]) continue;
 
-     cudaErr = cudaEventQuery(events[i]);
-     if (cudaErr == cudaSuccess) {
-       done[i] = 1;
-       remaining--;
-       idle = 0;
-       continue;
-     }
+      cudaErr = cudaEventQuery(events[i]);
+      if (cudaErr == cudaSuccess) {
+        done[i] = 1;
+        remaining--;
+        idle = 0;
+        continue;
+      }
 
-     if (cudaErr != cudaErrorNotReady) CUDACHECK(cudaErr);
+      if (cudaErr != cudaErrorNotReady) CUDACHECK(cudaErr);
 
 #if NCCL_VERSION_CODE >= NCCL_VERSION(2,4,0)
-     if (test_ncclVersion >= NCCL_VERSION(2,4,0) && comms) {
-       ncclResult_t ncclAsyncErr;
-       NCCLCHECK(ncclCommGetAsyncError(comms[i], &ncclAsyncErr));
-       if (ncclAsyncErr != ncclSuccess) {
-         // An asynchronous error happened. Stop the operation and destroy
-         // the communicator
-         for (int i=0; i<ngpus; i++)
-           NCCLCHECK(ncclCommAbort(comms[i]));
-         // Abort the perf test
-         NCCLCHECK(ncclAsyncErr);
-       }
-     }
-     double delta = tim.elapsed();
-     if (delta > timeout && timeout > 0) {
-       for (int i=0; i<ngpus; i++)
-         NCCLCHECK(ncclCommAbort(comms[i]));
-       char hostname[1024];
-       getHostName(hostname, 1024);
-       printf("%s: Test timeout (%ds) %s:%d\n",
-           hostname,
-           timeout,
-           __FILE__,__LINE__);
-       free(done);
-       return testTimeout;
-     }
+      if (test_ncclVersion >= NCCL_VERSION(2,4,0) && comms) {
+        ncclResult_t ncclAsyncErr;
+        NCCLCHECK(ncclCommGetAsyncError(comms[i], &ncclAsyncErr));
+        if (ncclAsyncErr != ncclSuccess) {
+          // An asynchronous error happened. Stop the operation and destroy
+          // the communicator
+          for (int i=0; i<ngpus; i++)
+            NCCLCHECK(ncclCommAbort(comms[i]));
+          // Abort the perf test
+          NCCLCHECK(ncclAsyncErr);
+        }
+      }
+      double delta = tim.elapsed();
+      if (delta > timeout && timeout > 0) {
+        for (int i=0; i<ngpus; i++)
+          NCCLCHECK(ncclCommAbort(comms[i]));
+        char hostname[1024];
+        getHostName(hostname, 1024);
+        printf("%s: Test timeout (%ds) %s:%d\n",
+               hostname,
+               timeout,
+               __FILE__,__LINE__);
+        free(done);
+        return testTimeout;
+      }
 #endif
-   }
+    }
 
-   // We might want to let other threads (including NCCL threads) use the CPU.
-   if (idle) sched_yield();
+    // We might want to let other threads (including NCCL threads) use the CPU.
+    if (idle) sched_yield();
   }
   free(done);
   return testSuccess;
@@ -483,8 +483,8 @@ testResult_t BenchTime(struct threadArgs* args, ncclDataType_t type, ncclRedOp_t
 
   Barrier(args);
   if (side_work) {
-      args->workThreadCountLast = *(args->workThreadCount);
-      args->workThreadBwLast = *(args->workThreadBw);
+    args->workThreadCountLast = *(args->workThreadCount);
+    args->workThreadBwLast = *(args->workThreadBw);
   }
 
 #if CUDART_VERSION >= 11030
@@ -524,14 +524,14 @@ testResult_t BenchTime(struct threadArgs* args, ncclDataType_t type, ncclRedOp_t
 
   //start copy thread and wait for it to be active
   if (side_work) {
-      (*args->workThreadStart)++;
-      while (*(args->workThreadStarted) < *(args->workThreadStart));
-      //collect copythread baseline
-      if (args->workThreadCountLast == 0) {
-          *(args->workThreadBaseBw) = *(args->workThreadBw);
-          args->workThreadCountLast = *(args->workThreadCount);
-          args->workThreadBwLast = *(args->workThreadBw);
-      }
+    (*args->workThreadStart)++;
+    while (*(args->workThreadStarted) < *(args->workThreadStart));
+    //collect copythread baseline
+    if (args->workThreadCountLast == 0) {
+      *(args->workThreadBaseBw) = *(args->workThreadBw);
+      args->workThreadCountLast = *(args->workThreadCount);
+      args->workThreadBwLast = *(args->workThreadBw);
+    }
   }
 
   // Performance Benchmark
@@ -568,12 +568,12 @@ testResult_t BenchTime(struct threadArgs* args, ncclDataType_t type, ncclRedOp_t
   double workThreadBw;
   int workThreadCount;
   if (side_work) {
-      (*args->workThreadStop)++;
-      while (*(args->workThreadStopped) < *(args->workThreadStop));
-      workThreadBw = *(args->workThreadBw) - args->workThreadBwLast;
-      workThreadCount = *(args->workThreadCount) - args->workThreadCountLast;
-      args->workThreadBwLast = *(args->workThreadBw);
-      Allreduce(args, &workThreadBw, average);
+    (*args->workThreadStop)++;
+    while (*(args->workThreadStopped) < *(args->workThreadStop));
+    workThreadBw = *(args->workThreadBw) - args->workThreadBwLast;
+    workThreadCount = *(args->workThreadCount) - args->workThreadCountLast;
+    args->workThreadBwLast = *(args->workThreadBw);
+    Allreduce(args, &workThreadBw, average);
   }
 
 #if CUDART_VERSION >= 11030
@@ -660,23 +660,23 @@ testResult_t BenchTime(struct threadArgs* args, ncclDataType_t type, ncclRedOp_t
     sprintf(timeStr, "%7.2f", timeUsec);
   }
   if(side_work == 1) {
-      sideBw = workThreadBw;
+    sideBw = workThreadBw;
   } else {
-      sideBw = ((double)workThreadCount)*COMP_SIZE*work_sms/(1000*timeUsec);
+    sideBw = ((double)workThreadCount)*COMP_SIZE*work_sms/(1000*timeUsec);
   }
 
   if (args->reportErrors) {
-     if (side_work == 1) {
-       PRINT("  %7s  %6.2f  %6.2f  %6.2f %5g", timeStr, algBw, busBw, sideBw, (double)wrongElts);
-      } else { 
-        PRINT("  %7s  %6.2f  %6.2f  %5g", timeStr, algBw, busBw, (double)wrongElts);
-      }
+    if (side_work == 1) {
+      PRINT("  %7s  %6.2f  %6.2f  %6.2f %5g", timeStr, algBw, busBw, sideBw, (double)wrongElts);
+    } else {
+      PRINT("  %7s  %6.2f  %6.2f  %5g", timeStr, algBw, busBw, (double)wrongElts);
+    }
   } else {
-     if (side_work == 1) {
-       PRINT("  %7s  %6.2f  %6.2f  %6.2f %5s", timeStr, algBw, busBw, sideBw, "N/A");
-     } else {
-       PRINT("  %7s  %6.2f  %6.2f  %5s", timeStr, algBw, busBw, "N/A");
-     }
+    if (side_work == 1) {
+      PRINT("  %7s  %6.2f  %6.2f  %6.2f %5s", timeStr, algBw, busBw, sideBw, "N/A");
+    } else {
+      PRINT("  %7s  %6.2f  %6.2f  %5s", timeStr, algBw, busBw, "N/A");
+    }
   }
 
   args->bw[0] += busBw;
@@ -718,13 +718,13 @@ testResult_t TimeTest(struct threadArgs* args, ncclDataType_t type, const char* 
 
   // Benchmark
   for (size_t size = args->minbytes; size<=args->maxbytes; size = ((args->stepfactor > 1) ? size*args->stepfactor : size+args->stepbytes)) {
-      setupArgs(size, type, args);
-      char rootName[100];
-      sprintf(rootName, "%6i", root);
-      PRINT("%12li  %12li  %8s  %6s  %6s", max(args->sendBytes, args->expectedBytes), args->nbytes / wordSize(type), typeName, opName, rootName);
-      TESTCHECK(BenchTime(args, type, op, root, 0));
-      TESTCHECK(BenchTime(args, type, op, root, 1));
-      PRINT("\n");
+    setupArgs(size, type, args);
+    char rootName[100];
+    sprintf(rootName, "%6i", root);
+    PRINT("%12li  %12li  %8s  %6s  %6s", max(args->sendBytes, args->expectedBytes), args->nbytes / wordSize(type), typeName, opName, rootName);
+    TESTCHECK(BenchTime(args, type, op, root, 0));
+    TESTCHECK(BenchTime(args, type, op, root, 1));
+    PRINT("\n");
   }
   return testSuccess;
 }
@@ -802,9 +802,9 @@ copykernel(int *dst, int *src, long nbytes)  {
 
 testResult_t copyOnStream(int *dst, int *src, long nbytes, cudaStream_t stream) {
   if (side_work == 1 && work_sms == 0) {
-     CUDACHECK(cudaMemcpyAsync(dst, src, nbytes, cudaMemcpyHostToDevice, stream));
+    CUDACHECK(cudaMemcpyAsync(dst, src, nbytes, cudaMemcpyHostToDevice, stream));
   } else {
-     copykernel<<<work_sms, 1024, 0, stream>>>(dst, src, nbytes);
+    copykernel<<<work_sms, 1024, 0, stream>>>(dst, src, nbytes);
   }
   return testSuccess;
 }
@@ -829,18 +829,18 @@ testResult_t workThread(struct threadArgs* args) {
     CUDACHECK(cudaEventCreateWithFlags(&events[i], cudaEventDisableTiming));
     CUDACHECK(cudaStreamCreateWithFlags(streams+i, cudaStreamNonBlocking));
     if (side_work == 1) {
-            CUDACHECK(cudaMalloc(ptrs+i, nbytes));
-            CUDACHECK(cudaHostAlloc(hostPtrs+i, nbytes, cudaHostAllocPortable | cudaHostAllocMapped));
+      CUDACHECK(cudaMalloc(ptrs+i, nbytes));
+      CUDACHECK(cudaHostAlloc(hostPtrs+i, nbytes, cudaHostAllocPortable | cudaHostAllocMapped));
     }
   }
 
   //collect baseline
   timer tim;
   for (int j=0; j<baseIter; j++) {
-      for (int i=0; i<args->nGpus; i++) {
-          CUDACHECK(cudaSetDevice(gpuids[i]));
-          copyOnStream((int*)ptrs[i], (int*)hostPtrs[i], nbytes, streams[i]);
-      }
+    for (int i=0; i<args->nGpus; i++) {
+      CUDACHECK(cudaSetDevice(gpuids[i]));
+      copyOnStream((int*)ptrs[i], (int*)hostPtrs[i], nbytes, streams[i]);
+    }
   }
   TESTCHECK(testStreamSynchronize(args->nGpus, streams, NULL));
   double copySec = tim.elapsed();
@@ -848,30 +848,30 @@ testResult_t workThread(struct threadArgs* args) {
   *args->workThreadBw = copyBw;
 
   while (args->workThreadAbort == 0) {
-     //wait for start signal
-     if (*args->workThreadStarted >= *args->workThreadStart) continue;
+    //wait for start signal
+    if (*args->workThreadStarted >= *args->workThreadStart) continue;
 
-     tim.reset();
-     workIter = 0;
-     while (*args->workThreadStopped >= *args->workThreadStop) {
-        for (int i=0; i<args->nGpus; i++) {
-          CUDACHECK(cudaSetDevice(gpuids[i]));
-          CUDACHECK(cudaEventRecord(events[i], streams[i]));
-          copyOnStream((int*)ptrs[i], (int*)hostPtrs[i], nbytes, streams[i]);
-        }
-        if (workIter == 0) (*args->workThreadStarted)++;
-        //test on any copies issued in workIter-1
-        //keep two copies in flight at any given time
-        TESTCHECK(testEventSynchronize(args->nGpus, events, NULL));
-        workIter++;
-     }
-     TESTCHECK(testStreamSynchronize(args->nGpus, streams, NULL));
-     //measure and update time
-     double copySec = tim.elapsed();
-     double copyBw = ((double)workIter*nbytes)/(1e9*copySec);
-     (*args->workThreadBw) += copyBw;
-     (*args->workThreadCount) += workIter;
-     (*args->workThreadStopped)++;
+    tim.reset();
+    workIter = 0;
+    while (*args->workThreadStopped >= *args->workThreadStop) {
+      for (int i=0; i<args->nGpus; i++) {
+        CUDACHECK(cudaSetDevice(gpuids[i]));
+        CUDACHECK(cudaEventRecord(events[i], streams[i]));
+        copyOnStream((int*)ptrs[i], (int*)hostPtrs[i], nbytes, streams[i]);
+      }
+      if (workIter == 0) (*args->workThreadStarted)++;
+      //test on any copies issued in workIter-1
+      //keep two copies in flight at any given time
+      TESTCHECK(testEventSynchronize(args->nGpus, events, NULL));
+      workIter++;
+    }
+    TESTCHECK(testStreamSynchronize(args->nGpus, streams, NULL));
+    //measure and update time
+    double copySec = tim.elapsed();
+    double copyBw = ((double)workIter*nbytes)/(1e9*copySec);
+    (*args->workThreadBw) += copyBw;
+    (*args->workThreadCount) += workIter;
+    (*args->workThreadStopped)++;
   }
 
   for (int i=0; i<args->nGpus; i++) {
@@ -1143,7 +1143,7 @@ testResult_t run() {
 #endif
   is_main_thread = is_main_proc = (proc == 0) ? 1 : 0;
 
-  PRINT("# nThread %d nGpus %d minBytes %ld maxBytes %ld step: %ld(%s) warmup iters: %d iters: %d agg iters: %d validation: %d graph: %d  side_work: %d work_sms: %d \n",
+  PRINT("# nThread %d nGpus %d minBytes %ld maxBytes %ld step: %ld(%s) warmup iters: %d iters: %d agg iters: %d validation: %d graph: %d side_work: %d work_sms: %d\n",
         nThreads, nGpus, minBytes, maxBytes,
         (stepFactor > 1)?stepFactor:stepBytes, (stepFactor > 1)?"factor":"bytes",
         warmup_iters, iters, agg_iters, datacheck, cudaGraphLaunches, side_work, work_sms);
@@ -1259,9 +1259,9 @@ testResult_t run() {
 
   const char* timeStr = report_cputime ? "cputime" : "time";
   PRINT("#\n");
-  if (side_work == 1) { 
+  if (side_work == 1) {
     PRINT("# %10s  %12s  %8s  %6s  %6s           out-of-place                       in-place          \n", "", "", "", "", "");
-    PRINT("# %10s  %12s  %8s  %6s  %6s  %7s  %6s  %6s %6s %6s  %7s  %6s  %6s %6s %6s\n", "size", "count", "type", "redop", 
+    PRINT("# %10s  %12s  %8s  %6s  %6s  %7s  %6s  %6s %6s %6s  %7s  %6s  %6s %6s %6s\n", "size", "count", "type", "redop",
 	"root", timeStr, "algbw", "busbw", "copybw", "#wrong", timeStr, "algbw", "busbw", "copybw", "#wrong");
     PRINT("# %10s  %12s  %8s  %6s  %6s  %7s  %6s  %6s  %6s %5s  %7s  %6s  %6s  %6s %5s\n", "(B)", "(elements)", "", "", "",
         "(us)", "(GB/s)", "(GB/s)", "(GB/s)", "", "(us)", "(GB/s)", "(GB/s)", "(GB/s)", "");
