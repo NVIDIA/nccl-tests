@@ -136,11 +136,22 @@ struct threadArgs {
   void** expected;
   size_t expectedBytes;
   int* errors;
+  double* workThreadBaseBw;
   double* bw;
   int* bw_count;
 
   int reportErrors;
 
+  volatile int *workThreadCount;
+  volatile double *workThreadBw;
+  volatile int *workThreadStart;
+  volatile int *workThreadStarted;
+  volatile int *workThreadStop;
+  volatile int *workThreadStopped;
+  volatile int workThreadAbort;
+
+  int workThreadCountLast;
+  double workThreadBwLast;
   struct testColl* collTest;
 };
 

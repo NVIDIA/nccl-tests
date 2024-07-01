@@ -55,6 +55,13 @@ extern "C" __attribute__((weak)) char const* ncclGetLastError(ncclComm_t comm) {
   return "";
 }
 
+// Side computation constants
+#define COMP_SIZE (1 << 22)
+#define NUM_BLOCKS 64
+#define WORK_SMS 64
+#define COPY_MEM_SIZE (1 * 1024 * 1024 * 1024L)
+#define UNROLL 8
+
 int is_main_proc = 0;
 thread_local int is_main_thread = 0;
 
@@ -75,6 +82,8 @@ static int ncclroot = 0;
 static int parallel_init = 0;
 static int blocking_coll = 0;
 static int streamnull = 0;
+static int side_work = 0;
+static int work_sms = WORK_SMS;
 static int timeout = 0;
 static int cudaGraphLaunches = 0;
 static int report_cputime = 0;
@@ -83,8 +92,6 @@ static int average = 1;
 #if NCCL_VERSION_CODE >= NCCL_VERSION(2,19,0)
 static int local_register = 0;
 #endif
-
-#define NUM_BLOCKS 32
 
 static double parsesize(const char *value) {
     long long int units;
@@ -271,6 +278,64 @@ testResult_t CheckData(struct threadArgs* args, ncclDataType_t type, ncclRedOp_t
   return testSuccess;
 }
 
+testResult_t testEventSynchronize(int ngpus, cudaEvent_t* events, ncclComm_t* comms) {
+  cudaError_t cudaErr;
+  int remaining = ngpus;
+  int* done = (int*)malloc(sizeof(int)*ngpus);
+  memset(done, 0, sizeof(int)*ngpus);
+  timer tim;
+
+  while (remaining) {
+   int idle = 1;
+   for (int i=0; i<ngpus; i++) {
+     if (done[i]) continue;
+
+     cudaErr = cudaEventQuery(events[i]);
+     if (cudaErr == cudaSuccess) {
+       done[i] = 1;
+       remaining--;
+       idle = 0;
+       continue;
+     }
+
+     if (cudaErr != cudaErrorNotReady) CUDACHECK(cudaErr);
+
+#if NCCL_VERSION_CODE >= NCCL_VERSION(2,4,0)
+     if (test_ncclVersion >= NCCL_VERSION(2,4,0) && comms) {
+       ncclResult_t ncclAsyncErr;
+       NCCLCHECK(ncclCommGetAsyncError(comms[i], &ncclAsyncErr));
+       if (ncclAsyncErr != ncclSuccess) {
+         // An asynchronous error happened. Stop the operation and destroy
+         // the communicator
+         for (int i=0; i<ngpus; i++)
+           NCCLCHECK(ncclCommAbort(comms[i]));
+         // Abort the perf test
+         NCCLCHECK(ncclAsyncErr);
+       }
+     }
+     double delta = tim.elapsed();
+     if (delta > timeout && timeout > 0) {
+       for (int i=0; i<ngpus; i++)
+         NCCLCHECK(ncclCommAbort(comms[i]));
+       char hostname[1024];
+       getHostName(hostname, 1024);
+       printf("%s: Test timeout (%ds) %s:%d\n",
+           hostname,
+           timeout,
+           __FILE__,__LINE__);
+       free(done);
+       return testTimeout;
+     }
+#endif
+   }
+
+   // We might want to let other threads (including NCCL threads) use the CPU.
+   if (idle) sched_yield();
+  }
+  free(done);
+  return testSuccess;
+}
+
 testResult_t testStreamSynchronize(int ngpus, cudaStream_t* streams, ncclComm_t* comms) {
   cudaError_t cudaErr;
   int remaining = ngpus;
@@ -417,10 +482,15 @@ testResult_t BenchTime(struct threadArgs* args, ncclDataType_t type, ncclRedOp_t
   TESTCHECK(completeColl(args));
 
   Barrier(args);
+  if (side_work) {
+      args->workThreadCountLast = *(args->workThreadCount);
+      args->workThreadBwLast = *(args->workThreadBw);
+  }
 
 #if CUDART_VERSION >= 11030
   cudaGraph_t graphs[args->nGpus];
   cudaGraphExec_t graphExec[args->nGpus];
+  //Record graph
   if (cudaGraphLaunches >= 1) {
     // Begin cuda graph capture
     for (int i=0; i<args->nGpus; i++) {
@@ -430,21 +500,15 @@ testResult_t BenchTime(struct threadArgs* args, ncclDataType_t type, ncclRedOp_t
       //   Since pre-connect calls cudaMalloc, we cannot use global capture mode
       CUDACHECK(cudaStreamBeginCapture(args->streams[i], cudaStreamCaptureModeThreadLocal));
     }
-  }
-#endif
 
-  // Performance Benchmark
-  timer tim;
-  for (int iter = 0; iter < iters; iter++) {
-    if (agg_iters>1) NCCLCHECK(ncclGroupStart());
-    for (int aiter = 0; aiter < agg_iters; aiter++) {
-      TESTCHECK(startColl(args, type, op, root, in_place, iter*agg_iters+aiter));
+    for (int iter = 0; iter < iters; iter++) {
+      if (agg_iters>1) NCCLCHECK(ncclGroupStart());
+      for (int aiter = 0; aiter < agg_iters; aiter++) {
+        TESTCHECK(startColl(args, type, op, root, in_place, iter*agg_iters+aiter));
+      }
+      if (agg_iters>1) NCCLCHECK(ncclGroupEnd());
     }
-    if (agg_iters>1) NCCLCHECK(ncclGroupEnd());
-  }
 
-#if CUDART_VERSION >= 11030
-  if (cudaGraphLaunches >= 1) {
     // End cuda graph capture
     for (int i=0; i<args->nGpus; i++) {
       CUDACHECK(cudaStreamEndCapture(args->streams[i], graphs+i));
@@ -455,14 +519,42 @@ testResult_t BenchTime(struct threadArgs* args, ncclDataType_t type, ncclRedOp_t
     }
     // Resync CPU, restart timing, launch cuda graph
     Barrier(args);
-    tim.reset();
+  }
+#endif
+
+  //start copy thread and wait for it to be active
+  if (side_work) {
+      (*args->workThreadStart)++;
+      while (*(args->workThreadStarted) < *(args->workThreadStart));
+      //collect copythread baseline
+      if (args->workThreadCountLast == 0) {
+          *(args->workThreadBaseBw) = *(args->workThreadBw);
+          args->workThreadCountLast = *(args->workThreadCount);
+          args->workThreadBwLast = *(args->workThreadBw);
+      }
+  }
+
+  // Performance Benchmark
+  timer tim;
+#if CUDART_VERSION >= 11030
+  if (cudaGraphLaunches >= 1) {
     for (int l=0; l<cudaGraphLaunches; l++) {
       for (int i=0; i<args->nGpus; i++) {
         CUDACHECK(cudaGraphLaunch(graphExec[i], args->streams[i]));
       }
     }
-  }
+  } else
 #endif
+  {
+    //stream launch
+    for (int iter = 0; iter < iters; iter++) {
+      if (agg_iters>1) NCCLCHECK(ncclGroupStart());
+      for (int aiter = 0; aiter < agg_iters; aiter++) {
+        TESTCHECK(startColl(args, type, op, root, in_place, iter*agg_iters+aiter));
+      }
+      if (agg_iters>1) NCCLCHECK(ncclGroupEnd());
+    }
+  }
 
   double cputimeSec = tim.elapsed()/(iters*agg_iters);
   TESTCHECK(completeColl(args));
@@ -471,6 +563,18 @@ testResult_t BenchTime(struct threadArgs* args, ncclDataType_t type, ncclRedOp_t
   deltaSec = deltaSec/(iters*agg_iters);
   if (cudaGraphLaunches >= 1) deltaSec = deltaSec/cudaGraphLaunches;
   Allreduce(args, &deltaSec, average);
+
+  //stop copy thread and wait for it to be stopped
+  double workThreadBw;
+  int workThreadCount;
+  if (side_work) {
+      (*args->workThreadStop)++;
+      while (*(args->workThreadStopped) < *(args->workThreadStop));
+      workThreadBw = *(args->workThreadBw) - args->workThreadBwLast;
+      workThreadCount = *(args->workThreadCount) - args->workThreadCountLast;
+      args->workThreadBwLast = *(args->workThreadBw);
+      Allreduce(args, &workThreadBw, average);
+  }
 
 #if CUDART_VERSION >= 11030
   if (cudaGraphLaunches >= 1) {
@@ -547,6 +651,7 @@ testResult_t BenchTime(struct threadArgs* args, ncclDataType_t type, ncclRedOp_t
 
   double timeUsec = (report_cputime ? cputimeSec : deltaSec)*1.0E6;
   char timeStr[100];
+  double sideBw = 0;
   if (timeUsec >= 10000.0) {
     sprintf(timeStr, "%7.0f", timeUsec);
   } else if (timeUsec >= 100.0) {
@@ -554,10 +659,24 @@ testResult_t BenchTime(struct threadArgs* args, ncclDataType_t type, ncclRedOp_t
   } else {
     sprintf(timeStr, "%7.2f", timeUsec);
   }
-  if (args->reportErrors) {
-    PRINT("  %7s  %6.2f  %6.2f  %5g", timeStr, algBw, busBw, (double)wrongElts);
+  if(side_work == 1) {
+      sideBw = workThreadBw;
   } else {
-    PRINT("  %7s  %6.2f  %6.2f  %5s", timeStr, algBw, busBw, "N/A");
+      sideBw = ((double)workThreadCount)*COMP_SIZE*work_sms/(1000*timeUsec);
+  }
+
+  if (args->reportErrors) {
+     if (side_work == 1) {
+       PRINT("  %7s  %6.2f  %6.2f  %6.2f %5g", timeStr, algBw, busBw, sideBw, (double)wrongElts);
+      } else { 
+        PRINT("  %7s  %6.2f  %6.2f  %5g", timeStr, algBw, busBw, (double)wrongElts);
+      }
+  } else {
+     if (side_work == 1) {
+       PRINT("  %7s  %6.2f  %6.2f  %6.2f %5s", timeStr, algBw, busBw, sideBw, "N/A");
+     } else {
+       PRINT("  %7s  %6.2f  %6.2f  %5s", timeStr, algBw, busBw, "N/A");
+     }
   }
 
   args->bw[0] += busBw;
@@ -655,6 +774,115 @@ testResult_t threadInit(struct threadArgs* args) {
   return testSuccess;
 }
 
+__global__ void
+__launch_bounds__(1024)
+copykernel(int *dst, int *src, long nbytes)  {
+  float4 *srcFloat = (float4*)src;
+  float4 *dstFloat = (float4*)dst;
+
+  const long elems_per_iter = blockDim.x * gridDim.x * UNROLL;
+  const long start_elem = blockIdx.x*blockDim.x + threadIdx.x;
+  const long end_elem = max(nbytes/16, start_elem);
+  const long aligned_elem = ((end_elem - start_elem) / elems_per_iter) * elems_per_iter;
+  const long end_aligned = start_elem + aligned_elem;
+
+  for(long i = start_elem; i<end_aligned; i+=elems_per_iter) {
+    float4 val[UNROLL];
+    #pragma unroll
+    for(int j=0;j<UNROLL;j++)
+      val[j]=srcFloat[i+blockDim.x*gridDim.x*j];
+    #pragma unroll
+    for(int j=0;j<UNROLL;j++)
+      dstFloat[i+blockDim.x*gridDim.x*j]=val[j];
+  }
+
+  for(long i = end_aligned; i<end_elem; i+=blockDim.x*gridDim.x)
+    dstFloat[i]=srcFloat[i];
+}
+
+testResult_t copyOnStream(int *dst, int *src, long nbytes, cudaStream_t stream) {
+  if (side_work == 1 && work_sms == 0) {
+     CUDACHECK(cudaMemcpyAsync(dst, src, nbytes, cudaMemcpyHostToDevice, stream));
+  } else {
+     copykernel<<<work_sms, 1024, 0, stream>>>(dst, src, nbytes);
+  }
+  return testSuccess;
+}
+
+testResult_t workThread(struct threadArgs* args) {
+  void* ptrs[args->nGpus];
+  void* hostPtrs[args->nGpus];
+  int gpuids[args->nGpus];
+  cudaStream_t streams[args->nGpus];
+  cudaEvent_t events[args->nGpus];
+  int workIter = 0;
+  int baseIter = 5;
+  int gpu0; {
+    char* str = getenv("NCCL_TESTS_DEVICE");
+    gpu0 = str ? atoi(str) : -1;
+  }
+
+  long nbytes = (long)COPY_MEM_SIZE;
+  for (int i=0; i<args->nGpus; i++) {
+    gpuids[i] = (gpu0 != -1 ? gpu0 : args->localRank*args->nThreads*args->nGpus) + args->thread*args->nGpus + i;
+    CUDACHECK(cudaSetDevice(gpuids[i]));
+    CUDACHECK(cudaEventCreateWithFlags(&events[i], cudaEventDisableTiming));
+    CUDACHECK(cudaStreamCreateWithFlags(streams+i, cudaStreamNonBlocking));
+    if (side_work == 1) {
+            CUDACHECK(cudaMalloc(ptrs+i, nbytes));
+            CUDACHECK(cudaHostAlloc(hostPtrs+i, nbytes, cudaHostAllocPortable | cudaHostAllocMapped));
+    }
+  }
+
+  //collect baseline
+  timer tim;
+  for (int j=0; j<baseIter; j++) {
+      for (int i=0; i<args->nGpus; i++) {
+          CUDACHECK(cudaSetDevice(gpuids[i]));
+          copyOnStream((int*)ptrs[i], (int*)hostPtrs[i], nbytes, streams[i]);
+      }
+  }
+  TESTCHECK(testStreamSynchronize(args->nGpus, streams, NULL));
+  double copySec = tim.elapsed();
+  double copyBw = ((double)baseIter*nbytes)/(1e9*copySec);
+  *args->workThreadBw = copyBw;
+
+  while (args->workThreadAbort == 0) {
+     //wait for start signal
+     if (*args->workThreadStarted >= *args->workThreadStart) continue;
+
+     tim.reset();
+     workIter = 0;
+     while (*args->workThreadStopped >= *args->workThreadStop) {
+        for (int i=0; i<args->nGpus; i++) {
+          CUDACHECK(cudaSetDevice(gpuids[i]));
+          CUDACHECK(cudaEventRecord(events[i], streams[i]));
+          copyOnStream((int*)ptrs[i], (int*)hostPtrs[i], nbytes, streams[i]);
+        }
+        if (workIter == 0) (*args->workThreadStarted)++;
+        //test on any copies issued in workIter-1
+        //keep two copies in flight at any given time
+        TESTCHECK(testEventSynchronize(args->nGpus, events, NULL));
+        workIter++;
+     }
+     TESTCHECK(testStreamSynchronize(args->nGpus, streams, NULL));
+     //measure and update time
+     double copySec = tim.elapsed();
+     double copyBw = ((double)workIter*nbytes)/(1e9*copySec);
+     (*args->workThreadBw) += copyBw;
+     (*args->workThreadCount) += workIter;
+     (*args->workThreadStopped)++;
+  }
+
+  for (int i=0; i<args->nGpus; i++) {
+    CUDACHECK(cudaEventDestroy(events[i]));
+    CUDACHECK(cudaStreamDestroy(streams[i]));
+    CUDACHECK(cudaFree(ptrs[i]));
+    CUDACHECK(cudaFreeHost(hostPtrs[i]));
+  }
+  return testSuccess;
+}
+
 void* threadLauncher(void* thread_) {
   struct testThread* thread = (struct testThread*)thread_;
   thread->ret = thread->func(&thread->args);
@@ -724,6 +952,8 @@ int main(int argc, char* argv[]) {
     {"root", required_argument, 0, 'r'},
     {"blocking", required_argument, 0, 'z'},
     {"stream_null", required_argument, 0, 'y'},
+    {"side_work", required_argument, 0, 'k'},
+    {"work_sms", required_argument, 0, 'S'},
     {"timeout", required_argument, 0, 'T'},
     {"cudagraph", required_argument, 0, 'G'},
     {"report_cputime", required_argument, 0, 'C'},
@@ -735,7 +965,7 @@ int main(int argc, char* argv[]) {
 
   while(1) {
     int c;
-    c = getopt_long(argc, argv, "t:g:b:e:i:f:n:m:w:p:c:o:d:r:z:y:T:hG:C:a:R:", longopts, &longindex);
+    c = getopt_long(argc, argv, "t:g:b:e:i:f:n:m:w:p:c:o:d:r:z:y:k:S:T:hG:C:a:R:", longopts, &longindex);
 
     if (c == -1)
       break;
@@ -803,6 +1033,12 @@ int main(int argc, char* argv[]) {
       case 'y':
         streamnull = strtol(optarg, NULL, 0);
         break;
+      case 'k':
+        side_work = strtol(optarg, NULL, 0);
+        break;
+      case 'S':
+        work_sms = (int)strtol(optarg, NULL, 0);
+        break;
       case 'T':
         timeout = strtol(optarg, NULL, 0);
         break;
@@ -854,6 +1090,8 @@ int main(int argc, char* argv[]) {
             "[-r,--root <root>] \n\t"
             "[-z,--blocking <0/1>] \n\t"
             "[-y,--stream_null <0/1>] \n\t"
+            "[-k,--side_work <0/1>] \n\t"
+            "[-S,-- <number of sms for compute, set 0 to use CE>] \n\t"
             "[-T,--timeout <time in seconds>] \n\t"
             "[-G,--cudagraph <num graph launches>] \n\t"
             "[-C,--report_cputime <0/1>] \n\t"
@@ -864,6 +1102,7 @@ int main(int argc, char* argv[]) {
         return 0;
     }
   }
+  if(side_work == 0) work_sms = 0;
   if (minBytes > maxBytes) {
     fprintf(stderr, "invalid sizes for 'minbytes' and 'maxbytes': %llu > %llu\n",
            (unsigned long long)minBytes,
@@ -904,10 +1143,10 @@ testResult_t run() {
 #endif
   is_main_thread = is_main_proc = (proc == 0) ? 1 : 0;
 
-  PRINT("# nThread %d nGpus %d minBytes %ld maxBytes %ld step: %ld(%s) warmup iters: %d iters: %d agg iters: %d validation: %d graph: %d\n",
+  PRINT("# nThread %d nGpus %d minBytes %ld maxBytes %ld step: %ld(%s) warmup iters: %d iters: %d agg iters: %d validation: %d graph: %d  side_work: %d work_sms: %d \n",
         nThreads, nGpus, minBytes, maxBytes,
         (stepFactor > 1)?stepFactor:stepBytes, (stepFactor > 1)?"factor":"bytes",
-        warmup_iters, iters, agg_iters, datacheck, cudaGraphLaunches);
+        warmup_iters, iters, agg_iters, datacheck, cudaGraphLaunches, side_work, work_sms);
   if (blocking_coll) PRINT("# Blocking Enabled: wait for completion and barrier after each collective \n");
   if (parallel_init) PRINT("# Parallel Init Enabled: threads call into NcclInitRank concurrently \n");
   PRINT("#\n");
@@ -1020,14 +1259,38 @@ testResult_t run() {
 
   const char* timeStr = report_cputime ? "cputime" : "time";
   PRINT("#\n");
-  PRINT("# %10s  %12s  %8s  %6s  %6s           out-of-place                       in-place          \n", "", "", "", "", "");
-  PRINT("# %10s  %12s  %8s  %6s  %6s  %7s  %6s  %6s %6s  %7s  %6s  %6s %6s\n", "size", "count", "type", "redop", "root",
-      timeStr, "algbw", "busbw", "#wrong", timeStr, "algbw", "busbw", "#wrong");
-  PRINT("# %10s  %12s  %8s  %6s  %6s  %7s  %6s  %6s  %5s  %7s  %6s  %6s  %5s\n", "(B)", "(elements)", "", "", "",
-      "(us)", "(GB/s)", "(GB/s)", "", "(us)", "(GB/s)", "(GB/s)", "");
+  if (side_work == 1) { 
+    PRINT("# %10s  %12s  %8s  %6s  %6s           out-of-place                       in-place          \n", "", "", "", "", "");
+    PRINT("# %10s  %12s  %8s  %6s  %6s  %7s  %6s  %6s %6s %6s  %7s  %6s  %6s %6s %6s\n", "size", "count", "type", "redop", 
+	"root", timeStr, "algbw", "busbw", "copybw", "#wrong", timeStr, "algbw", "busbw", "copybw", "#wrong");
+    PRINT("# %10s  %12s  %8s  %6s  %6s  %7s  %6s  %6s  %6s %5s  %7s  %6s  %6s  %6s %5s\n", "(B)", "(elements)", "", "", "",
+        "(us)", "(GB/s)", "(GB/s)", "(GB/s)", "", "(us)", "(GB/s)", "(GB/s)", "(GB/s)", "");
+  } else {
+    PRINT("# %10s  %12s  %8s  %6s  %6s           out-of-place                       in-place          \n", "", "", "", "", "");
+    PRINT("# %10s  %12s  %8s  %6s  %6s  %7s  %6s  %6s %6s  %7s  %6s  %6s %6s\n", "size", "count", "type", "redop", "root",
+        timeStr, "algbw", "busbw", "#wrong", timeStr, "algbw", "busbw", "#wrong");
+    PRINT("# %10s  %12s  %8s  %6s  %6s  %7s  %6s  %6s  %5s  %7s  %6s  %6s  %5s\n", "(B)", "(elements)", "", "", "",
+        "(us)", "(GB/s)", "(GB/s)", "", "(us)", "(GB/s)", "(GB/s)", "");
+  }
 
   struct testThread threads[nThreads];
+  struct testThread workThreads[nThreads];
   memset(threads, 0, sizeof(struct testThread)*nThreads);
+
+  double workThreadsBw[nThreads];
+  double workThreadsBaseBw[nThreads];
+  int workThreadsCount[nThreads];
+  int workThreadsStart[nThreads];
+  int workThreadsStarted[nThreads];
+  int workThreadsStop[nThreads];
+  int workThreadsStopped[nThreads];
+  memset(workThreadsBw, 0, sizeof(double)*nThreads);
+  memset(workThreadsBaseBw, 0, sizeof(double)*nThreads);
+  memset(workThreadsCount, 0, sizeof(int)*nThreads);
+  memset(workThreadsStart, 0, sizeof(int)*nThreads);
+  memset(workThreadsStarted, 0, sizeof(int)*nThreads);
+  memset(workThreadsStop, 0, sizeof(int)*nThreads);
+  memset(workThreadsStopped, 0, sizeof(int)*nThreads);
 
   for (int t=nThreads-1; t>=0; t--) {
     threads[t].args.minbytes=minBytes;
@@ -1051,10 +1314,25 @@ testResult_t run() {
     threads[t].args.streams=streams+t*nGpus;
 
     threads[t].args.errors=errors+t;
+    threads[t].args.workThreadBaseBw=workThreadsBaseBw+t;
     threads[t].args.bw=bw+t;
     threads[t].args.bw_count=bw_count+t;
 
     threads[t].args.reportErrors = datacheck;
+
+    threads[t].args.workThreadBw = workThreadsBw+t;
+    threads[t].args.workThreadCount = workThreadsCount+t;
+    threads[t].args.workThreadStart = workThreadsStart+t;
+    threads[t].args.workThreadStarted = workThreadsStarted+t;
+    threads[t].args.workThreadStop = workThreadsStop+t;
+    threads[t].args.workThreadStopped = workThreadsStopped+t;
+
+    if (side_work) {
+      memset(workThreads+t, 0, sizeof(struct testThread));
+      memcpy(&workThreads[t].args, &threads[t].args, sizeof(struct threadArgs));
+      workThreads[t].func = workThread;
+      TESTCHECK(threadLaunch(workThreads+t));
+    }
 
     threads[t].func = parallel_init ? threadInit : threadRunTests;
     if (t)
@@ -1110,9 +1388,11 @@ testResult_t run() {
   envstr = getenv("NCCL_TESTS_MIN_BW");
   double check_avg_bw = envstr ? atof(envstr) : -1;
   bw[0] /= bw_count[0];
+  if (side_work == 1) workThreadsBaseBw[0] /= nThreads;
 
   PRINT("# Out of bounds values : %d %s\n", errors[0], errors[0] ? "FAILED" : "OK");
   PRINT("# Avg bus bandwidth    : %g %s\n", bw[0], check_avg_bw == -1 ? "" : (bw[0] < check_avg_bw*(0.9) ? "FAILED" : "OK"));
+  if (side_work == 1) PRINT("# Base Copy BW : %g \n", workThreadsBaseBw[0]);
   PRINT("#\n");
 #ifdef MPI_SUPPORT
   MPI_Comm_free(&mpi_comm);
