@@ -36,7 +36,16 @@ void AllReduceGetBw(size_t count, int typesize, double sec, double* algBw, doubl
   double baseBw = (double)(count * typesize) / 1.0E9 / sec;
 
   *algBw = baseBw;
-  double factor = ((double)(2*(nranks - 1)))/((double)nranks);
+
+  const char* nccl_algo = getenv("NCCL_ALGO");
+
+  double factor;
+  if (nccl_algo != nullptr && (strcmp(nccl_algo, "NVLS") == 0 || strcmp(nccl_algo, "NVLSTREE") == 0)) {
+    factor = ((double)(nranks - 1)) / ((double)(nranks + 1));
+  } else {
+    factor = ((double)(2 * (nranks - 1))) / ((double)nranks);
+  }
+
   *busBw = baseBw * factor;
 }
 

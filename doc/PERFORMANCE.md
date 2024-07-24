@@ -136,6 +136,7 @@ And :
 To obtain a bus bandwidth which should be independent of the number of ranks _n_, we apply a correction factor to the algorithm bandwidth :
 
 * AllReduce : 2*(_n_-1)/_n_
+* AllReduce (In-Network Reduction): (n-1)/(n+1)
 * ReduceScatter : (_n_-1)/_n_
 * AllGather : (_n_-1)/_n_
 * Broadcast : 1
