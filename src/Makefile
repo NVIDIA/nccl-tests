@@ -34,8 +34,8 @@ NVCC_GENCODE ?= -gencode=arch=compute_35,code=sm_35 \
                 -gencode=arch=compute_70,code=compute_70
 endif
 
-NVCUFLAGS  := -ccbin $(CXX) $(NVCC_GENCODE) -std=c++11
-CXXFLAGS   := -std=c++11
+NVCUFLAGS  := -ccbin $(CXX) $(NVCC_GENCODE) -std=c++17
+CXXFLAGS   := -std=c++17
 
 LDFLAGS    := -L${CUDA_LIB} -lcudart -lrt
 NVLDFLAGS  := -L${CUDA_LIB} -l${CUDARTLIB} -lrt
@@ -69,6 +69,13 @@ endif
 ifeq ($(MPI_IBM),1)
 NVCUFLAGS += -DMPI_SUPPORT
 NVLDFLAGS += -lmpi_ibm
+endif
+ifeq ($(GLOO), 1)
+PYTHON_CONFIG := python3-config
+PYTHON_INCLUDE := $(shell $(PYTHON_CONFIG) --includes)
+TORCH_HOME ?= /usr/local/libtorch
+NVCUFLAGS += -D_GLIBCXX_USE_CXX11_ABI=0 -DUSE_C10D_GLOO $(PYTHON_INCLUDE) -isystem $(TORCH_HOME)/include -isystem $(TORCH_HOME)/include/torch/csrc/api/include
+NVLDFLAGS += -L$(TORCH_HOME)/lib -lc10 -ltorch_cpu
 endif
 LIBRARIES += nccl
 NVLDFLAGS += $(LIBRARIES:%=-l%)
