@@ -34,8 +34,13 @@ NVCC_GENCODE ?= -gencode=arch=compute_35,code=sm_35 \
                 -gencode=arch=compute_70,code=compute_70
 endif
 
+ifeq ($(GLOO), 1)
 NVCUFLAGS  := -ccbin $(CXX) $(NVCC_GENCODE) -std=c++17
 CXXFLAGS   := -std=c++17
+else
+NVCUFLAGS  := -ccbin $(CXX) $(NVCC_GENCODE) -std=c++11
+CXXFLAGS   := -std=c++11
+endif
 
 LDFLAGS    := -L${CUDA_LIB} -lcudart -lrt
 NVLDFLAGS  := -L${CUDA_LIB} -l${CUDARTLIB} -lrt

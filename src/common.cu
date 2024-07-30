@@ -958,7 +958,8 @@ int main(int argc, char* argv[]) {
       auto options = c10d::ProcessGroupGloo::Options::create();
       // Create Gloo device that binds to any interface.
       ::gloo::transport::tcp::attr tcp_attr;
-      tcp_attr.iface = "eth0";
+      str = getenv("GLOO_INTERFACE");
+      tcp_attr.iface = str ? str : "eth0";
       auto gloo_device = ::gloo::transport::tcp::CreateDevice(tcp_attr);
       options->devices.push_back(gloo_device);
 
