@@ -24,14 +24,15 @@ NCCL tests can run on multiple processes, multiple threads, and multiple CUDA de
 
 ### Quick examples
 
-Run on 8 GPUs (`-g 8`), scanning from 8 Bytes to 128MBytes :
+Run on single node with 8 GPUs (`-g 8`), scanning from 8 Bytes to 128MBytes :
 ```shell
 $ ./build/all_reduce_perf -b 8 -e 128M -f 2 -g 8
 ```
 
-Run with MPI on 10 processes (potentially on multiple nodes) with 4 GPUs each, for a total of 40 GPUs:
+Run 64 MPI processes on nodes with 8 GPUs each, for a total of 64 GPUs spread across 8 nodes :
+(NB: The nccl-tests binaries must be compiled with `MPI=1` for this case)
 ```shell
-$ mpirun -np 10 ./build/all_reduce_perf -b 8 -e 128M -f 2 -g 4
+$ mpirun -np 64 -N 8 ./build/all_reduce_perf -b 8 -e 8G -f 2 -g 1
 ```
 
 ### Performance
@@ -59,14 +60,18 @@ All tests support the same set of arguments :
   * `-n,--iters <iteration count>` number of iterations. Default : 20.
   * `-w,--warmup_iters <warmup iteration count>` number of warmup iterations (not timed). Default : 5.
   * `-m,--agg_iters <aggregation count>` number of operations to aggregate together in each iteration. Default : 1.
+  * `-N,--run_cycles <cycle count>` run & print each cycle. Default : 1; 0=infinite.
   * `-a,--average <0/1/2/3>` Report performance as an average across all ranks (MPI=1 only). <0=Rank0,1=Avg,2=Min,3=Max>. Default : 1.
 * Test operation
   * `-p,--parallel_init <0/1>` use threads to initialize NCCL in parallel. Default : 0.
   * `-c,--check <check iteration count>` perform count iterations, checking correctness of results on each iteration. This can be quite slow on large numbers of GPUs. Default : 1.
   * `-z,--blocking <0/1>` Make NCCL collective blocking, i.e. have CPUs wait and sync after each collective. Default : 0.
   * `-G,--cudagraph <num graph launches>` Capture iterations as a CUDA graph and then replay specified number of times. Default : 0.
+  * `-C,--report_cputime <0/1>]` Report CPU time instead of latency. Default : 0.
+  * `-R,--local_register <1/0>` enable local buffer registration on send/recv buffers. Default : 0.
+  * `-T,--timeout <time in seconds>` timeout each test after specified number of seconds. Default : disabled.
 
 ## Copyright
 
-NCCL tests are provided under the BSD license. All source code and accompanying documentation is copyright (c) 2016-2021, NVIDIA CORPORATION. All rights reserved.
+NCCL tests are provided under the BSD license. All source code and accompanying documentation is copyright (c) 2016-2024, NVIDIA CORPORATION. All rights reserved.
 
