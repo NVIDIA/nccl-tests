@@ -770,7 +770,12 @@ int main(int argc, char* argv[]) {
         maxBytes = (size_t)parsed;
         break;
       case 'i':
-        stepBytes = strtol(optarg, NULL, 0);
+        parsed = parsesize(optarg);
+        if (parsed < 0) {
+          fprintf(stderr, "invalid size specified for 'stepBytes'\n");
+          return -1;
+        }
+        stepBytes = (size_t)parsed;
         break;
       case 'f':
         stepFactor = strtol(optarg, NULL, 0);
