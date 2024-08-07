@@ -61,6 +61,8 @@ extern "C" __attribute__((weak)) char const* ncclGetLastError(ncclComm_t comm) {
 #define WORK_SMS 64
 #define COPY_MEM_SIZE (1 * 1024 * 1024 * 1024L)
 #define UNROLL 8
+#define DIRECTION_H2D 0
+#define DIRECTION_D2H 1
 
 int is_main_proc = 0;
 thread_local int is_main_thread = 0;
@@ -85,6 +87,7 @@ static int blocking_coll = 0;
 static int streamnull = 0;
 static int side_work = 0;
 static int work_sms = WORK_SMS;
+static int direction = DIRECTION_H2D;
 static int timeout = 0;
 static int cudaGraphLaunches = 0;
 static int report_cputime = 0;
@@ -807,9 +810,15 @@ copykernel(int *dst, int *src, long nbytes)  {
 
 testResult_t copyOnStream(int *dst, int *src, long nbytes, cudaStream_t stream) {
   if (side_work == 1 && work_sms == 0) {
-    CUDACHECK(cudaMemcpyAsync(dst, src, nbytes, cudaMemcpyHostToDevice, stream));
+    if (direction == DIRECTION_H2D)
+      CUDACHECK(cudaMemcpyAsync(dst, src, nbytes, cudaMemcpyHostToDevice, stream));
+    else
+      CUDACHECK(cudaMemcpyAsync(src, dst, nbytes, cudaMemcpyDeviceToHost, stream));
   } else {
-    copykernel<<<work_sms, 1024, 0, stream>>>(dst, src, nbytes);
+    if (direction == DIRECTION_H2D)
+      copykernel<<<work_sms, 1024, 0, stream>>>(dst, src, nbytes);
+    else
+      copykernel<<<work_sms, 1024, 0, stream>>>(src, dst, nbytes);
   }
   return testSuccess;
 }
@@ -960,6 +969,7 @@ int main(int argc, char* argv[]) {
     {"stream_null", required_argument, 0, 'y'},
     {"side_work", required_argument, 0, 'k'},
     {"work_sms", required_argument, 0, 'S'},
+    {"direction", required_argument, 0, 'D'},
     {"timeout", required_argument, 0, 'T'},
     {"cudagraph", required_argument, 0, 'G'},
     {"report_cputime", required_argument, 0, 'C'},
@@ -971,7 +981,7 @@ int main(int argc, char* argv[]) {
 
   while(1) {
     int c;
-    c = getopt_long(argc, argv, "t:g:b:e:i:f:n:m:w:N:p:c:o:d:r:z:y:k:S:T:hG:C:a:R:", longopts, &longindex);
+    c = getopt_long(argc, argv, "t:g:b:e:i:f:n:m:w:N:p:c:o:d:r:z:y:k:D:S:T:hG:C:a:R:", longopts, &longindex);
 
     if (c == -1)
       break;
@@ -1053,6 +1063,9 @@ int main(int argc, char* argv[]) {
       case 'S':
         work_sms = (int)strtol(optarg, NULL, 0);
         break;
+      case 'D':
+        direction = (int)strtol(optarg, NULL, 0);
+        break;
       case 'T':
         timeout = strtol(optarg, NULL, 0);
         break;
@@ -1106,7 +1119,8 @@ int main(int argc, char* argv[]) {
             "[-z,--blocking <0/1>] \n\t"
             "[-y,--stream_null <0/1>] \n\t"
             "[-k,--side_work <0/1>] \n\t"
-            "[-S,-- <number of sms for compute, set 0 to use CE>] \n\t"
+            "[-S,-- <number of SMs for side_work, set 0 to use CE>] \n\t"
+            "[-D,-- <side_work copy direction, 0=H2D (default); 1=D2H>] \n\t"
             "[-T,--timeout <time in seconds>] \n\t"
             "[-G,--cudagraph <num graph launches>] \n\t"
             "[-C,--report_cputime <0/1>] \n\t"
@@ -1158,10 +1172,11 @@ testResult_t run() {
 #endif
   is_main_thread = is_main_proc = (proc == 0) ? 1 : 0;
 
-  PRINT("# nThread %d nGpus %d minBytes %ld maxBytes %ld step: %ld(%s) warmup iters: %d iters: %d agg iters: %d validation: %d graph: %d side_work: %d work_sms: %d\n",
+  PRINT("# nThread %d nGpus %d minBytes %ld maxBytes %ld step: %ld(%s) warmup iters: %d iters: %d agg iters: %d validation: %d graph: %d side_work: %d work_sms: %d direction: %s\n",
         nThreads, nGpus, minBytes, maxBytes,
         (stepFactor > 1)?stepFactor:stepBytes, (stepFactor > 1)?"factor":"bytes",
-        warmup_iters, iters, agg_iters, datacheck, cudaGraphLaunches, side_work, work_sms);
+        warmup_iters, iters, agg_iters, datacheck, cudaGraphLaunches, side_work, work_sms,
+        (direction == DIRECTION_H2D) ? "H2D" : "D2H");
   if (blocking_coll) PRINT("# Blocking Enabled: wait for completion and barrier after each collective \n");
   if (parallel_init) PRINT("# Parallel Init Enabled: threads call into NcclInitRank concurrently \n");
   PRINT("#\n");
