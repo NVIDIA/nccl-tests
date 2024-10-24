@@ -254,7 +254,7 @@ extern ncclRedOp_t test_ops[];
 extern const char *test_opnames[];
 
 static int ncclstringtotype(char *str) {
-    for (int t=0; t<ncclNumTypes; t++) {
+    for (int t=0; t<test_typenum; t++) {
       if (strcmp(str, test_typenames[t]) == 0) {
         return t;
       }
