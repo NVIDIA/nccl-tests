@@ -1,0 +1,36 @@
+#!/usr/bin/env bash
+TEST_DIR=$(cd $(dirname $0) && pwd)
+COLL=all_reduce
+while [[ -n $1 ]]; do
+  case $1 in
+  -l*)
+    case ${1:2} in
+    Broadcast|broadcast|Bcast|bcast) COLL=broadcast;;
+    Reduce|reduce) COLL=reduce;;
+    Gather|gather) COLL=gather;;
+    Scatter|scatter) COLL=scatter;;
+    AllToAll|alltoall) COLL=alltoall;;
+    AllGather|allgather) COLL=all_gather;;
+    ReduceScatter|reducescatter) COLL=reduce_scatter;;
+    HyperCube|Hypercube|hypercube) COLL=hypercube;;
+    SendRecv|sendrecv) COLL=sendrecv;;
+    esac;;
+  *) OPTIONS="$OPTIONS $1";;
+  esac
+  shift 1
+done
+
+export OMPI_ALLOW_RUN_AS_ROOT=1
+export OMPI_ALLOW_RUN_AS_ROOT_CONFIRM=1
+export OMPI_MCA_btl=self,tcp
+export OMPI_MCA_pml=^ucx
+
+if [ $OMPI_COMM_WORLD_SIZE -gt $OMPI_COMM_WORLD_LOCAL_SIZE ]; then
+  if [ $OMPI_COMM_WORLD_RANK -eq 0 ]; then
+    export NCCL_DEBUG=${NCCL_DEBUG:-"INFO"}
+  fi
+fi
+if [ $OMPI_COMM_WORLD_RANK -eq 0 ]; then
+  echo "[$(hostname)] running nccl test $COLL$OPTIONS, world_size=$OMPI_COMM_WORLD_SIZE"
+fi
+$TEST_DIR/${COLL}_perf -f2$OPTIONS

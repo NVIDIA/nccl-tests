@@ -19,7 +19,14 @@ CUDA_MAJOR = $(shell echo $(CUDA_VERSION) | cut -d "." -f 1)
 
 # Better define NVCC_GENCODE in your environment to the minimal set
 # of archs to reduce compile time.
-ifeq ($(shell test "0$(CUDA_MAJOR)" -ge 11; echo $$?),0)
+ifeq ($(shell test "0$(CUDA_MAJOR)" -ge 12; echo $$?),0)
+NVCC_GENCODE ?= -gencode=arch=compute_70,code=sm_70 \
+                -gencode=arch=compute_80,code=sm_80 \
+                -gencode=arch=compute_86,code=sm_86 \
+                -gencode=arch=compute_89,code=sm_89 \
+                -gencode=arch=compute_90,code=sm_90 \
+                -gencode=arch=compute_90,code=compute_90
+else ifeq ($(shell test "0$(CUDA_MAJOR)" -ge 11; echo $$?),0)
 NVCC_GENCODE ?= -gencode=arch=compute_60,code=sm_60 \
                 -gencode=arch=compute_61,code=sm_61 \
                 -gencode=arch=compute_70,code=sm_70 \
@@ -33,6 +40,7 @@ NVCC_GENCODE ?= -gencode=arch=compute_35,code=sm_35 \
                 -gencode=arch=compute_70,code=sm_70 \
                 -gencode=arch=compute_70,code=compute_70
 endif
+$(info NVCC_GENCODE is ${NVCC_GENCODE})
 
 NVCUFLAGS  := -ccbin $(CXX) $(NVCC_GENCODE) -std=c++11
 CXXFLAGS   := -std=c++11
@@ -101,5 +109,5 @@ ${DST_DIR}/timer.o: timer.cc timer.h
 ${DST_DIR}/%_perf:${DST_DIR}/%.o ${DST_DIR}/common.o ${DST_DIR}/timer.o $(TEST_VERIFIABLE_OBJS)
 	@printf "Linking  %-35s > %s\n" $< $@
 	@mkdir -p ${DST_DIR}
-	$(NVCC) -o $@ $(NVCUFLAGS) $^ ${NVLDFLAGS}
+	$(NVCC) -o $@ $(NVCUFLAGS) $^ ${NVLDFLAGS} -Xcompiler \"-Wl,-rpath,/usr/local/sihpc/lib\"
 
