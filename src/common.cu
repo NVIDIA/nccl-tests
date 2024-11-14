@@ -14,6 +14,10 @@
 
 #include "../verifiable/verifiable.h"
 
+#include "ucommd.h"
+
+static Ucommd ucommd_;
+
 int test_ncclVersion = 0; // init'd with ncclGetVersion()
 
 #if NCCL_MAJOR >= 2
@@ -64,14 +68,18 @@ static int nGpus = 1;
 static size_t minBytes = 32*1024*1024;
 static size_t maxBytes = 32*1024*1024;
 static size_t stepBytes = 1*1024*1024;
-static size_t stepFactor = 1;
+static size_t stepFactor = 2;
 static int datacheck = 1;
 static int warmup_iters = 5;
 static int iters = 20;
 static int agg_iters = 1;
 static int run_cycles = 1;
 static int ncclop = ncclSum;
-static int nccltype = ncclFloat;
+#if defined(__CUDA_BF16_TYPES_EXIST__) && NCCL_VERSION_CODE >= NCCL_VERSION(2,10,0)
+static int nccltype = ncclBfloat16;
+#else
+static int nccltype = ncclHalf;
+#endif
 static int ncclroot = 0;
 static int parallel_init = 0;
 static int blocking_coll = 0;
@@ -709,11 +717,15 @@ int main(int argc, char* argv[]) {
     }
   #endif
 
+  nGpus = ucommd_.getNGpusPerProc();
+  minBytes = maxBytes = ucommd_.getBytes();
+  timeout = ucommd_.getTimeoutSec();
+
   // Parse args
   double parsed;
   int longindex;
   static struct option longopts[] = {
-    {"nthreads", required_argument, 0, 't'},
+  //{"nthreads", required_argument, 0, 't'},
     {"ngpus", required_argument, 0, 'g'},
     {"minbytes", required_argument, 0, 'b'},
     {"maxbytes", required_argument, 0, 'e'},
@@ -741,15 +753,16 @@ int main(int argc, char* argv[]) {
 
   while(1) {
     int c;
-    c = getopt_long(argc, argv, "t:g:b:e:i:f:n:m:w:N:p:c:o:d:r:z:y:T:hG:C:a:R:", longopts, &longindex);
+  //c = getopt_long(argc, argv, "t:g:b:e:i:f:n:m:w:N:p:c:o:d:r:z:y:T:hG:C:a:R:", longopts, &longindex);
+    c = getopt_long(argc, argv, "g:b:e:i:f:n:m:w:N:p:c:o:d:r:z:y:T:hG:C:a:R:", longopts, &longindex);
 
     if (c == -1)
       break;
 
     switch(c) {
-      case 't':
-        nThreads = strtol(optarg, NULL, 0);
-        break;
+    //case 't':
+    //  nThreads = strtol(optarg, NULL, 0);
+    //  break;
       case 'g':
         nGpus = strtol(optarg, NULL, 0);
         break;
@@ -846,7 +859,7 @@ int main(int argc, char* argv[]) {
       default:
         if (c != 'h') printf("invalid option '%c'\n", c);
         printf("USAGE: %s \n\t"
-            "[-t,--nthreads <num threads>] \n\t"
+        //  "[-t,--nthreads <num threads>] \n\t"
             "[-g,--ngpus <gpus per thread>] \n\t"
             "[-b,--minbytes <min size in bytes>] \n\t"
             "[-e,--maxbytes <max size in bytes>] \n\t"
@@ -919,8 +932,10 @@ testResult_t run() {
 #endif
   is_main_thread = is_main_proc = (proc == 0) ? 1 : 0;
 
-  PRINT("# nThread %d nGpus %d minBytes %ld maxBytes %ld step: %ld(%s) warmup iters: %d iters: %d agg iters: %d validation: %d graph: %d\n",
-        nThreads, nGpus, minBytes, maxBytes,
+//PRINT("# nThread %d nGpus %d minBytes %ld maxBytes %ld step: %ld(%s) warmup iters: %d iters: %d agg iters: %d validation: %d graph: %d\n",
+//      nThreads, nGpus, minBytes, maxBytes,
+  PRINT("# nGpus(perProc) %d minBytes %ld maxBytes %ld step: %ld(%s) warmup iters: %d iters: %d agg iters: %d validation: %d graph: %d\n",
+        nGpus, minBytes, maxBytes,
         (stepFactor > 1)?stepFactor:stepBytes, (stepFactor > 1)?"factor":"bytes",
         warmup_iters, iters, agg_iters, datacheck, cudaGraphLaunches);
   if (blocking_coll) PRINT("# Blocking Enabled: wait for completion and barrier after each collective \n");
@@ -949,7 +964,9 @@ testResult_t run() {
   // Gather all output in rank order to root (0)
   MPI_Gather(line, MAX_LINE, MPI_BYTE, lines, MAX_LINE, MPI_BYTE, 0, MPI_COMM_WORLD);
   if (proc == 0) {
-    for (int p = 0; p < totalProcs; p++)
+  //for (int p = 0; p < totalProcs; p++)
+    int stride = ucommd_.getLocalSize() > 0 ? ucommd_.getLocalSize() : 1;
+    for (int p = stride-1; p < totalProcs; p+=stride)
       PRINT("%s", lines+MAX_LINE*p);
     free(lines);
   }
@@ -1123,11 +1140,14 @@ testResult_t run() {
 #endif
 
   envstr = getenv("NCCL_TESTS_MIN_BW");
-  double check_avg_bw = envstr ? atof(envstr) : -1;
+//double check_avg_bw = envstr ? atof(envstr) : -1;
+  double check_avg_bw = envstr ? atof(envstr) :
+      (!strcmp(threads[0].args.collTest->name, "AllReduce") && minBytes == maxBytes && minBytes >= ucommd_.getBytes()) ? ucommd_.getBw(nGpus) : -1;
   bw[0] /= bw_count[0];
 
   PRINT("# Out of bounds values : %d %s\n", errors[0], errors[0] ? "FAILED" : "OK");
-  PRINT("# Avg bus bandwidth    : %g %s\n", bw[0], check_avg_bw == -1 ? "" : (bw[0] < check_avg_bw*(0.9) ? "FAILED" : "OK"));
+  PRINT("# Avg bus bandwidth    : %g %s\n", bw[0], check_avg_bw == -1 ? "" : (bw[0] < check_avg_bw/**(0.9)*/ ? "FAILED" : "OK"));
+  if (bw[0] < check_avg_bw) PRINT("# Expected min bandwidth : %g\n", check_avg_bw);
   PRINT("#\n");
 #ifdef MPI_SUPPORT
   MPI_Comm_free(&mpi_comm);
@@ -1139,7 +1159,7 @@ testResult_t run() {
   // 'cuda-memcheck --leak-check full' requires this
   cudaDeviceReset();
 
-  if (errors[0] || bw[0] < check_avg_bw*(0.9))
+  if (errors[0] || bw[0] < check_avg_bw/**(0.9)*/)
     exit(EXIT_FAILURE);
   else
     exit(EXIT_SUCCESS);

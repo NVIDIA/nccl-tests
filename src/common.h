@@ -94,12 +94,6 @@ struct testColl {
   testResult_t (*runColl)(void* sendbuff, void* recvbuff, size_t count, ncclDataType_t type,
       ncclRedOp_t op, int root, ncclComm_t comm, cudaStream_t stream);
 };
-extern struct testColl allReduceTest;
-extern struct testColl allGatherTest;
-extern struct testColl reduceScatterTest;
-extern struct testColl broadcastTest;
-extern struct testColl reduceTest;
-extern struct testColl alltoAllTest;
 
 struct testEngine {
   void (*getBuffSize)(size_t *sendcount, size_t *recvcount, size_t count, int nranks);
@@ -162,7 +156,14 @@ extern void AllocateBuffs(void **sendbuff, void **recvbuff, void **expected, voi
 #include <unistd.h>
 
 static void getHostName(char* hostname, int maxlen) {
-  gethostname(hostname, maxlen);
+  const char* node_name = getenv("NODE_NAME");
+  if (node_name && node_name[0]) {
+    strncpy(hostname, node_name, maxlen);
+  } else {
+    if (-1 == gethostname(hostname, maxlen)) {
+      strncpy(hostname, "unknown", 16);
+    }
+  }
   for (int i=0; i< maxlen; i++) {
     if (hostname[i] == '.') {
       hostname[i] = '\0';

@@ -106,7 +106,12 @@ ${DST_DIR}/timer.o: timer.cc timer.h
 	@mkdir -p ${DST_DIR}
 	$(CXX) $(CXXFLAGS) -o $@ -c timer.cc
 
-${DST_DIR}/%_perf:${DST_DIR}/%.o ${DST_DIR}/common.o ${DST_DIR}/timer.o $(TEST_VERIFIABLE_OBJS)
+${DST_DIR}/ucommd.o: ucommd.cc ucommd.h
+	@printf "Compiling  %-35s > %s\n" $< $@
+	@mkdir -p ${DST_DIR}
+	$(CXX) $(CXXFLAGS) -o $@ -c ucommd.cc
+
+${DST_DIR}/%_perf:${DST_DIR}/%.o ${DST_DIR}/common.o ${DST_DIR}/timer.o ${DST_DIR}/ucommd.o $(TEST_VERIFIABLE_OBJS)
 	@printf "Linking  %-35s > %s\n" $< $@
 	@mkdir -p ${DST_DIR}
 	$(NVCC) -o $@ $(NVCUFLAGS) $^ ${NVLDFLAGS} -Xcompiler \"-Wl,-rpath,/usr/local/sihpc/lib\"
