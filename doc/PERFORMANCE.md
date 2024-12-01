@@ -150,6 +150,7 @@ To obtain a bus bandwidth which should be independent of the number of ranks _n_
 * AllGather : (_n_-1)/_n_
 * Broadcast : 1
 * Reduce : 1
+* AlltoAll: (_n_-1)/_n_
 * Bisection : 1
 
 The bus bandwidth should reflect the speed of the hardware bottleneck : NVLink, PCI, QPI, or network.
