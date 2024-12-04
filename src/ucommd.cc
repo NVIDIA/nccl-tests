@@ -14,10 +14,10 @@
 #include "ucommd.h"
 
 Ucommd::Ucommd() {
+  (void)_get_node_name();
   (void)_check_multi_node_via_ompi();
   (void)_check_sys_nv_devices();
   (void)_check_sys_ib_devices();
-  (void)_get_node_name();
 }
 
 Ucommd::~Ucommd() {
