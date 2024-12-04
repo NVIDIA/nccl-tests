@@ -1,6 +1,8 @@
-/**
+/*************************************************************************
  * Copyright (c) 2024, Scitix Tech PTE. LTD. All rights reserved.
- */
+ *
+ * See LICENSE.txt for license information
+ ************************************************************************/
 
 #ifndef __UCOMMD_H__
 #define __UCOMMD_H__
