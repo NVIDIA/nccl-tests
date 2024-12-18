@@ -87,7 +87,7 @@ struct testColl {
   void (*getCollByteCount)(
       size_t *sendcount, size_t *recvcount, size_t *paramcount,
       size_t *sendInplaceOffset, size_t *recvInplaceOffset,
-      size_t count, int nranks);
+      size_t count, size_t eltSize, int nranks);
   testResult_t (*initData)(struct threadArgs* args, ncclDataType_t type,
       ncclRedOp_t op, int root, int rep, int in_place);
   void (*getBw)(size_t count, int typesize, double sec, double* algBw, double* busBw, int nranks);
