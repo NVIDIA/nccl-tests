@@ -19,14 +19,20 @@ int test_ncclVersion = 0; // init'd with ncclGetVersion()
 #if NCCL_MAJOR >= 2
   ncclDataType_t test_types[ncclNumTypes] = {
     ncclInt8, ncclUint8, ncclInt32, ncclUint32, ncclInt64, ncclUint64, ncclHalf, ncclFloat, ncclDouble
-  #if defined(__CUDA_BF16_TYPES_EXIST__) && NCCL_VERSION_CODE >= NCCL_VERSION(2,10,0)
+  #if HAVE_BF16
     , ncclBfloat16
+  #endif
+  #if HAVE_FP8
+    , ncclFloat8e4m3, ncclFloat8e5m2
   #endif
   };
   const char *test_typenames[ncclNumTypes] = {
     "int8", "uint8", "int32", "uint32", "int64", "uint64", "half", "float", "double"
-  #if defined(__CUDA_BF16_TYPES_EXIST__) && NCCL_VERSION_CODE >= NCCL_VERSION(2,10,0)
+  #if HAVE_BF16
     , "bfloat16"
+  #endif
+  #if HAVE_FP8
+    , "f8e4m3", "f8e5m2"
   #endif
   };
   int test_typenum = -1;
@@ -96,6 +102,7 @@ static int average = 1;
 #if NCCL_VERSION_CODE >= NCCL_VERSION(2,19,0)
 static int local_register = 0;
 #endif
+static int minCudaArch = 1<<30;
 
 static double parsesize(const char *value) {
     long long int units;
@@ -134,18 +141,18 @@ static double parsesize(const char *value) {
 }
 
 testResult_t CheckDelta(void* results, void* expected, size_t count, size_t offset, ncclDataType_t type, ncclRedOp_t op, uint64_t seed, int nranks, int64_t *wrongEltN) {
-  ncclVerifiableVerify(results, expected, count, (int)type, (int)op, nranks, seed, offset, wrongEltN, cudaStreamDefault);
+  CUDACHECK(ncclVerifiableVerify(results, expected, count, (int)type, (int)op, nranks, seed, offset, wrongEltN, cudaStreamDefault));
   CUDACHECK(cudaDeviceSynchronize());
   return testSuccess;
 }
 
 testResult_t InitDataReduce(void* data, const size_t count, const size_t offset, ncclDataType_t type, ncclRedOp_t op, uint64_t seed, int nranks) {
-  ncclVerifiablePrepareExpected(data, count, (int)type, (int)op, nranks, seed, offset, cudaStreamDefault);
+  CUDACHECK(ncclVerifiablePrepareExpected(data, count, (int)type, (int)op, nranks, seed, offset, cudaStreamDefault));
   return testSuccess;
 }
 
 testResult_t InitData(void* data, const size_t count, size_t offset, ncclDataType_t type, ncclRedOp_t op, uint64_t seed, int nranks, int rank) {
-  ncclVerifiablePrepareInput(data, count, (int)type, (int)op, nranks, rank, seed, offset, cudaStreamDefault);
+  CUDACHECK(ncclVerifiablePrepareInput(data, count, (int)type, (int)op, nranks, rank, seed, offset, cudaStreamDefault));
   return testSuccess;
 }
 
@@ -419,32 +426,40 @@ testResult_t startColl(struct threadArgs* args, ncclDataType_t type, ncclRedOp_t
     if(opIndex < ncclNumOps) {
       op = opIndex;
     }
-    #if NCCL_VERSION_CODE >= NCCL_VERSION(2,11,0)
-    else {
-      union {
-        int8_t i8; uint8_t u8; int32_t i32; uint32_t u32; int64_t i64; uint64_t u64;
-        half f16; float f32; double f64;
-        #if defined(__CUDA_BF16_TYPES_EXIST__)
-        __nv_bfloat16 bf16;
-        #endif
-      };
-      switch(type) {
-      case ncclInt8: i8 = ncclVerifiablePremulScalar<int8_t>(rank); break;
-      case ncclUint8: u8 = ncclVerifiablePremulScalar<uint8_t>(rank); break;
-      case ncclInt32: i32 = ncclVerifiablePremulScalar<int32_t>(rank); break;
-      case ncclUint32: u32 = ncclVerifiablePremulScalar<uint32_t>(rank); break;
-      case ncclInt64: i64 = ncclVerifiablePremulScalar<int64_t>(rank); break;
-      case ncclUint64: u64 = ncclVerifiablePremulScalar<uint64_t>(rank); break;
-      case ncclFloat16: f16 = ncclVerifiablePremulScalar<half>(rank); break;
-      case ncclFloat32: f32 = ncclVerifiablePremulScalar<float>(rank); break;
-      case ncclFloat64: f64 = ncclVerifiablePremulScalar<double>(rank); break;
-      #if defined(__CUDA_BF16_TYPES_EXIST__)
-      case ncclBfloat16: bf16 = ncclVerifiablePremulScalar<__nv_bfloat16>(rank); break;
-      #endif
+#if NCCL_VERSION_CODE >= NCCL_VERSION(2,11,0)
+      else {
+        union {
+          int8_t i8; uint8_t u8; int32_t i32; uint32_t u32; int64_t i64; uint64_t u64;
+          half f16; float f32; double f64;
+          #if HAVE_BF16
+          __nv_bfloat16 bf16;
+          #endif
+          #if HAVE_FP8
+          __nv_fp8_e4m3 f8e4m3; __nv_fp8_e5m2 f8e5m2;
+          #endif
+        };
+        switch (type) {
+          case ncclInt8: i8 = ncclVerifiablePremulScalar<int8_t>(rank); break;
+          case ncclUint8: u8 = ncclVerifiablePremulScalar<uint8_t>(rank); break;
+          case ncclInt32: i32 = ncclVerifiablePremulScalar<int32_t>(rank); break;
+          case ncclUint32: u32 = ncclVerifiablePremulScalar<uint32_t>(rank); break;
+          case ncclInt64: i64 = ncclVerifiablePremulScalar<int64_t>(rank); break;
+          case ncclUint64: u64 = ncclVerifiablePremulScalar<uint64_t>(rank); break;
+          case ncclFloat16: f16 = ncclVerifiablePremulScalar<half>(rank); break;
+          case ncclFloat32: f32 = ncclVerifiablePremulScalar<float>(rank); break;
+          case ncclFloat64: f64 = ncclVerifiablePremulScalar<double>(rank); break;
+          #if HAVE_BF16
+          case ncclBfloat16: bf16 = ncclVerifiablePremulScalar<__nv_bfloat16>(rank); break;
+          #endif
+          #if HAVE_FP8
+          case ncclFloat8e4m3: f8e4m3 = ncclVerifiablePremulScalar<__nv_fp8_e4m3>(rank); break;
+          case ncclFloat8e5m2: f8e5m2 = ncclVerifiablePremulScalar<__nv_fp8_e5m2>(rank); break;
+          #endif
+          default: break; // Just to silence clang
+        }
+        NCCLCHECK(ncclRedOpCreatePreMulSum(&op, &u64, type, ncclScalarHostImmediate, args->comms[i]));
       }
-      NCCLCHECK(ncclRedOpCreatePreMulSum(&op, &u64, type, ncclScalarHostImmediate, args->comms[i]));
-    }
-    #endif
+#endif
 
     TESTCHECK(args->collTest->runColl(
           (void*)(in_place ? recvBuff + args->sendInplaceOffset*rank : sendBuff),
@@ -937,13 +952,16 @@ int main(int argc, char* argv[]) {
     test_typenum = 9;
     if (NCCL_VERSION_CODE >= NCCL_VERSION(2,10,0) && test_ncclVersion >= NCCL_VERSION(2,10,0)) {
       test_opnum++; // ncclAvg
-      #if defined(__CUDA_BF16_TYPES_EXIST__)
-        test_typenum++; // bfloat16
-      #endif
     }
     if (NCCL_VERSION_CODE >= NCCL_VERSION(2,11,0) && test_ncclVersion >= NCCL_VERSION(2,11,0)) {
       test_opnum++; // PreMulSum
     }
+    #if HAVE_BF16
+      test_typenum++; // bfloat16
+    #endif
+    #if HAVE_FP8
+      test_typenum += 2; // fp8 e4m3,e5m2
+    #endif
   #endif
 
   // Parse args
@@ -1212,6 +1230,7 @@ testResult_t run() {
   PRINT("%s", line);
 #endif
 
+
   // We need sendbuff, recvbuff, expected (when datacheck enabled), plus 1G for the rest.
   size_t memMaxBytes = (maxMem - (1<<30)) / (datacheck ? 3 : 2);
   if (maxBytes > memMaxBytes) {
@@ -1242,11 +1261,34 @@ testResult_t run() {
     gpus[i] = (gpu0 != -1 ? gpu0 : localRank*nThreads*nGpus) + i;
     CUDACHECK(cudaSetDevice(gpus[i]));
     TESTCHECK(AllocateBuffs(sendbuffs+i, sendBytes, recvbuffs+i, recvBytes, expected+i, (size_t)maxBytes));
-    if (streamnull)
+    if (streamnull) {
       streams[i] = NULL;
-    else
+    }
+    else {
       CUDACHECK(cudaStreamCreateWithFlags(streams+i, cudaStreamNonBlocking));
+    }
+    int archMajor, archMinor;
+    CUDACHECK(cudaDeviceGetAttribute(&archMajor, cudaDevAttrComputeCapabilityMajor, gpus[i]));
+    CUDACHECK(cudaDeviceGetAttribute(&archMinor, cudaDevAttrComputeCapabilityMinor, gpus[i]));
+    minCudaArch = std::min(minCudaArch, 100*archMajor + 10*archMinor);
   }
+
+#ifdef MPI_SUPPORT
+  MPI_Allreduce(MPI_IN_PLACE, &minCudaArch, 1, MPI_INT, MPI_MIN, MPI_COMM_WORLD);
+#endif
+#if HAVE_FP8
+  if (minCudaArch < 900) { // Filter out fp8 on pre-Hopper hardware
+    int n = 0;
+    for (int i=0; i < test_typenum; i++) {
+      if (!(test_types[i] == ncclFloat8e4m3 || test_types[i] == ncclFloat8e5m2)) {
+        test_types[n] = test_types[i];
+        test_typenames[n] = test_typenames[i];
+        n += 1;
+      }
+    }
+    test_typenum = n;
+  };
+#endif
 
   //if parallel init is not selected, use main thread to initialize NCCL
   ncclComm_t* comms = (ncclComm_t*)malloc(sizeof(ncclComm_t)*nThreads*nGpus);
