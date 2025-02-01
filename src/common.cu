@@ -426,40 +426,40 @@ testResult_t startColl(struct threadArgs* args, ncclDataType_t type, ncclRedOp_t
     if(opIndex < ncclNumOps) {
       op = opIndex;
     }
-#if NCCL_VERSION_CODE >= NCCL_VERSION(2,11,0)
-      else {
-        union {
-          int8_t i8; uint8_t u8; int32_t i32; uint32_t u32; int64_t i64; uint64_t u64;
-          half f16; float f32; double f64;
-          #if HAVE_BF16
-          __nv_bfloat16 bf16;
-          #endif
-          #if HAVE_FP8
-          __nv_fp8_e4m3 f8e4m3; __nv_fp8_e5m2 f8e5m2;
-          #endif
-        };
-        switch (type) {
-          case ncclInt8: i8 = ncclVerifiablePremulScalar<int8_t>(rank); break;
-          case ncclUint8: u8 = ncclVerifiablePremulScalar<uint8_t>(rank); break;
-          case ncclInt32: i32 = ncclVerifiablePremulScalar<int32_t>(rank); break;
-          case ncclUint32: u32 = ncclVerifiablePremulScalar<uint32_t>(rank); break;
-          case ncclInt64: i64 = ncclVerifiablePremulScalar<int64_t>(rank); break;
-          case ncclUint64: u64 = ncclVerifiablePremulScalar<uint64_t>(rank); break;
-          case ncclFloat16: f16 = ncclVerifiablePremulScalar<half>(rank); break;
-          case ncclFloat32: f32 = ncclVerifiablePremulScalar<float>(rank); break;
-          case ncclFloat64: f64 = ncclVerifiablePremulScalar<double>(rank); break;
-          #if HAVE_BF16
-          case ncclBfloat16: bf16 = ncclVerifiablePremulScalar<__nv_bfloat16>(rank); break;
-          #endif
-          #if HAVE_FP8
-          case ncclFloat8e4m3: f8e4m3 = ncclVerifiablePremulScalar<__nv_fp8_e4m3>(rank); break;
-          case ncclFloat8e5m2: f8e5m2 = ncclVerifiablePremulScalar<__nv_fp8_e5m2>(rank); break;
-          #endif
-          default: break; // Just to silence clang
-        }
-        NCCLCHECK(ncclRedOpCreatePreMulSum(&op, &u64, type, ncclScalarHostImmediate, args->comms[i]));
+    #if NCCL_VERSION_CODE >= NCCL_VERSION(2,11,0)
+    else {
+      union {
+        int8_t i8; uint8_t u8; int32_t i32; uint32_t u32; int64_t i64; uint64_t u64;
+        half f16; float f32; double f64;
+        #if HAVE_BF16
+        __nv_bfloat16 bf16;
+        #endif
+        #if HAVE_FP8
+        __nv_fp8_e4m3 f8e4m3; __nv_fp8_e5m2 f8e5m2;
+        #endif
+      };
+      switch(type) {
+      case ncclInt8: i8 = ncclVerifiablePremulScalar<int8_t>(rank); break;
+      case ncclUint8: u8 = ncclVerifiablePremulScalar<uint8_t>(rank); break;
+      case ncclInt32: i32 = ncclVerifiablePremulScalar<int32_t>(rank); break;
+      case ncclUint32: u32 = ncclVerifiablePremulScalar<uint32_t>(rank); break;
+      case ncclInt64: i64 = ncclVerifiablePremulScalar<int64_t>(rank); break;
+      case ncclUint64: u64 = ncclVerifiablePremulScalar<uint64_t>(rank); break;
+      case ncclFloat16: f16 = ncclVerifiablePremulScalar<half>(rank); break;
+      case ncclFloat32: f32 = ncclVerifiablePremulScalar<float>(rank); break;
+      case ncclFloat64: f64 = ncclVerifiablePremulScalar<double>(rank); break;
+      #if HAVE_BF16
+      case ncclBfloat16: bf16 = ncclVerifiablePremulScalar<__nv_bfloat16>(rank); break;
+      #endif
+      #if HAVE_FP8
+      case ncclFloat8e4m3: f8e4m3 = ncclVerifiablePremulScalar<__nv_fp8_e4m3>(rank); break;
+      case ncclFloat8e5m2: f8e5m2 = ncclVerifiablePremulScalar<__nv_fp8_e5m2>(rank); break;
+      #endif
+      default: break; // Just to silence clang
       }
-#endif
+      NCCLCHECK(ncclRedOpCreatePreMulSum(&op, &u64, type, ncclScalarHostImmediate, args->comms[i]));
+    }
+    #endif
 
     TESTCHECK(args->collTest->runColl(
           (void*)(in_place ? recvBuff + args->sendInplaceOffset*rank : sendBuff),
@@ -1229,7 +1229,6 @@ testResult_t run() {
 #else
   PRINT("%s", line);
 #endif
-
 
   // We need sendbuff, recvbuff, expected (when datacheck enabled), plus 1G for the rest.
   size_t memMaxBytes = (maxMem - (1<<30)) / (datacheck ? 3 : 2);
