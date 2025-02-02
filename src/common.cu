@@ -956,11 +956,15 @@ int main(int argc, char* argv[]) {
     if (NCCL_VERSION_CODE >= NCCL_VERSION(2,11,0) && test_ncclVersion >= NCCL_VERSION(2,11,0)) {
       test_opnum++; // PreMulSum
     }
-    #if HAVE_BF16
+    #if defined(__CUDA_BF16_TYPES_EXIST__)
+    if (NCCL_VERSION_CODE >= NCCL_VERSION(2,10,0) && test_ncclVersion >= NCCL_VERSION(2,10,0)) {
       test_typenum++; // bfloat16
+    }
     #endif
-    #if HAVE_FP8
+    #if defined(__CUDA_FP8_TYPES_EXIST__)
+    if (NCCL_VERSION_CODE >= NCCL_VERSION(2,24,0) && test_ncclVersion >= NCCL_VERSION(2,24,0)) {
       test_typenum += 2; // fp8 e4m3,e5m2
+    }
     #endif
   #endif
 
@@ -1275,18 +1279,20 @@ testResult_t run() {
 #ifdef MPI_SUPPORT
   MPI_Allreduce(MPI_IN_PLACE, &minCudaArch, 1, MPI_INT, MPI_MIN, MPI_COMM_WORLD);
 #endif
-#if HAVE_FP8
-  if (minCudaArch < 900) { // Filter out fp8 on pre-Hopper hardware
-    int n = 0;
-    for (int i=0; i < test_typenum; i++) {
-      if (!(test_types[i] == ncclFloat8e4m3 || test_types[i] == ncclFloat8e5m2)) {
-        test_types[n] = test_types[i];
-        test_typenames[n] = test_typenames[i];
-        n += 1;
+#if defined(__CUDA_FP8_TYPES_EXIST__)
+  if (NCCL_VERSION_CODE >= NCCL_VERSION(2,24,0) && test_ncclVersion >= NCCL_VERSION(2,24,0)) {
+    if (minCudaArch < 900) { // Filter out fp8 on pre-Hopper hardware
+      int n = 0;
+      for (int i=0; i < test_typenum; i++) {
+        if (!(test_types[i] == ncclFloat8e4m3 || test_types[i] == ncclFloat8e5m2)) {
+          test_types[n] = test_types[i];
+          test_typenames[n] = test_typenames[i];
+          n += 1;
+        }
       }
+      test_typenum = n;
     }
-    test_typenum = n;
-  };
+  }
 #endif
 
   //if parallel init is not selected, use main thread to initialize NCCL
