@@ -695,7 +695,7 @@ void setupArgs(size_t size, ncclDataType_t type, struct threadArgs* args) {
   size_t count, sendCount, recvCount, paramCount, sendInplaceOffset, recvInplaceOffset;
 
   count = size / wordSize(type);
-  args->collTest->getCollByteCount(&sendCount, &recvCount, &paramCount, &sendInplaceOffset, &recvInplaceOffset, (size_t)count, (size_t)nranks);
+  args->collTest->getCollByteCount(&sendCount, &recvCount, &paramCount, &sendInplaceOffset, &recvInplaceOffset, (size_t)count, wordSize(type), (size_t)nranks);
 
   args->nbytes = paramCount * wordSize(type);
   args->sendBytes = sendCount * wordSize(type);
@@ -1147,6 +1147,7 @@ int main(int argc, char* argv[]) {
   return 0;
 }
 
+#ifdef MPI_SUPPORT
 // parse int for base 2/10/16, will ignore first whitespaces
 static bool parseInt(char *s, int *num) {
   char *p = NULL;
@@ -1164,6 +1165,7 @@ static bool parseInt(char *s, int *num) {
     return false;
   return true;
 }
+#endif
 
 testResult_t run() {
   int totalProcs = 1, proc = 0, ncclProcs = 1, ncclProc = 0, color = 0;
@@ -1181,28 +1183,28 @@ testResult_t run() {
     if (p == proc) break;
     if (hostHashs[p] == hostHashs[proc]) localRank++;
   }
-  
+
   char *splitMaskEnv = NULL;
   if (splitMaskEnv = getenv("NCCL_TESTS_SPLIT_MASK")) {
     color = proc & strtoul(splitMaskEnv, NULL, 16);
   } else if (splitMaskEnv = getenv("NCCL_TESTS_SPLIT")) {
     if (
-      (strncasecmp(splitMaskEnv, "AND", strlen("AND")) == 0 && parseInt(splitMaskEnv + strlen("AND"), &color)) || 
+      (strncasecmp(splitMaskEnv, "AND", strlen("AND")) == 0 && parseInt(splitMaskEnv + strlen("AND"), &color)) ||
       (strncasecmp(splitMaskEnv, "&", strlen("&")) == 0 && parseInt(splitMaskEnv + strlen("&"), &color))
     )
         color = proc & color;
     if (
-      (strncasecmp(splitMaskEnv, "OR", strlen("OR")) == 0 && parseInt(splitMaskEnv + strlen("OR"), &color)) || 
+      (strncasecmp(splitMaskEnv, "OR", strlen("OR")) == 0 && parseInt(splitMaskEnv + strlen("OR"), &color)) ||
       (strncasecmp(splitMaskEnv, "|", strlen("|")) == 0 && parseInt(splitMaskEnv + strlen("|"), &color))
     )
         color = proc | color;
     if (
-      (strncasecmp(splitMaskEnv, "MOD", strlen("MOD")) == 0 && parseInt(splitMaskEnv + strlen("MOD"), &color)) || 
+      (strncasecmp(splitMaskEnv, "MOD", strlen("MOD")) == 0 && parseInt(splitMaskEnv + strlen("MOD"), &color)) ||
       (strncasecmp(splitMaskEnv, "%", strlen("%")) == 0 && parseInt(splitMaskEnv + strlen("%"), &color))
     )
         color = proc % color;
     if (
-      (strncasecmp(splitMaskEnv, "DIV", strlen("DIV")) == 0 && parseInt(splitMaskEnv + strlen("DIV"), &color)) || 
+      (strncasecmp(splitMaskEnv, "DIV", strlen("DIV")) == 0 && parseInt(splitMaskEnv + strlen("DIV"), &color)) ||
       (strncasecmp(splitMaskEnv, "/", strlen("/")) == 0 && parseInt(splitMaskEnv + strlen("/"), &color))
     )
         color = proc / color;

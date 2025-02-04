@@ -7,12 +7,12 @@
 #include "cuda_runtime.h"
 #include "common.h"
 
-void GatherGetCollByteCount(size_t *sendcount, size_t *recvcount, size_t *paramcount, size_t *sendInplaceOffset, size_t *recvInplaceOffset, size_t count, int nranks) {
-  *sendcount = count/nranks;
-  *recvcount = (count/nranks)*nranks;
-  *sendInplaceOffset = count/nranks;
+void GatherGetCollByteCount(size_t *sendcount, size_t *recvcount, size_t *paramcount, size_t *sendInplaceOffset, size_t *recvInplaceOffset, size_t count, size_t eltSize, int nranks) {
+  *sendcount = (count/nranks) & -(16/eltSize);
+  *recvcount = (*sendcount)*nranks;
+  *sendInplaceOffset = *sendcount;
   *recvInplaceOffset = 0;
-  *paramcount = count/nranks;
+  *paramcount = *sendcount;
 }
 
 testResult_t GatherInitData(struct threadArgs* args, ncclDataType_t type, ncclRedOp_t op, int root, int rep, int in_place) {
@@ -73,7 +73,7 @@ struct testColl gatherTest = {
 
 void GatherGetBuffSize(size_t *sendcount, size_t *recvcount, size_t count, int nranks) {
   size_t paramcount, sendInplaceOffset, recvInplaceOffset;
-  GatherGetCollByteCount(sendcount, recvcount, &paramcount, &sendInplaceOffset, &recvInplaceOffset, count, nranks);
+  GatherGetCollByteCount(sendcount, recvcount, &paramcount, &sendInplaceOffset, &recvInplaceOffset, count, /*eltSize=*/1, nranks);
 }
 
 testResult_t GatherRunTest(struct threadArgs* args, int root, ncclDataType_t type, const char* typeName, ncclRedOp_t op, const char* opName) {

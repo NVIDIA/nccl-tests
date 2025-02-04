@@ -7,12 +7,12 @@
 #include "cuda_runtime.h"
 #include "common.h"
 
-void ScatterGetCollByteCount(size_t *sendcount, size_t *recvcount, size_t *paramcount, size_t *sendInplaceOffset, size_t *recvInplaceOffset, size_t count, int nranks) {
-  *sendcount = (count/nranks)*nranks;
-  *recvcount = count/nranks;
+void ScatterGetCollByteCount(size_t *sendcount, size_t *recvcount, size_t *paramcount, size_t *sendInplaceOffset, size_t *recvInplaceOffset, size_t count, size_t eltSize, int nranks) {
+  *recvcount = (count/nranks) & -(16/eltSize);
+  *sendcount = (*recvcount)*nranks;
   *sendInplaceOffset = 0;
-  *recvInplaceOffset = count/nranks;
-  *paramcount = count/nranks;
+  *recvInplaceOffset = *recvcount;
+  *paramcount = *recvcount;
 }
 
 testResult_t ScatterInitData(struct threadArgs* args, ncclDataType_t type, ncclRedOp_t op, int root, int rep, int in_place) {
@@ -69,7 +69,7 @@ struct testColl scatterTest = {
 
 void ScatterGetBuffSize(size_t *sendcount, size_t *recvcount, size_t count, int nranks) {
   size_t paramcount, sendInplaceOffset, recvInplaceOffset;
-  ScatterGetCollByteCount(sendcount, recvcount, &paramcount, &sendInplaceOffset, &recvInplaceOffset, count, nranks);
+  ScatterGetCollByteCount(sendcount, recvcount, &paramcount, &sendInplaceOffset, &recvInplaceOffset, count, /*eltSize=*/1, nranks);
 }
 
 testResult_t ScatterRunTest(struct threadArgs* args, int root, ncclDataType_t type, const char* typeName, ncclRedOp_t op, const char* opName) {
