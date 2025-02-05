@@ -1,4 +1,5 @@
 #!/usr/bin/env bash
+ulimit -n $((1<<16))
 TEST_DIR=$(cd $(dirname $0) && pwd)
 COLL=all_reduce
 while [[ -n $1 ]]; do
