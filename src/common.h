@@ -213,6 +213,20 @@ static uint64_t getHostHash(const char* hostname) {
   return getHash(hostHash, strlen(hostHash));
 }
 
+#define HAVE_BF16 0
+#define HAVE_FP8 0
+
+#if NCCL_MAJOR >= 2
+  #if defined(__CUDA_BF16_TYPES_EXIST__) && NCCL_VERSION_CODE >= NCCL_VERSION(2,10,0)
+    #undef HAVE_BF16
+    #define HAVE_BF16 1
+    #if defined(__CUDA_FP8_TYPES_EXIST__) && NCCL_VERSION_CODE >= NCCL_VERSION(2,24,0)
+      #undef HAVE_FP8
+      #define HAVE_FP8 1
+    #endif
+  #endif
+#endif
+
 static size_t wordSize(ncclDataType_t type) {
   switch(type) {
     case ncclChar:
@@ -220,9 +234,13 @@ static size_t wordSize(ncclDataType_t type) {
     //case ncclInt8:
     case ncclUint8:
 #endif
+#if HAVE_FP8
+    case ncclFloat8e4m3:
+    case ncclFloat8e5m2:
+#endif
       return 1;
     case ncclHalf:
-#if defined(__CUDA_BF16_TYPES_EXIST__)
+#if HAVE_BF16
     case ncclBfloat16:
 #endif
     //case ncclFloat16:

@@ -34,13 +34,13 @@ __host__ __device__ T ncclVerifiablePremulScalar(int rank_me) {
 }
 
 // Enqueue kernel to generate data which is to be reduced.
-void ncclVerifiablePrepareInput(
+cudaError_t ncclVerifiablePrepareInput(
   void *elts, intptr_t elt_n, int elt_ty, int red_op, int rank_n, int rank_me,
   uint64_t seed, intptr_t elt_ix0, cudaStream_t stream
 );
 
 // Enqueue kernel to generate expected results of reduction.
-void ncclVerifiablePrepareExpected(
+cudaError_t ncclVerifiablePrepareExpected(
   void *elts, intptr_t elt_n, int elt_ty, int red_op, int rank_n,
   uint64_t seed, intptr_t elt_ix0, cudaStream_t stream
 );
@@ -51,9 +51,10 @@ void ncclVerifiablePrepareExpected(
 // which can be costly. Thus if you plan to run the same reduction multiple
 // times it is advantageous to precompute the expected values with
 // ncclVerifiablePrepareExpected and pass them as `expected` here.
-void ncclVerifiableVerify(
+cudaError_t ncclVerifiableVerify(
   void const *results, void const *expected, intptr_t elt_n, int elt_ty,
   int red_op, int rank_n, uint64_t seed, intptr_t elt_ix0,
   int64_t *bad_elt_n, cudaStream_t stream
 );
+
 #endif
