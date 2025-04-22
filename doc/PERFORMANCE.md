@@ -130,6 +130,16 @@ Similarly to broadcast, all data need to be sent to the root, hence :
 And :
 
  `B = S/t`
+ 
+### Bisection
+
+In the bisection operation, each rank is paired with a single other rank and sends him one message of size S, hence:
+
+t = S/B 
+
+And : 
+
+B = S/t
 
 ### Summary
 
@@ -141,5 +151,6 @@ To obtain a bus bandwidth which should be independent of the number of ranks _n_
 * Broadcast : 1
 * Reduce : 1
 * AlltoAll: (_n_-1)/_n_
+* Bisection : 1
 
 The bus bandwidth should reflect the speed of the hardware bottleneck : NVLink, PCI, QPI, or network.
