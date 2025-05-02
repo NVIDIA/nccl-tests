@@ -83,7 +83,7 @@ All tests support the same set of arguments :
 
 ### Running multiple operations in parallel
 
-NCCL tests allow to partition the set of GPUs into smaller sets, each executing the same operation in parallel. 
+NCCL tests allow to partition the set of GPUs into smaller sets, each executing the same operation in parallel.
 To split the GPUs, NCCL will compute a "color" for each rank, based on the `NCCL_TESTS_SPLIT` environment variable, then all ranks
 with the same color will end up in the same group. The resulting group is printed next to each GPU at the beginning of the test.
 
@@ -92,13 +92,15 @@ with the same color will end up in the same group. The resulting group is printe
 `NCCL_TESTS_SPLIT_MASK="<value>"` is equivalent to `NCCL_TESTS_SPLIT="&<value>"`.
 
 Here are a few examples:
- - `NCCL_TESTS_SPLIT="AND 0x7"` or `NCCL_TESTS_SPLIT="MOD 8`: On systems with 8 GPUs, run 8 parallel operations, each with 1 GPU per node (purely communicating on the network)
- - `NCCL_TESTS_SPLIT="OR 0x7"` or `NCCL_TESTS_SPLIT="DIV 8"`: On systems with 8 GPUs, run one operation per node, purely intra-node.
- - `NCCL_TESTS_SPLIT="AND 0x1"` or `NCCL_TESTS_SPLIT="MOD 2"`: Run two operations, each operation using every other rank.
+
+ - `NCCL_TESTS_SPLIT="AND 0x7"` or `NCCL_TESTS_SPLIT="MOD 8"`: On systems with 8 GPUs, run 8 parallel operations, each with 1 GPU per node (purely communicating over the inter-node network)
+
+- `NCCL_TESTS_SPLIT="OR 0x7"` or `NCCL_TESTS_SPLIT="DIV 8"`: On systems with 8 GPUs, run one operation per node, purely intra-node.
+
+- `NCCL_TESTS_SPLIT="AND 0x1"` or `NCCL_TESTS_SPLIT="MOD 2"`: Run two operations, each operation using every other rank.
 
 Note that the reported bandwidth is per group, hence to get the total bandwidth used by all groups, one must multiply by the number of groups.
 
 ## Copyright
 
 NCCL tests are provided under the BSD license. All source code and accompanying documentation is copyright (c) 2016-2025, NVIDIA CORPORATION. All rights reserved.
-
