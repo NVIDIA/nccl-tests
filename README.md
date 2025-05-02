@@ -100,5 +100,5 @@ Note that the reported bandwidth is per group, hence to get the total bandwidth 
 
 ## Copyright
 
-NCCL tests are provided under the BSD license. All source code and accompanying documentation is copyright (c) 2016-2024, NVIDIA CORPORATION. All rights reserved.
+NCCL tests are provided under the BSD license. All source code and accompanying documentation is copyright (c) 2016-2025, NVIDIA CORPORATION. All rights reserved.
 
