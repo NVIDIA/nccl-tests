@@ -21,7 +21,8 @@ CUDA_MINOR = $(shell echo $(CUDA_VERSION) | cut -d "." -f 2)
 # of archs to reduce compile time.
 ifeq ($(shell test "0$(CUDA_MAJOR)" -eq 12 -a "0$(CUDA_MINOR)" -ge 8 -o "0$(CUDA_MAJOR)" -ge 13; echo $$?),0)
 # Include Blackwell support if we're using CUDA12.8 or above
-NVCC_GENCODE ?=	-gencode=arch=compute_80,code=sm_80 \
+NVCC_GENCODE ?= -gencode=arch=compute_70,code=sm_70 \
+		-gencode=arch=compute_80,code=sm_80 \
 		-gencode=arch=compute_90,code=sm_90 \
 		-gencode=arch=compute_100,code=sm_100 \
 		-gencode=arch=compute_120,code=sm_120 \
