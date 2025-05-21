@@ -16,6 +16,9 @@
 
 #include "../verifiable/verifiable.h"
 
+#define DIVUP(x, y) \
+    (((x)+(y)-1)/(y))
+
 int test_ncclVersion = 0; // init'd with ncclGetVersion()
 
 #if NCCL_MAJOR >= 2
@@ -1279,9 +1282,11 @@ testResult_t run() {
   PRINT("%s", line);
 #endif
 
-  const size_t reserveMem = 3*(1ULL<<30); // Reserve 3GB for the library
-  const size_t bufferCount = datacheck ? 3 : 2; // Number of buffers needed (send, recv, expected)
-  size_t memMaxBytes = (maxMem - reserveMem) / bufferCount;
+  // Reserve 1GiB of memory for each 16GiB installed, but limit to a max of 4GiB
+  const size_t GB = (1ULL << 30);
+  size_t reserveMem =  std::min(DIVUP(maxMem, 16*GB) * 1*GB, 4*GB);
+  // We need sendbuff, recvbuff, expected (when datacheck enabled), plus 1G for the rest.
+  size_t memMaxBytes = (maxMem - reserveMem - 1*GB) / (datacheck ? 3 : 2);
   if (maxBytes > memMaxBytes) {
     maxBytes = memMaxBytes;
     if (minBytes > maxBytes) minBytes = maxBytes;
