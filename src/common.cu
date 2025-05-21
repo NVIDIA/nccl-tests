@@ -1279,9 +1279,9 @@ testResult_t run() {
   PRINT("%s", line);
 #endif
 
-  // We need sendbuff, recvbuff, expected (when datacheck enabled),
-  // plus 2GiB extra for the library
-  size_t memMaxBytes = (maxMem - (1ULL<<31)) / (datacheck ? 3 : 2);
+  const size_t reserveMem = 3*(1ULL<<30); // Reserve 3GB for the library
+  const size_t bufferCount = datacheck ? 3 : 2; // Number of buffers needed (send, recv, expected)
+  size_t memMaxBytes = (maxMem - reserveMem) / bufferCount;
   if (maxBytes > memMaxBytes) {
     maxBytes = memMaxBytes;
     if (minBytes > maxBytes) minBytes = maxBytes;
