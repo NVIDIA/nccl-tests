@@ -1279,10 +1279,12 @@ testResult_t run() {
   PRINT("%s", line);
 #endif
 
-  // We need sendbuff, recvbuff, expected (when datacheck enabled), plus 1G for the rest.
-  size_t memMaxBytes = (maxMem - (1<<30)) / (datacheck ? 3 : 2);
+  // We need sendbuff, recvbuff, expected (when datacheck enabled),
+  // plus 2GiB extra for the library
+  size_t memMaxBytes = (maxMem - (1<<31)) / (datacheck ? 3 : 2);
   if (maxBytes > memMaxBytes) {
     maxBytes = memMaxBytes;
+    if (minBytes > maxBytes) minBytes = maxBytes;
     if (proc == 0) printf("#\n# Reducing maxBytes to %ld due to memory limitation\n", maxBytes);
   }
 
