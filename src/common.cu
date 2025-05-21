@@ -1281,7 +1281,7 @@ testResult_t run() {
 
   // We need sendbuff, recvbuff, expected (when datacheck enabled),
   // plus 2GiB extra for the library
-  size_t memMaxBytes = (maxMem - (1<<31)) / (datacheck ? 3 : 2);
+  size_t memMaxBytes = (maxMem - (1ULL<<31)) / (datacheck ? 3 : 2);
   if (maxBytes > memMaxBytes) {
     maxBytes = memMaxBytes;
     if (minBytes > maxBytes) minBytes = maxBytes;
