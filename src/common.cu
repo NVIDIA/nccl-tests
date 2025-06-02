@@ -784,6 +784,7 @@ testResult_t threadInit(struct threadArgs* args) {
   }
   NCCLCHECK(ncclGroupEnd());
 #if NCCL_VERSION_CODE >= NCCL_VERSION(2,19,0)
+  NCCLCHECK(ncclGroupStart());
   void **sendRegHandles = (local_register) ? (void **)malloc(sizeof(*sendRegHandles)*args->nGpus) : NULL;
   void **recvRegHandles = (local_register) ? (void **)malloc(sizeof(*recvRegHandles)*args->nGpus) : NULL;
   for (int i=0; i<args->nGpus; i++) {
@@ -798,6 +799,7 @@ testResult_t threadInit(struct threadArgs* args) {
       if (local_register) NCCLCHECK(ncclCommRegister(args->comms[i], args->recvbuffs[i], args->maxbytes, &recvRegHandles[i]));
     }
   }
+  NCCLCHECK(ncclGroupEnd());
 #endif
 
   TESTCHECK(threadRunTests(args));
@@ -1385,6 +1387,7 @@ testResult_t run() {
        NCCLCHECK(ncclGroupEnd());
      }
 #if NCCL_VERSION_CODE >= NCCL_VERSION(2,19,0)
+     NCCLCHECK(ncclGroupStart());
      sendRegHandles = (local_register) ? (void **)malloc(sizeof(*sendRegHandles)*nThreads*nGpus) : NULL;
      recvRegHandles = (local_register) ? (void **)malloc(sizeof(*recvRegHandles)*nThreads*nGpus) : NULL;
      for (int i=0; i<nGpus*nThreads; i++) {
@@ -1399,6 +1402,7 @@ testResult_t run() {
          if (local_register) NCCLCHECK(ncclCommRegister(comms[i], recvbuffs[i], maxBytes, &recvRegHandles[i]));
        }
      }
+     NCCLCHECK(ncclGroupEnd());
 #endif
   }
 
