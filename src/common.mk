@@ -20,7 +20,7 @@ CUDA_MINOR = $(shell echo $(CUDA_VERSION) | cut -d "." -f 2)
 # Better define NVCC_GENCODE in your environment to the minimal set
 # of archs to reduce compile time.
 ifeq ($(shell test "0$(CUDA_MAJOR)" -ge 13; echo $$?),0)
-# Add Blackwell but drop Volta support if we're using CUDA13.0 or above
+# Add Blackwell but drop Pascal & Volta support if we're using CUDA13.0 or above
 NVCC_GENCODE ?= -gencode=arch=compute_80,code=sm_80 \
 		-gencode=arch=compute_90,code=sm_90 \
 		-gencode=arch=compute_100,code=sm_100 \
@@ -28,7 +28,9 @@ NVCC_GENCODE ?= -gencode=arch=compute_80,code=sm_80 \
 		-gencode=arch=compute_120,code=compute_120
 else ifeq ($(shell test "0$(CUDA_MAJOR)" -eq 12 -a "0$(CUDA_MINOR)" -ge 8; echo $$?),0)
 # Include Blackwell support if we're using CUDA12.8 or above
-NVCC_GENCODE ?= -gencode=arch=compute_70,code=sm_70 \
+NVCC_GENCODE ?= -gencode=arch=compute_60,code=sm_60 \
+		-gencode=arch=compute_61,code=sm_61 \
+		-gencode=arch=compute_70,code=sm_70 \
 		-gencode=arch=compute_80,code=sm_80 \
 		-gencode=arch=compute_90,code=sm_90 \
 		-gencode=arch=compute_100,code=sm_100 \
