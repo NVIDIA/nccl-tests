@@ -140,6 +140,7 @@ struct threadArgs {
   int* bw_count;
 
   int reportErrors;
+  int jsonFlag;
 
   struct testColl* collTest;
 };
@@ -299,6 +300,7 @@ static int ncclstringtoop (char *str) {
 
 extern int is_main_proc;
 extern thread_local int is_main_thread;
-#define PRINT if (is_main_thread) printf
+extern thread_local int json_flag;
+#define PRINT if (is_main_thread && !json_flag) printf
 
 #endif
