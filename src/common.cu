@@ -13,10 +13,13 @@
 #include <string.h>
 #include <ctype.h>
 #include "cuda.h"
+#include <string>
 
 #include "../verifiable/verifiable.h"
 
 int test_ncclVersion = 0; // init'd with ncclGetVersion()
+
+std::string structured_output;
 
 #if NCCL_MAJOR >= 2
   ncclDataType_t test_types[ncclNumTypes] = {
@@ -65,6 +68,7 @@ extern "C" __attribute__((weak)) char const* ncclGetLastError(ncclComm_t comm) {
 
 int is_main_proc = 0;
 thread_local int is_main_thread = 0;
+thread_local int json_flag = 0;
 
 // Command line parameter defaults
 static int nThreads = 1;
@@ -574,6 +578,12 @@ testResult_t BenchTime(struct threadArgs* args, ncclDataType_t type, ncclRedOp_t
   } else {
     sprintf(timeStr, "%7.2f", timeUsec);
   }
+  std::string prefix = (in_place == 1) ? "ip" : "oop";
+  structured_output += "\"" + prefix + "_time\": " + std::to_string(timeUsec) + ", ";
+  structured_output += "\"" + prefix + "_algbw\": " + std::to_string(algBw) + ", ";
+  structured_output += "\"" + prefix + "_busbw\": " + std::to_string(busBw) + ", ";
+  structured_output += "\"" + prefix + "_error\": " + (args->reportErrors ? std::to_string(double(wrongElts)) : "\"N/A\"");
+
   if (args->reportErrors) {
     PRINT("  %7s  %6.2f  %6.2f  %5g", timeStr, algBw, busBw, (double)wrongElts);
   } else {
@@ -619,17 +629,28 @@ testResult_t TimeTest(struct threadArgs* args, ncclDataType_t type, const char* 
 
   // Benchmark
   long repeat = run_cycles;
+  structured_output += "[";
   do {
+    structured_output += "{";
     for (size_t size = args->minbytes; size<=args->maxbytes; size = ((args->stepfactor > 1) ? size*args->stepfactor : size+args->stepbytes)) {
       setupArgs(size, type, args);
       char rootName[100];
       sprintf(rootName, "%6i", root);
+      structured_output += "\"" + std::to_string(max(args->sendBytes, args->expectedBytes)) + "\": {";
+      structured_output += "\"count\": " + std::to_string(args->nbytes / wordSize(type)) + ", ";
+      structured_output += "\"type\": \"" + std::string(typeName) + "\", ";
+      structured_output += "\"redop\": \"" + std::string(opName) + "\", ";
+      structured_output += "\"root\": \"" + std::to_string(root) + "\", ";
       PRINT("%12li  %12li  %8s  %6s  %6s", max(args->sendBytes, args->expectedBytes), args->nbytes / wordSize(type), typeName, opName, rootName);
       TESTCHECK(BenchTime(args, type, op, root, 0));
+      structured_output += ", ";
       TESTCHECK(BenchTime(args, type, op, root, 1));
+      structured_output +=  (size==args->maxbytes) ? "}" : "}, ";
       PRINT("\n");
     }
+    structured_output += repeat == 1 ? "}" : "}, ";
   } while (--repeat);
+  structured_output += "], ";
 
   return testSuccess;
 }
@@ -650,6 +671,7 @@ testResult_t threadInit(struct threadArgs* args) {
 
   //set main thread again
   is_main_thread = (is_main_proc && args->thread == 0) ? 1 : 0;
+  json_flag = (is_my_main_thread && args->jsonFlag) ? 1 : 0;
 
   NCCLCHECK(ncclGroupStart());
   for (int i=0; i<args->nGpus; i++) {
@@ -757,6 +779,7 @@ int main(int argc, char* argv[]) {
   double parsed;
   int longindex;
   static struct option longopts[] = {
+    {"json", no_argument, &json_flag, 1},
     {"nthreads", required_argument, 0, 't'},
     {"ngpus", required_argument, 0, 'g'},
     {"minbytes", required_argument, 0, 'b'},
@@ -791,6 +814,7 @@ int main(int argc, char* argv[]) {
       break;
 
     switch(c) {
+      case 0: break; // flags
       case 't':
         nThreads = strtol(optarg, NULL, 0);
         break;
@@ -1007,6 +1031,7 @@ testResult_t run() {
   MPI_Comm_rank(mpi_comm, &ncclProc);
 #endif
   is_main_thread = is_main_proc = (proc == 0) ? 1 : 0;
+  json_flag = (is_main_thread && json_flag) ? 1 : 0;
 
   PRINT("# nThread %d nGpus %d minBytes %ld maxBytes %ld step: %ld(%s) warmup iters: %d iters: %d agg iters: %d validation: %d graph: %d\n",
         nThreads, nGpus, minBytes, maxBytes,
@@ -1157,6 +1182,9 @@ testResult_t run() {
 
   fflush(stdout);
 
+  structured_output += "{\"identifier\": \"nccl-tests structured output\", ";
+  structured_output += "\"version\": \"" + std::to_string(NCCL_MAJOR) + "." + std::to_string(NCCL_MINOR) + "." + std::to_string(NCCL_PATCH) + "\", ";
+  structured_output += "\"benchmark\": ";
   const char* timeStr = report_cputime ? "cputime" : "time";
   PRINT("#\n");
   PRINT("# %10s  %12s  %8s  %6s  %6s           out-of-place                       in-place          \n", "", "", "", "", "");
@@ -1258,9 +1286,19 @@ testResult_t run() {
   double check_avg_bw = envstr ? atof(envstr) : -1;
   bw[0] /= bw_count[0];
 
+  structured_output += "\"out_of_bounds_value\": " + std::to_string(errors[0]) + ", ";
+  structured_output += "\"out_of_bounds_value_status\": ";
+  structured_output += errors[0] != 0 ? "\"FAILED\", " : "\"OK\", ";
+  structured_output += "\"avg_bus_bw\": " + std::to_string(bw[0]) + ", ";
+  structured_output += "\"avg_bus_bw_status\": ";
+  structured_output += (bw[0] < check_avg_bw*(0.9)) ? "\"FAILED\"" : "\"OK\"";
+  structured_output += "}";
   PRINT("# Out of bounds values : %d %s\n", errors[0], errors[0] ? "FAILED" : "OK");
   PRINT("# Avg bus bandwidth    : %g %s\n", bw[0], check_avg_bw == -1 ? "" : (bw[0] < check_avg_bw*(0.9) ? "FAILED" : "OK"));
   PRINT("#\n");
+  if (json_flag) {
+    printf("%s\n", structured_output.c_str());
+  }
 #ifdef MPI_SUPPORT
   MPI_Comm_free(&mpi_comm);
   MPI_Finalize();
