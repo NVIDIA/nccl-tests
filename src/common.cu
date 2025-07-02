@@ -1408,8 +1408,6 @@ testResult_t run() {
 
   int errors[nThreads];
   double bw[nThreads];
-  double* delta;
-  CUDACHECK(cudaHostAlloc(&delta, sizeof(double)*nThreads*NUM_BLOCKS, cudaHostAllocPortable | cudaHostAllocMapped));
   int bw_count[nThreads];
   for (int t=0; t<nThreads; t++) {
     bw[t] = 0.0;
@@ -1548,7 +1546,6 @@ testResult_t run() {
     if (datacheck) CUDACHECK(cudaFree(expected[i]));
 #endif
   }
-  CUDACHECK(cudaFreeHost(delta));
 #if NCCL_VERSION_CODE >= NCCL_VERSION(2,19,0)
   free(sendRegHandles);
   free(recvRegHandles);
