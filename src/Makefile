@@ -5,9 +5,12 @@
 #
 include common.mk
 
-MPI ?= 0        # Set to 1 to enable MPI support (multi-process/multi-node)
-NAME_SUFFIX ?=  # e.g. _mpi when using MPI=1
-DSO ?= 0        # Set to 1 to create and use libverifiable.so to reduce binary size
+# Set to 1 to enable MPI support (multi-process/multi-node)
+MPI ?= 0
+# e.g. Set to _mpi when using MPI=1
+NAME_SUFFIX ?=
+# Set to 1 to create and use libverifiable.so to reduce binary size
+DSO ?= 0
 
 .PHONY: build clean
 
