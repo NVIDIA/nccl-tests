@@ -776,11 +776,22 @@ testResult_t threadInit(struct threadArgs* args) {
   //set main thread again
   is_main_thread = (is_main_proc && args->thread == 0) ? 1 : 0;
 
+#if NCCL_VERSION_CODE >= NCCL_VERSION(2,14,0)
+     ncclConfig_t config = NCCL_CONFIG_INITIALIZER;
+#if NCCL_VERSION_CODE >= NCCL_VERSION(2,28,0)
+     config.nvlinkCentricSched = 1;
+#endif
+#endif
+
   NCCLCHECK(ncclGroupStart());
   for (int i=0; i<args->nGpus; i++) {
     int rank = args->proc*args->nThreads*args->nGpus + args->thread*args->nGpus + i;
     CUDACHECK(cudaSetDevice(args->gpus[i]));
+#if NCCL_VERSION_CODE >= NCCL_VERSION(2,14,0)
+    NCCLCHECK(ncclCommInitRankConfig(args->comms+i, nranks, args->ncclId, rank, &config));
+#else
     NCCLCHECK(ncclCommInitRank(args->comms+i, nranks, args->ncclId, rank));
+#endif
   }
   NCCLCHECK(ncclGroupEnd());
 #if NCCL_VERSION_CODE >= NCCL_VERSION(2,19,0)
@@ -1376,16 +1387,22 @@ testResult_t run() {
   void **recvRegHandles = NULL;
 #endif
   if (!parallel_init) {
-     if (ncclProcs == 1) {
-       NCCLCHECK(ncclCommInitAll(comms, nGpus*nThreads, gpus));
-     } else {
-       NCCLCHECK(ncclGroupStart());
-       for (int i=0; i<nGpus*nThreads; i++) {
-         CUDACHECK(cudaSetDevice(gpus[i]));
-         NCCLCHECK(ncclCommInitRank(comms+i, ncclProcs*nThreads*nGpus, ncclId, ncclProc*nThreads*nGpus+i));
-       }
-       NCCLCHECK(ncclGroupEnd());
+#if NCCL_VERSION_CODE >= NCCL_VERSION(2,14,0)
+     ncclConfig_t config = NCCL_CONFIG_INITIALIZER;
+#if NCCL_VERSION_CODE >= NCCL_VERSION(2,28,0)
+     config.nvlinkCentricSched = 1;
+#endif
+#endif
+     NCCLCHECK(ncclGroupStart());
+     for (int i=0; i<nGpus*nThreads; i++) {
+       CUDACHECK(cudaSetDevice(gpus[i]));
+#if NCCL_VERSION_CODE >= NCCL_VERSION(2,14,0)
+       NCCLCHECK(ncclCommInitRankConfig(comms+i, ncclProcs*nThreads*nGpus, ncclId, ncclProc*nThreads*nGpus+i, &config));
+#else
+       NCCLCHECK(ncclCommInitRank(comms+i, ncclProcs*nThreads*nGpus, ncclId, ncclProc*nThreads*nGpus+i));
+#endif
      }
+     NCCLCHECK(ncclGroupEnd());
 #if NCCL_VERSION_CODE >= NCCL_VERSION(2,19,0)
      NCCLCHECK(ncclGroupStart());
      sendRegHandles = (local_register) ? (void **)malloc(sizeof(*sendRegHandles)*nThreads*nGpus) : NULL;
