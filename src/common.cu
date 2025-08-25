@@ -78,7 +78,7 @@ static size_t maxBytes = 32*1024*1024;
 static size_t stepBytes = 1*1024*1024;
 static size_t stepFactor = 1;
 static int datacheck = 1;
-static int warmup_iters = 5;
+static int warmup_iters = 1;
 static int iters = 20;
 static int agg_iters = 1;
 static int run_cycles = 1;
@@ -607,19 +607,14 @@ testResult_t TimeTest(struct threadArgs* args, ncclDataType_t type, const char* 
   // Sync to avoid first-call timeout
   Barrier(args);
 
-  // Warm-up for large size
-  setupArgs(args->maxbytes, type, args);
-  for (int iter = 0; iter < warmup_iters; iter++) {
-    TESTCHECK(startColl(args, type, op, root, 0, iter));
+  // Warm-up for all sizes (using a stepfactor of 2)
+  for (size_t size = args->minbytes; size <= args->maxbytes; size = size * 2) {
+    setupArgs(size, type, args);
+    for (int iter = 0; iter < warmup_iters; iter++) {
+      TESTCHECK(startColl(args, type, op, root, 0, iter));
+    }
+    TESTCHECK(completeColl(args));
   }
-  TESTCHECK(completeColl(args));
-
-  // Warm-up for small size
-  setupArgs(args->minbytes, type, args);
-  for (int iter = 0; iter < warmup_iters; iter++) {
-    TESTCHECK(startColl(args, type, op, root, 0, iter));
-  }
-  TESTCHECK(completeColl(args));
 
   // Benchmark
   long repeat = run_cycles;
