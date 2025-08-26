@@ -13,6 +13,7 @@
 #include <string.h>
 #include <ctype.h>
 #include "cuda.h"
+#include <errno.h>     /* program_invocation_short_name */
 
 #include "../verifiable/verifiable.h"
 
@@ -86,7 +87,7 @@ static size_t maxBytes = 32*1024*1024;
 static size_t stepBytes = 1*1024*1024;
 static size_t stepFactor = 1;
 static int datacheck = 1;
-static int warmup_iters = 5;
+static int warmup_iters = 1;
 static int iters = 20;
 static int agg_iters = 1;
 static int run_cycles = 1;
@@ -728,19 +729,14 @@ testResult_t TimeTest(struct threadArgs* args, ncclDataType_t type, const char* 
   // Sync to avoid first-call timeout
   Barrier(args);
 
-  // Warm-up for large size
-  setupArgs(args->maxbytes, type, args);
-  for (int iter = 0; iter < warmup_iters; iter++) {
-    TESTCHECK(startColl(args, type, op, root, 0, iter));
+  // Warm-up for all sizes (using a stepfactor of 2)
+  for (size_t size = args->minbytes; size <= args->maxbytes; size = size * 2) {
+    setupArgs(size, type, args);
+    for (int iter = 0; iter < warmup_iters; iter++) {
+      TESTCHECK(startColl(args, type, op, root, 0, iter));
+    }
+    TESTCHECK(completeColl(args));
   }
-  TESTCHECK(completeColl(args));
-
-  // Warm-up for small size
-  setupArgs(args->minbytes, type, args);
-  for (int iter = 0; iter < warmup_iters; iter++) {
-    TESTCHECK(startColl(args, type, op, root, 0, iter));
-  }
-  TESTCHECK(completeColl(args));
 
   // Benchmark
   long repeat = run_cycles;
@@ -1275,6 +1271,7 @@ testResult_t run() {
 #endif
   is_main_thread = is_main_proc = (proc == 0) ? 1 : 0;
 
+  PRINT("# Collective test starting: %s\n", program_invocation_short_name);
   PRINT("# nThread %d nGpus %d minBytes %ld maxBytes %ld step: %ld(%s) warmup iters: %d iters: %d agg iters: %d validation: %d graph: %d side_work: %d work_sms: %d direction: %s\n",
         nThreads, nGpus, minBytes, maxBytes,
         (stepFactor > 1)?stepFactor:stepBytes, (stepFactor > 1)?"factor":"bytes",
@@ -1577,6 +1574,7 @@ testResult_t run() {
   PRINT("# Avg bus bandwidth    : %g %s\n", bw[0], check_avg_bw == -1 ? "" : (bw[0] < check_avg_bw*(0.9) ? "FAILED" : "OK"));
   if (side_work == 1) PRINT("# Base Copy BW : %g \n", workThreadsBaseBw[0]);
   PRINT("#\n");
+  PRINT("# Collective test concluded: %s\n", program_invocation_short_name);
 #ifdef MPI_SUPPORT
   MPI_Comm_free(&mpi_comm);
   MPI_Finalize();

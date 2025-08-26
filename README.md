@@ -68,7 +68,7 @@ All tests support the same set of arguments :
   * `-r,--root <root/all>` Specify which root to use. Only for operations with a root like broadcast or reduce. Default : 0.
 * Performance
   * `-n,--iters <iteration count>` number of iterations. Default : 20.
-  * `-w,--warmup_iters <warmup iteration count>` number of warmup iterations (not timed). Default : 5.
+  * `-w,--warmup_iters <warmup iteration count>` number of warmup iterations (not timed). Default : 1.
   * `-m,--agg_iters <aggregation count>` number of operations to aggregate together in each iteration. Default : 1.
   * `-N,--run_cycles <cycle count>` run & print each cycle. Default : 1; 0=infinite.
   * `-a,--average <0/1/2/3>` Report performance as an average across all ranks (MPI=1 only). <0=Rank0,1=Avg,2=Min,3=Max>. Default : 1.
