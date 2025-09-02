@@ -59,8 +59,8 @@ NVCC_GENCODE ?= -gencode=arch=compute_35,code=sm_35 \
                 -gencode=arch=compute_70,code=compute_70
 endif
 
-NVCUFLAGS  := -ccbin $(CXX) $(NVCC_GENCODE) -std=c++11
-CXXFLAGS   := -std=c++11
+NVCUFLAGS  := -ccbin $(CXX) $(NVCC_GENCODE) -std=c++14
+CXXFLAGS   := -std=c++14
 
 LDFLAGS    := -L${CUDA_LIB} -lcudart -lrt
 NVLDFLAGS  := -L${CUDA_LIB} -l${CUDARTLIB} -lrt
