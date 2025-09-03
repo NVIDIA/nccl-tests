@@ -52,12 +52,17 @@ testResult_t GatherRunColl(void* sendbuff, void* recvbuff, size_t count, ncclDat
   if (count == 0) return testSuccess;
 
   NCCLCHECK(ncclGroupStart());
+#if NCCL_VERSION_CODE >= NCCL_VERSION(2,28,0)
+  NCCLCHECK(ncclGather(sendbuff, recvbuff, count, type, root, comm, stream));
+#else
+  // Send/Recv based implementation
   NCCLCHECK(ncclSend(sendbuff, count, type, root, comm, stream));
   if (rank == root) {
     for (int r=0; r<nRanks; r++) {
       NCCLCHECK(ncclRecv(((char*)recvbuff)+r*rankOffset, count, type, r, comm, stream));
     }
   }
+#endif
   NCCLCHECK(ncclGroupEnd());
 
   return testSuccess;

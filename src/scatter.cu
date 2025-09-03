@@ -48,12 +48,17 @@ testResult_t ScatterRunColl(void* sendbuff, void* recvbuff, size_t count, ncclDa
   if (count == 0) return testSuccess;
 
   NCCLCHECK(ncclGroupStart());
+#if NCCL_VERSION_CODE >= NCCL_VERSION(2,28,0)
+  NCCLCHECK(ncclScatter(sendbuff, recvbuff, count, type, root, comm, stream));
+#else
+  // Send/Recv based implementation
   if (rank == root) {
     for (int r=0; r<nRanks; r++) {
       NCCLCHECK(ncclSend(((char*)sendbuff)+r*rankOffset, count, type, r, comm, stream));
     }
   }
   NCCLCHECK(ncclRecv(recvbuff, count, type, root, comm, stream));
+#endif
   NCCLCHECK(ncclGroupEnd());
 
   return testSuccess;
