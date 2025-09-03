@@ -17,6 +17,9 @@
 
 #include "../verifiable/verifiable.h"
 
+#pragma weak ncclCommWindowRegister
+#pragma weak ncclCommWindowDeregister
+
 #define DIVUP(x, y) \
     (((x)+(y)-1)/(y))
 
@@ -109,6 +112,9 @@ static int average = 1;
 #define LOCAL_REGISTER 1
 #define SYMMETRIC_REGISTER 2
 static int local_register = 0;
+#endif
+#if NCCL_VERSION_CODE >= NCCL_VERSION(2,28,0)
+static int ctaPolicy = -1;
 #endif
 static int minCudaArch = 1<<30;
 
@@ -774,7 +780,9 @@ testResult_t threadInit(struct threadArgs* args) {
 
 #if NCCL_VERSION_CODE >= NCCL_VERSION(2,14,0)
      ncclConfig_t config = NCCL_CONFIG_INITIALIZER;
-#if NCCL_VERSION_CODE >= NCCL_VERSION(2,28,0)
+#if NCCL_VERSION_CODE >= NCCL_VERSION(2,27,0)
+     if (ctaPolicy >= 0)
+       config.CTAPolicy = ctaPolicy;
      config.nvlinkCentricSched = 1;
 #endif
 #endif
@@ -1029,13 +1037,14 @@ int main(int argc, char* argv[]) {
     {"report_cputime", required_argument, 0, 'C'},
     {"average", required_argument, 0, 'a'},
     {"local_register", required_argument, 0, 'R'},
+    {"cta_policy", required_argument, 0, 'x'},
     {"help", no_argument, 0, 'h'},
     {}
   };
 
   while(1) {
     int c;
-    c = getopt_long(argc, argv, "t:g:b:e:i:f:n:m:w:N:p:c:o:d:r:z:y:k:D:S:T:hG:C:a:R:", longopts, &longindex);
+    c = getopt_long(argc, argv, "t:g:b:e:i:f:n:m:w:N:p:c:o:d:r:z:y:k:D:S:T:hG:C:a:R:x:", longopts, &longindex);
 
     if (c == -1)
       break;
@@ -1147,6 +1156,17 @@ int main(int argc, char* argv[]) {
         printf("Option -R (register) is not supported before NCCL 2.19. Ignoring\n");
 #endif
         break;
+      case 'x':
+        if (test_ncclVersion >= NCCL_VERSION(2,27,0)) {
+          ctaPolicy = (int)strtol(optarg, NULL, 0);
+          if (ctaPolicy > 1 && test_ncclVersion < NCCL_VERSION(2,28,0)) {
+            printf("Option -x (cta_policy) %d is not supported before NCCL 2.28. Ignoring\n", ctaPolicy);
+            ctaPolicy = -1;
+          }
+        }
+        else
+          printf("Option -x (cta_policy) is not supported before NCCL 2.27. Ignoring\n");
+        break;
       case 'h':
       default:
         if (c != 'h') printf("invalid option '%c'\n", c);
@@ -1182,6 +1202,7 @@ int main(int argc, char* argv[]) {
             "[-C,--report_cputime <0/1>] \n\t"
             "[-a,--average <0/1/2/3> report average iteration time <0=RANK0/1=AVG/2=MIN/3=MAX>] \n\t"
             "[-R,--local_register <0/1/2> enable local (1) or symmetric (2) buffer registration on send/recv buffers (default: disable (0))] \n\t"
+            "[-x,--cta_policy <0/1/2> set CTA policy (NCCL_CTA_POLICY_DEFAULT (0), NCCL_CTA_POLICY_EFFICIENCY (1), NCCL_CTA_POLICY_ZERO (2)) (default: do not set)] \n\t"
             "[-h,--help]\n",
           basename(argv[0]));
         return 0;
@@ -1386,7 +1407,9 @@ testResult_t run() {
   if (!parallel_init) {
 #if NCCL_VERSION_CODE >= NCCL_VERSION(2,14,0)
      ncclConfig_t config = NCCL_CONFIG_INITIALIZER;
-#if NCCL_VERSION_CODE >= NCCL_VERSION(2,28,0)
+#if NCCL_VERSION_CODE >= NCCL_VERSION(2,27,0)
+     if (ctaPolicy >= 0)
+       config.CTAPolicy = ctaPolicy;
      config.nvlinkCentricSched = 1;
 #endif
 #endif
