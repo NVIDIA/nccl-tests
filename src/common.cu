@@ -783,7 +783,9 @@ testResult_t threadInit(struct threadArgs* args) {
 #if NCCL_VERSION_CODE >= NCCL_VERSION(2,27,0)
      if (ctaPolicy >= 0)
        config.CTAPolicy = ctaPolicy;
+#if NCCL_VERSION_CODE >= NCCL_VERSION(2,28,0)
      config.nvlinkCentricSched = 1;
+#endif
 #endif
 #endif
 
@@ -1410,7 +1412,9 @@ testResult_t run() {
 #if NCCL_VERSION_CODE >= NCCL_VERSION(2,27,0)
      if (ctaPolicy >= 0)
        config.CTAPolicy = ctaPolicy;
+#if NCCL_VERSION_CODE >= NCCL_VERSION(2,28,0)
      config.nvlinkCentricSched = 1;
+#endif
 #endif
 #endif
      NCCLCHECK(ncclGroupStart());
