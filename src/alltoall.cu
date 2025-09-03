@@ -55,10 +55,15 @@ testResult_t AlltoAllRunColl(void* sendbuff, void* recvbuff, size_t count, ncclD
   return testNcclError;
 #else
   NCCLCHECK(ncclGroupStart());
+#if NCCL_VERSION_CODE >= NCCL_VERSION(2,28,0)
+    NCCLCHECK(ncclAlltoAll(sendbuff, recvbuff, count, type, comm, stream));
+#else
   for (int r=0; r<nRanks; r++) {
+    // Send/Recv based implementation
     NCCLCHECK(ncclSend(((char*)sendbuff)+r*rankOffset, count, type, r, comm, stream));
     NCCLCHECK(ncclRecv(((char*)recvbuff)+r*rankOffset, count, type, r, comm, stream));
   }
+#endif
   NCCLCHECK(ncclGroupEnd());
   return testSuccess;
 #endif
