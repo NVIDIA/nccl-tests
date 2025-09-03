@@ -113,7 +113,7 @@ static int average = 1;
 #define SYMMETRIC_REGISTER 2
 static int local_register = 0;
 #endif
-#if NCCL_VERSION_CODE >= NCCL_VERSION(2,28,0)
+#if NCCL_VERSION_CODE >= NCCL_VERSION(2,27,0)
 static int ctaPolicy = -1;
 #endif
 static int minCudaArch = 1<<30;
