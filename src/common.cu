@@ -103,11 +103,9 @@ bool deviceMultimemEnabled = false; // Track whether multimem was successfully e
 
 // Report average iteration time: (0=RANK0,1=AVG,2=MIN,3=MAX)
 static int average = 1;
-#if NCCL_VERSION_CODE >= NCCL_VERSION(2,19,0)
 #define LOCAL_REGISTER 1
 #define SYMMETRIC_REGISTER 2
 static int local_register = 0;
-#endif
 #if NCCL_VERSION_CODE >= NCCL_VERSION(2,27,0)
 static int ctaPolicy = -1;
 #endif
@@ -962,15 +960,15 @@ int main(int argc, char* argv[]) {
 #endif
         break;
       case 'x':
-        if (test_ncclVersion >= NCCL_VERSION(2,27,0)) {
-          ctaPolicy = (int)strtol(optarg, NULL, 0);
-          if (ctaPolicy > 1 && test_ncclVersion < NCCL_VERSION(2,28,0)) {
-            printf("Option -x (cta_policy) %d is not supported before NCCL 2.28. Ignoring\n", ctaPolicy);
-            ctaPolicy = -1;
-          }
+#if NCCL_VERSION_CODE >= NCCL_VERSION(2,27,0)
+        ctaPolicy = (int)strtol(optarg, NULL, 0);
+        if (ctaPolicy > 1 && test_ncclVersion < NCCL_VERSION(2,28,0)) {
+          printf("Option -x (cta_policy) %d is not supported before NCCL 2.28. Ignoring\n", ctaPolicy);
+          ctaPolicy = -1;
         }
-        else
-          printf("Option -x (cta_policy) is not supported before NCCL 2.27. Ignoring\n");
+#else
+        printf("Option -x (cta_policy) is not supported before NCCL 2.27. Ignoring\n");
+#endif
         break;
       case 'D':
 	if (test_ncclVersion >= NCCL_VERSION(2,28,0)) {
