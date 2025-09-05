@@ -43,18 +43,24 @@ void SendRecvGetBw(size_t count, int typesize, double sec, double* algBw, double
   *busBw = baseBw * factor;
 }
 
-testResult_t SendRecvRunColl(void* sendbuff, void* recvbuff, size_t count, ncclDataType_t type, ncclRedOp_t op, int root, ncclComm_t comm, cudaStream_t stream) {
-  int nRanks;
-  NCCLCHECK(ncclCommCount(comm, &nRanks));
-  int rank;
-  NCCLCHECK(ncclCommUserRank(comm, &rank));
-  int recvPeer = (rank-1+nRanks) % nRanks;
-  int sendPeer = (rank+1) % nRanks;
+testResult_t SendRecvRunColl(void* sendbuff, size_t sendoffset, void* recvbuff, size_t recvoffset, size_t count, ncclDataType_t type, ncclRedOp_t op, int root, ncclComm_t comm, cudaStream_t stream, int deviceImpl) {
+  if (deviceImpl == 0) {
+    int nRanks;
+    NCCLCHECK(ncclCommCount(comm, &nRanks));
+    int rank;
+    NCCLCHECK(ncclCommUserRank(comm, &rank));
+    int recvPeer = (rank-1+nRanks) % nRanks;
+    int sendPeer = (rank+1) % nRanks;
 
-  NCCLCHECK(ncclGroupStart());
-  NCCLCHECK(ncclSend(sendbuff, count, type, sendPeer, comm, stream));
-  NCCLCHECK(ncclRecv(recvbuff, count, type, recvPeer, comm, stream));
-  NCCLCHECK(ncclGroupEnd());
+    char* sptr = (char*)sendbuff + sendoffset;
+    char* rptr = (char*)recvbuff + recvoffset;
+    NCCLCHECK(ncclGroupStart());
+    NCCLCHECK(ncclSend(sptr, count, type, sendPeer, comm, stream));
+    NCCLCHECK(ncclRecv(rptr, count, type, recvPeer, comm, stream));
+    NCCLCHECK(ncclGroupEnd());
+  } else {
+    return testNotImplemented;
+  }
   return testSuccess;
 }
 

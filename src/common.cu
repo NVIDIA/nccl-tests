@@ -17,6 +17,11 @@
 
 #include "../verifiable/verifiable.h"
 
+#pragma weak ncclCommWindowRegister
+#pragma weak ncclCommWindowDeregister
+#pragma weak ncclDevCommCreate
+#pragma weak ncclDevCommDestroy
+
 #define DIVUP(x, y) \
     (((x)+(y)-1)/(y))
 
@@ -91,12 +96,20 @@ static int streamnull = 0;
 static int timeout = 0;
 static int cudaGraphLaunches = 0;
 static int report_cputime = 0;
+static int deviceImpl = 0;
+
+int deviceCtaCount = 16; // Default number of CTAs for device implementation
+bool deviceMultimemEnabled = false; // Track whether multimem was successfully enabled
+
 // Report average iteration time: (0=RANK0,1=AVG,2=MIN,3=MAX)
 static int average = 1;
 #if NCCL_VERSION_CODE >= NCCL_VERSION(2,19,0)
 #define LOCAL_REGISTER 1
 #define SYMMETRIC_REGISTER 2
 static int local_register = 0;
+#endif
+#if NCCL_VERSION_CODE >= NCCL_VERSION(2,27,0)
+static int ctaPolicy = -1;
 #endif
 static int minCudaArch = 1<<30;
 
@@ -401,10 +414,22 @@ testResult_t startColl(struct threadArgs* args, ncclDataType_t type, ncclRedOp_t
     }
     #endif
 
-    TESTCHECK(args->collTest->runColl(
-          (void*)(in_place ? recvBuff + args->sendInplaceOffset*rank : sendBuff),
-          (void*)(in_place ? recvBuff + args->recvInplaceOffset*rank : recvBuff),
-        count, type, op, root, args->comms[i], args->streams[i]));
+    if (deviceImpl == 0) {
+      TESTCHECK(args->collTest->runColl(
+            (void*)(in_place ? recvBuff : sendBuff), in_place ? args->sendInplaceOffset*rank : 0,
+            (void*)recvBuff, in_place ? args->recvInplaceOffset*rank : 0,
+            count, type, op, root, args->comms[i], args->streams[i], 0));
+    } else {
+#if NCCL_VERSION_CODE >= NCCL_VERSION(2,28,0)
+      void* sendwin = args->sendRegHandles[i];
+      void* recvwin = args->recvRegHandles[i];
+      CUDACHECK(cudaSetDevice(args->gpus[i]));
+      TESTCHECK(args->collTest->runColl(
+            (void*)(in_place ? recvwin : sendwin), shift + in_place ? args->sendInplaceOffset*rank : 0,
+            (void*)recvwin, shift + in_place ? args->recvInplaceOffset*rank : 0,
+            count, type, op, root, (ncclComm_t)(args->devComms+i), args->streams[i], deviceImpl));
+#endif
+    }
 
     #if NCCL_VERSION_CODE >= NCCL_VERSION(2,11,0)
     if(opIndex >= ncclNumOps) {
@@ -650,49 +675,95 @@ testResult_t threadInit(struct threadArgs* args) {
   //set main thread again
   is_main_thread = (is_main_proc && args->thread == 0) ? 1 : 0;
 
+#if NCCL_VERSION_CODE >= NCCL_VERSION(2,14,0)
+     ncclConfig_t config = NCCL_CONFIG_INITIALIZER;
+#if NCCL_VERSION_CODE >= NCCL_VERSION(2,27,0)
+     if (ctaPolicy >= 0)
+       config.CTAPolicy = ctaPolicy;
+#if NCCL_VERSION_CODE >= NCCL_VERSION(2,28,0)
+     config.nvlinkCentricSched = 1;
+#endif
+#endif
+#endif
+
   NCCLCHECK(ncclGroupStart());
   for (int i=0; i<args->nGpus; i++) {
     int rank = args->proc*args->nThreads*args->nGpus + args->thread*args->nGpus + i;
     CUDACHECK(cudaSetDevice(args->gpus[i]));
+#if NCCL_VERSION_CODE >= NCCL_VERSION(2,14,0)
+    NCCLCHECK(ncclCommInitRankConfig(args->comms+i, nranks, args->ncclId, rank, &config));
+#else
     NCCLCHECK(ncclCommInitRank(args->comms+i, nranks, args->ncclId, rank));
+#endif
   }
   NCCLCHECK(ncclGroupEnd());
 #if NCCL_VERSION_CODE >= NCCL_VERSION(2,19,0)
   NCCLCHECK(ncclGroupStart());
-  void **sendRegHandles = (local_register) ? (void **)malloc(sizeof(*sendRegHandles)*args->nGpus) : NULL;
-  void **recvRegHandles = (local_register) ? (void **)malloc(sizeof(*recvRegHandles)*args->nGpus) : NULL;
   for (int i=0; i<args->nGpus; i++) {
 #if NCCL_VERSION_CODE >= NCCL_VERSION(2,27,0)
     if (test_ncclVersion >= NCCL_VERSION(2,27,0) && (local_register == SYMMETRIC_REGISTER)) {
-      NCCLCHECK(ncclCommWindowRegister(args->comms[i], args->sendbuffs[i], args->maxbytes, (ncclWindow_t*)&sendRegHandles[i], NCCL_WIN_COLL_SYMMETRIC));
-      NCCLCHECK(ncclCommWindowRegister(args->comms[i], args->recvbuffs[i], args->maxbytes, (ncclWindow_t*)&recvRegHandles[i], NCCL_WIN_COLL_SYMMETRIC));
+      NCCLCHECK(ncclCommWindowRegister(args->comms[i], args->sendbuffs[i], args->maxbytes, (ncclWindow_t*)&args->sendRegHandles[i], NCCL_WIN_COLL_SYMMETRIC));
+      NCCLCHECK(ncclCommWindowRegister(args->comms[i], args->recvbuffs[i], args->maxbytes, (ncclWindow_t*)&args->recvRegHandles[i], NCCL_WIN_COLL_SYMMETRIC));
     } else
 #endif
     {
-      if (local_register) NCCLCHECK(ncclCommRegister(args->comms[i], args->sendbuffs[i], args->maxbytes, &sendRegHandles[i]));
-      if (local_register) NCCLCHECK(ncclCommRegister(args->comms[i], args->recvbuffs[i], args->maxbytes, &recvRegHandles[i]));
+      if (local_register) NCCLCHECK(ncclCommRegister(args->comms[i], args->sendbuffs[i], args->maxbytes, &args->sendRegHandles[i]));
+      if (local_register) NCCLCHECK(ncclCommRegister(args->comms[i], args->recvbuffs[i], args->maxbytes, &args->recvRegHandles[i]));
     }
   }
   NCCLCHECK(ncclGroupEnd());
 #endif
+#if NCCL_VERSION_CODE >= NCCL_VERSION(2,28,0)
+  /* Create device communicators with multimem fallback */
+  if (deviceImpl) {
+    // Duplicate comms so our checks here do not affect the originals
+    ncclComm_t tmpComms[args->nGpus];
+    memset(tmpComms, 0, sizeof(tmpComms));
+    NCCLCHECK(ncclGroupStart());
+    for (int i = 0; i < args->nGpus; i++) {
+      int rank;
+      NCCLCHECK(ncclCommUserRank(args->comms[i], &rank));
+      NCCLCHECK(ncclCommSplit(args->comms[i], 0, rank, &tmpComms[i], NULL));
+    }
+    NCCLCHECK(ncclGroupEnd());
+
+    // Check multimem support on the duplicated comms
+    bool checkMultimemFailed = false;
+    ncclResult_t result;
+    ncclDevComm tmpDevComms[args->nGpus];
+    memset(tmpDevComms, 0, sizeof(tmpDevComms));
+    NCCLCHECK(ncclGroupStart());
+    for (int i = 0; i < args->nGpus; i++) {
+      ncclDevCommRequirements reqs;
+      memset(&reqs, 0, sizeof(reqs));
+      reqs.lsaBarrierCount = deviceCtaCount;
+      reqs.lsaMultimem = true;
+      result = ncclDevCommCreate(tmpComms[i], &reqs, &tmpDevComms[i]);
+      if (result != ncclInProgress && result != ncclSuccess) {
+        checkMultimemFailed = true;
+      }
+    }
+    result = ncclGroupEnd();
+    if (result != ncclSuccess) checkMultimemFailed = true;
+    deviceMultimemEnabled = !checkMultimemFailed;
+
+    // Create final dev comms with correct multimem setting and cleanup temps
+    NCCLCHECK(ncclGroupStart());
+    for (int i = 0; i < args->nGpus; i++) {
+      ncclDevCommRequirements reqs;
+      memset(&reqs, 0, sizeof(reqs));
+      reqs.lsaBarrierCount = deviceCtaCount;
+      reqs.lsaMultimem = deviceMultimemEnabled;
+      NCCLCHECK(ncclDevCommCreate(args->comms[i], &reqs, args->devComms+i));
+      NCCLCHECK(ncclDevCommDestroy(tmpComms[i], &tmpDevComms[i]));
+      NCCLCHECK(ncclCommDestroy(tmpComms[i]));
+    }
+    NCCLCHECK(ncclGroupEnd());
+  }
+#endif
 
   TESTCHECK(threadRunTests(args));
 
-  for (int i=0; i<args->nGpus; i++) {
-#if NCCL_VERSION_CODE >= NCCL_VERSION(2,19,0)
-#if NCCL_VERSION_CODE >= NCCL_VERSION(2,27,0)
-    if (test_ncclVersion >= NCCL_VERSION(2,27,0) && (local_register == SYMMETRIC_REGISTER)) {
-      NCCLCHECK(ncclCommWindowDeregister(args->comms[i], (ncclWindow_t)sendRegHandles[i]));
-      NCCLCHECK(ncclCommWindowDeregister(args->comms[i], (ncclWindow_t)recvRegHandles[i]));
-    } else
-#endif
-    {
-      if (local_register) NCCLCHECK(ncclCommDeregister(args->comms[i], sendRegHandles[i]));
-      if (local_register) NCCLCHECK(ncclCommDeregister(args->comms[i], recvRegHandles[i]));
-    }
-#endif
-    NCCLCHECK(ncclCommDestroy(args->comms[i]));
-  }
   return testSuccess;
 }
 
@@ -778,13 +849,16 @@ int main(int argc, char* argv[]) {
     {"report_cputime", required_argument, 0, 'C'},
     {"average", required_argument, 0, 'a'},
     {"local_register", required_argument, 0, 'R'},
+    {"cta_policy", required_argument, 0, 'x'},
+    {"device_implementation", required_argument, 0, 'D'},
+    {"device_cta_count", required_argument, 0, 'V'},
     {"help", no_argument, 0, 'h'},
     {}
   };
 
   while(1) {
     int c;
-    c = getopt_long(argc, argv, "t:g:b:e:i:f:n:m:w:N:p:c:o:d:r:z:y:T:hG:C:a:R:", longopts, &longindex);
+    c = getopt_long(argc, argv, "t:g:b:e:i:f:n:m:w:N:p:c:o:d:r:z:y:T:hG:C:a:R:x:D:V:", longopts, &longindex);
 
     if (c == -1)
       break;
@@ -887,6 +961,40 @@ int main(int argc, char* argv[]) {
         printf("Option -R (register) is not supported before NCCL 2.19. Ignoring\n");
 #endif
         break;
+      case 'x':
+        if (test_ncclVersion >= NCCL_VERSION(2,27,0)) {
+          ctaPolicy = (int)strtol(optarg, NULL, 0);
+          if (ctaPolicy > 1 && test_ncclVersion < NCCL_VERSION(2,28,0)) {
+            printf("Option -x (cta_policy) %d is not supported before NCCL 2.28. Ignoring\n", ctaPolicy);
+            ctaPolicy = -1;
+          }
+        }
+        else
+          printf("Option -x (cta_policy) is not supported before NCCL 2.27. Ignoring\n");
+        break;
+      case 'D':
+	if (test_ncclVersion >= NCCL_VERSION(2,28,0)) {
+          deviceImpl = (int)strtol(optarg, NULL, 0);
+	}
+	else {
+          fprintf(stderr, "Option -D (device implementation) requires NCCL >= 2.28.0\n");
+          return -1;
+        }
+        break;
+      case 'V':
+	if (test_ncclVersion >= NCCL_VERSION(2,28,0)) {
+          deviceCtaCount = (int)strtol(optarg, NULL, 0);
+          if (deviceCtaCount <= 0 || deviceCtaCount > 128) {
+            fprintf(stderr, "device_cta_count (-V) must be positive and less than 128, got %d. "
+                    "Using default value 16.\n", deviceCtaCount);
+            deviceCtaCount = 16;
+	  }
+        }
+	else {
+          fprintf(stderr, "Option -V (device CTA count) requires NCCL >= 2.28.0\n");
+          return -1;
+	}
+        break;
       case 'h':
       default:
         if (c != 'h') printf("invalid option '%c'\n", c);
@@ -919,6 +1027,9 @@ int main(int argc, char* argv[]) {
             "[-C,--report_cputime <0/1>] \n\t"
             "[-a,--average <0/1/2/3> report average iteration time <0=RANK0/1=AVG/2=MIN/3=MAX>] \n\t"
             "[-R,--local_register <0/1/2> enable local (1) or symmetric (2) buffer registration on send/recv buffers (default: disable (0))] \n\t"
+            "[-x,--cta_policy <0/1/2> set CTA policy (NCCL_CTA_POLICY_DEFAULT (0), NCCL_CTA_POLICY_EFFICIENCY (1), NCCL_CTA_POLICY_ZERO (2)) (default: do not set)] \n\t"
+            "[-D,--device_implementation <implementation number> enable device implementation (default: 0, use NCCL implementation; requires -R 2 if > 0)] \n\t"
+            "[-V,--device_cta_count <number> set number of CTAs for device implementation (default: 16)] \n\t"
             "[-h,--help]\n",
           basename(argv[0]));
         return 0;
@@ -930,6 +1041,11 @@ int main(int argc, char* argv[]) {
            (unsigned long long)maxBytes);
     return -1;
   }
+  if (deviceImpl > 0 && (local_register != SYMMETRIC_REGISTER)) {
+    fprintf(stderr, "device implementation (-D > 0) requires enabling symmetric memory registration (-R 2)\n");
+    return -1;
+  }
+
 #ifdef MPI_SUPPORT
   MPI_Init(&argc, &argv);
 #endif
@@ -1115,24 +1231,37 @@ testResult_t run() {
   //if parallel init is not selected, use main thread to initialize NCCL
   ncclComm_t* comms = (ncclComm_t*)malloc(sizeof(ncclComm_t)*nThreads*nGpus);
 #if NCCL_VERSION_CODE >= NCCL_VERSION(2,19,0)
-  void **sendRegHandles = NULL;
-  void **recvRegHandles = NULL;
+  void* sendRegHandles[nThreads*nGpus];
+  void* recvRegHandles[nThreads*nGpus];
+  memset(sendRegHandles, 0, sizeof(sendRegHandles));
+  memset(recvRegHandles, 0, sizeof(recvRegHandles));
+#endif
+#if NCCL_VERSION_CODE >= NCCL_VERSION(2,28,0)
+  ncclDevComm devComms[nThreads*nGpus];
 #endif
   if (!parallel_init) {
-     if (ncclProcs == 1) {
-       NCCLCHECK(ncclCommInitAll(comms, nGpus*nThreads, gpus));
-     } else {
-       NCCLCHECK(ncclGroupStart());
-       for (int i=0; i<nGpus*nThreads; i++) {
-         CUDACHECK(cudaSetDevice(gpus[i]));
-         NCCLCHECK(ncclCommInitRank(comms+i, ncclProcs*nThreads*nGpus, ncclId, ncclProc*nThreads*nGpus+i));
-       }
-       NCCLCHECK(ncclGroupEnd());
+#if NCCL_VERSION_CODE >= NCCL_VERSION(2,14,0)
+     ncclConfig_t config = NCCL_CONFIG_INITIALIZER;
+#if NCCL_VERSION_CODE >= NCCL_VERSION(2,27,0)
+     if (ctaPolicy >= 0)
+       config.CTAPolicy = ctaPolicy;
+#if NCCL_VERSION_CODE >= NCCL_VERSION(2,28,0)
+     config.nvlinkCentricSched = 1;
+#endif
+#endif
+#endif
+     NCCLCHECK(ncclGroupStart());
+     for (int i=0; i<nGpus*nThreads; i++) {
+       CUDACHECK(cudaSetDevice(gpus[i]));
+#if NCCL_VERSION_CODE >= NCCL_VERSION(2,14,0)
+       NCCLCHECK(ncclCommInitRankConfig(comms+i, ncclProcs*nThreads*nGpus, ncclId, ncclProc*nThreads*nGpus+i, &config));
+#else
+       NCCLCHECK(ncclCommInitRank(comms+i, ncclProcs*nThreads*nGpus, ncclId, ncclProc*nThreads*nGpus+i));
+#endif
      }
+     NCCLCHECK(ncclGroupEnd());
 #if NCCL_VERSION_CODE >= NCCL_VERSION(2,19,0)
      NCCLCHECK(ncclGroupStart());
-     sendRegHandles = (local_register) ? (void **)malloc(sizeof(*sendRegHandles)*nThreads*nGpus) : NULL;
-     recvRegHandles = (local_register) ? (void **)malloc(sizeof(*recvRegHandles)*nThreads*nGpus) : NULL;
      for (int i=0; i<nGpus*nThreads; i++) {
 #if NCCL_VERSION_CODE >= NCCL_VERSION(2,27,0)
        if (test_ncclVersion >= NCCL_VERSION(2,27,0) && (local_register == SYMMETRIC_REGISTER)) {
@@ -1147,12 +1276,58 @@ testResult_t run() {
      }
      NCCLCHECK(ncclGroupEnd());
 #endif
+#if NCCL_VERSION_CODE >= NCCL_VERSION(2,28,0)
+     /* Create device communicators with multimem fallback */
+     if (deviceImpl) {
+       // Duplicate comms so our checks here do not affect the originals
+       ncclComm_t tmpComms[nGpus * nThreads];
+       memset(tmpComms, 0, sizeof(tmpComms));
+       NCCLCHECK(ncclGroupStart());
+       for (int i = 0; i < nGpus * nThreads; i++) {
+         int rank;
+         NCCLCHECK(ncclCommUserRank(comms[i], &rank));
+         NCCLCHECK(ncclCommSplit(comms[i], 0, rank, &tmpComms[i], NULL));
+       }
+       NCCLCHECK(ncclGroupEnd());
+
+       // Check multimem support on the duplicated comms
+       bool checkMultimemFailed = false;
+       ncclResult_t result;
+       ncclDevComm tmpDevComms[nGpus * nThreads];
+       memset(tmpDevComms, 0, sizeof(tmpDevComms));
+       NCCLCHECK(ncclGroupStart());
+       for (int i = 0; i < nGpus * nThreads; i++) {
+         ncclDevCommRequirements reqs;
+         memset(&reqs, 0, sizeof(reqs));
+         reqs.lsaBarrierCount = deviceCtaCount;
+         reqs.lsaMultimem = true;
+         result = ncclDevCommCreate(tmpComms[i], &reqs, &tmpDevComms[i]);
+         if (result != ncclInProgress && result != ncclSuccess) {
+           checkMultimemFailed = true;
+         }
+       }
+       result = ncclGroupEnd();
+       if (result != ncclSuccess) checkMultimemFailed = true;
+       deviceMultimemEnabled = !checkMultimemFailed;
+
+       // Create final dev comms with correct multimem setting and cleanup temps
+       NCCLCHECK(ncclGroupStart());
+       for (int i = 0; i < nGpus * nThreads; i++) {
+         ncclDevCommRequirements reqs;
+         memset(&reqs, 0, sizeof(reqs));
+         reqs.lsaBarrierCount = deviceCtaCount;
+         reqs.lsaMultimem = deviceMultimemEnabled;
+         NCCLCHECK(ncclDevCommCreate(comms[i], &reqs, devComms+i));
+         NCCLCHECK(ncclDevCommDestroy(tmpComms[i], &tmpDevComms[i]));
+         NCCLCHECK(ncclCommDestroy(tmpComms[i]));
+       }
+       NCCLCHECK(ncclGroupEnd());
+     }
+#endif
   }
 
   int errors[nThreads];
   double bw[nThreads];
-  double* delta;
-  CUDACHECK(cudaHostAlloc(&delta, sizeof(double)*nThreads*NUM_BLOCKS, cudaHostAllocPortable | cudaHostAllocMapped));
   int bw_count[nThreads];
   for (int t=0; t<nThreads; t++) {
     bw[t] = 0.0;
@@ -1189,6 +1364,13 @@ testResult_t run() {
     threads[t].args.sendbuffs = sendbuffs+t*nGpus;
     threads[t].args.recvbuffs = recvbuffs+t*nGpus;
     threads[t].args.expected = expected+t*nGpus;
+#if NCCL_VERSION_CODE >= NCCL_VERSION(2,28,0)
+    threads[t].args.devComms = devComms+t*nGpus;
+#endif
+#if NCCL_VERSION_CODE >= NCCL_VERSION(2,19,0)
+    threads[t].args.sendRegHandles = sendRegHandles+t*nGpus;
+    threads[t].args.recvRegHandles = recvRegHandles+t*nGpus;
+#endif
     threads[t].args.ncclId = ncclId;
     threads[t].args.comms=comms+t*nGpus;
     threads[t].args.streams=streams+t*nGpus;
@@ -1252,11 +1434,6 @@ testResult_t run() {
     if (datacheck) CUDACHECK(cudaFree(expected[i]));
 #endif
   }
-  CUDACHECK(cudaFreeHost(delta));
-#if NCCL_VERSION_CODE >= NCCL_VERSION(2,19,0)
-  free(sendRegHandles);
-  free(recvRegHandles);
-#endif
 
   envstr = getenv("NCCL_TESTS_MIN_BW");
   double check_avg_bw = envstr ? atof(envstr) : -1;

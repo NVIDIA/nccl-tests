@@ -39,23 +39,35 @@ void ScatterGetBw(size_t count, int typesize, double sec, double* algBw, double*
   *busBw = baseBw * factor;
 }
 
-testResult_t ScatterRunColl(void* sendbuff, void* recvbuff, size_t count, ncclDataType_t type, ncclRedOp_t op, int root, ncclComm_t comm, cudaStream_t stream) {
-  int nRanks;
-  NCCLCHECK(ncclCommCount(comm, &nRanks));
-  int rank;
-  NCCLCHECK(ncclCommUserRank(comm, &rank));
-  size_t rankOffset = count * wordSize(type);
-  if (count == 0) return testSuccess;
+testResult_t ScatterRunColl(void* sendbuff, size_t sendoffset, void* recvbuff, size_t recvoffset, size_t count, ncclDataType_t type, ncclRedOp_t op, int root, ncclComm_t comm, cudaStream_t stream, int deviceImpl) {
+  if (deviceImpl == 0) {
+    int nRanks;
+    NCCLCHECK(ncclCommCount(comm, &nRanks));
+    int rank;
+    NCCLCHECK(ncclCommUserRank(comm, &rank));
+    size_t rankOffset = count * wordSize(type);
+    if (count == 0) return testSuccess;
 
-  NCCLCHECK(ncclGroupStart());
-  if (rank == root) {
-    for (int r=0; r<nRanks; r++) {
-      NCCLCHECK(ncclSend(((char*)sendbuff)+r*rankOffset, count, type, r, comm, stream));
+    char* sptr = (char*)sendbuff + sendoffset;
+    char* rptr = (char*)recvbuff + recvoffset;
+#if NCCL_VERSION_CODE >= NCCL_VERSION(2,28,0)
+    NCCLCHECK(ncclScatter(sptr, rptr, count, type, root, comm, stream));
+#elif NCCL_VERSION_CODE >= NCCL_VERSION(2,7,0)
+    NCCLCHECK(ncclGroupStart());
+    if (rank == root) {
+      for (int r=0; r<nRanks; r++) {
+        NCCLCHECK(ncclSend(sptr + r * rankOffset, count, type, r, comm, stream));
+      }
     }
+    NCCLCHECK(ncclRecv(rptr, count, type, root, comm, stream));
+    NCCLCHECK(ncclGroupEnd());
+#else
+    printf("NCCL 2.7 or later is needed for scatter. This test was compiled with %d.%d.\n", NCCL_MAJOR, NCCL_MINOR);
+    return testNcclError;
+#endif
+  } else {
+    return testNotImplemented;
   }
-  NCCLCHECK(ncclRecv(recvbuff, count, type, root, comm, stream));
-  NCCLCHECK(ncclGroupEnd());
-
   return testSuccess;
 }
 
