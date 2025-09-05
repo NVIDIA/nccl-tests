@@ -17,6 +17,13 @@ CUDA_VERSION = $(strip $(shell which $(NVCC) >/dev/null && $(NVCC) --version | g
 CUDA_MAJOR = $(shell echo $(CUDA_VERSION) | cut -d "." -f 1)
 CUDA_MINOR = $(shell echo $(CUDA_VERSION) | cut -d "." -f 2)
 
+# CUDA 13.0 requires c++17
+ifeq ($(shell test "0$(CUDA_MAJOR)" -ge 13; echo $$?),0)
+  CXXSTD ?= -std=c++17
+else
+  CXXSTD ?= -std=c++14
+endif
+
 # Better define NVCC_GENCODE in your environment to the minimal set
 # of archs to reduce compile time.
 ifeq ($(shell test "0$(CUDA_MAJOR)" -ge 13; echo $$?),0)
@@ -59,8 +66,8 @@ NVCC_GENCODE ?= -gencode=arch=compute_35,code=sm_35 \
                 -gencode=arch=compute_70,code=compute_70
 endif
 
-NVCUFLAGS  := -ccbin $(CXX) $(NVCC_GENCODE) -std=c++14
-CXXFLAGS   := -std=c++14
+NVCUFLAGS  := -ccbin $(CXX) $(NVCC_GENCODE) $(CXXSTD)
+CXXFLAGS   := $(CXXSTD)
 
 LDFLAGS    := -L${CUDA_LIB} -lcudart -lrt
 NVLDFLAGS  := -L${CUDA_LIB} -l${CUDARTLIB} -lrt
