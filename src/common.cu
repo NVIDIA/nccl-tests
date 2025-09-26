@@ -1137,9 +1137,21 @@ testResult_t run() {
   size_t maxMem = ~0;
   char* envstr = getenv("NCCL_TESTS_DEVICE");
   int gpu0 = envstr ? atoi(envstr) : -1;
+  int available_devices;
+  CUDACHECK(cudaGetDeviceCount(&available_devices));
   for (int i=0; i<nThreads*nGpus; i++) {
     int cudaDev = (gpu0 != -1 ? gpu0 : localRank*nThreads*nGpus) + i;
     int rank = proc*nThreads*nGpus+i;
+    if (cudaDev >= available_devices) {
+      fprintf(stderr,
+              "Invalid number of GPUs: %d requested but only %d were found.\n",
+              (gpu0 != -1 ? gpu0 : localRank * nThreads * nGpus) +
+                  nThreads * nGpus,
+              available_devices);
+      fprintf(stderr,
+              "Please check the number of processes and GPUs per process.\n");
+      return testNotImplemented;
+    }
     cudaDeviceProp prop;
     CUDACHECK(cudaGetDeviceProperties(&prop, cudaDev));
     len += snprintf(line+len, MAX_LINE-len, "#  Rank %2d Group %2d Pid %6d on %10s device %2d [%04x:%02x:%02x] %s\n",
