@@ -109,6 +109,9 @@ struct testEngine {
   void (*getBuffSize)(size_t *sendcount, size_t *recvcount, size_t count, int nranks);
   testResult_t (*runTest)(struct threadArgs* args, int root, ncclDataType_t type,
       const char* typeName, ncclRedOp_t op, const char* opName);
+#if NCCL_VERSION_CODE >= NCCL_VERSION(2,28,0)
+  bool (*getDevCommRequirements)(int deviceImpl, ncclDevCommRequirements* reqs);
+#endif
 };
 
 extern struct testEngine ncclTestEngine;
@@ -276,7 +279,6 @@ static size_t wordSize(ncclDataType_t type) {
 
 extern int test_ncclVersion; // init'd with ncclGetVersion()
 extern int deviceCtaCount; // number of CTAs for device implementation
-extern bool deviceMultimemEnabled; // whether multimem was successfully enabled
 constexpr int test_opNumMax = (int)ncclNumOps + (NCCL_VERSION_CODE >= NCCL_VERSION(2,11,0) ? 1 : 0);
 extern int test_opnum;
 extern int test_typenum;
@@ -317,22 +319,9 @@ extern thread_local int is_main_thread;
 
 #if NCCL_VERSION_CODE >= NCCL_VERSION(2,28,0)
 template <typename F>
-testResult_t testLaunchDeviceKernel(F kernel, void* sendbuff, size_t sendoffset, void* recvbuff, size_t recvoffset, size_t count, ncclDataType_t type, ncclRedOp_t op, int root, ncclComm_t comm, cudaStream_t stream, int useMultimem) {
+testResult_t testLaunchDeviceKernel(F kernel, void* sendbuff, size_t sendoffset, void* recvbuff, size_t recvoffset, size_t count, ncclDataType_t type, ncclRedOp_t op, int root, ncclComm_t comm, cudaStream_t stream) {
   if (kernel == nullptr) return testNotImplemented;
   ncclDevComm* devComm = (ncclDevComm*)comm;
-
-  // Check if multimem is enabled for this kernel
-  if (useMultimem && !deviceMultimemEnabled) {
-    printf("[KERNEL_LAUNCH_ERROR] Device kernel requires multimem but it was not available during "
-           "DevComm creation. Multimem support may not be available on this hardware.\n");
-    return testInternalError;
-  }
-
-  // Only check mcBasePtr if multimem is active for this kernel
-  if (useMultimem && devComm->lsaMultimem.mcBasePtr == nullptr) {
-    printf("[KERNEL_LAUNCH_ERROR] Device kernel requires multimem, which may not be available.\n");
-    return testInternalError;
-  }
 
   ncclWindow_t sendwin = (ncclWindow_t)sendbuff;
   ncclWindow_t recvwin = (ncclWindow_t)recvbuff;
@@ -355,7 +344,7 @@ testResult_t testLaunchDeviceKernel(F kernel, void* sendbuff, size_t sendoffset,
   )
 #else
 template <typename F>
-testResult_t testLaunchDeviceKernel(F kernel, void* sendbuff, size_t sendoffset, void* recvbuff, size_t recvoffset, size_t count, ncclDataType_t type, ncclRedOp_t op, int root, ncclComm_t comm, cudaStream_t stream, int useMultimem) {
+testResult_t testLaunchDeviceKernel(F kernel, void* sendbuff, size_t sendoffset, void* recvbuff, size_t recvoffset, size_t count, ncclDataType_t type, ncclRedOp_t op, int root, ncclComm_t comm, cudaStream_t stream) {
   return testNotImplemented;
 }
 #define SPECIALIZE_KERNEL(kernel, type, op) nullptr
