@@ -602,9 +602,9 @@ testResult_t BenchTime(struct threadArgs* args, ncclDataType_t type, ncclRedOp_t
     sprintf(timeStr, "%7.2f", timeUsec);
   }
   if (args->reportErrors) {
-    PRINT("  %7s  %6.2f  %6.2f  %5g", timeStr, algBw, busBw, (double)wrongElts);
+    PRINT("  %7s  %6.2f  %6.2f  %6g", timeStr, algBw, busBw, (double)wrongElts);
   } else {
-    PRINT("  %7s  %6.2f  %6.2f  %5s", timeStr, algBw, busBw, "N/A");
+    PRINT("  %7s  %6.2f  %6.2f  %6s", timeStr, algBw, busBw, "N/A");
   }
 
   args->bw[0] += busBw;
@@ -1349,9 +1349,9 @@ testResult_t run() {
   const char* timeStr = report_cputime ? "cputime" : "time";
   PRINT("#\n");
   PRINT("# %10s  %12s  %8s  %6s  %6s           out-of-place                       in-place          \n", "", "", "", "", "");
-  PRINT("# %10s  %12s  %8s  %6s  %6s  %7s  %6s  %6s %6s  %7s  %6s  %6s %6s\n", "size", "count", "type", "redop", "root",
+  PRINT("# %10s  %12s  %8s  %6s  %6s  %7s  %6s  %6s  %6s  %7s  %6s  %6s  %6s\n", "size", "count", "type", "redop", "root",
       timeStr, "algbw", "busbw", "#wrong", timeStr, "algbw", "busbw", "#wrong");
-  PRINT("# %10s  %12s  %8s  %6s  %6s  %7s  %6s  %6s  %5s  %7s  %6s  %6s  %5s\n", "(B)", "(elements)", "", "", "",
+  PRINT("# %10s  %12s  %8s  %6s  %6s  %7s  %6s  %6s  %6s  %7s  %6s  %6s  %6s\n", "(B)", "(elements)", "", "", "",
       "(us)", "(GB/s)", "(GB/s)", "", "(us)", "(GB/s)", "(GB/s)", "");
 
   struct testThread threads[nThreads];
