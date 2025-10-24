@@ -823,7 +823,7 @@ int main(int argc, char* argv[], char **envp) {
   #else
     test_ncclVersion = NCCL_VERSION_CODE;
   #endif
-  //printf("# NCCL_VERSION_CODE=%d ncclGetVersion=%d\n", NCCL_VERSION_CODE, test_ncclVersion);
+  //printf("# nccl-tests version %s NCCL_VERSION_CODE=%d ncclGetVersion=%d\n", NCCL_TESTS_VERSION, NCCL_VERSION_CODE, test_ncclVersion);
   #if NCCL_VERSION_CODE >= NCCL_VERSION(2,0,0)
     test_opnum = 4;
     test_typenum = 9;
