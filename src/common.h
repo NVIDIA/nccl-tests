@@ -6,6 +6,8 @@
 #ifndef __COMMON_H__
 #define __COMMON_H__
 
+#define NCCL_TESTS_VERSION "2.17.3"
+
 #include "nccl.h"
 #if NCCL_VERSION_CODE >= NCCL_VERSION(2,28,0)
 #include "nccl_device.h"
@@ -179,6 +181,9 @@ extern void AllocateBuffs(void **sendbuff, void **recvbuff, void **expected, voi
 static void getHostName(char* hostname, int maxlen) {
   gethostname(hostname, maxlen);
   for (int i=0; i< maxlen; i++) {
+    if (hostname[i] == '\0') {
+      return;
+    }
     if (hostname[i] == '.') {
       hostname[i] = '\0';
       return;
@@ -315,7 +320,6 @@ static int ncclstringtoop (char *str) {
 
 extern int is_main_proc;
 extern thread_local int is_main_thread;
-#define PRINT if (is_main_thread) printf
 
 #if NCCL_VERSION_CODE >= NCCL_VERSION(2,28,0)
 template <typename F>

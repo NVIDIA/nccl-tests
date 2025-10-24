@@ -502,6 +502,7 @@ void writeBenchmarkLineBody(double timeUsec, double algBw, double busBw, bool re
 // strings would be smarter/easier, but I chose to adapt what was
 // already in place.
 testResult_t writeDeviceReport(size_t *maxMem, int localRank, int proc, int totalProcs, int color, const char hostname[], const char *program_name) {
+  PRINT("# nccl-tests version %s nccl-headers=%d nccl-library=%d\n", NCCL_TESTS_VERSION, NCCL_VERSION_CODE, test_ncclVersion);
   PRINT("# Collective test starting: %s\n", program_name);
   PRINT("# nThread %d nGpus %d minBytes %ld maxBytes %ld step: %ld(%s) warmup iters: %d iters: %d agg iters: %d validation: %d graph: %d\n",
         nThreads, nGpus, minBytes, maxBytes,
