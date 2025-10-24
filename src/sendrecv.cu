@@ -113,8 +113,8 @@ testResult_t SendRecvRunTest(struct threadArgs* args, int root, ncclDataType_t t
 }
 
 struct testEngine sendRecvEngine = {
-  SendRecvGetBuffSize,
-  SendRecvRunTest
+  .getBuffSize = SendRecvGetBuffSize,
+  .runTest = SendRecvRunTest
 };
 
 #pragma weak ncclTestEngine=sendRecvEngine

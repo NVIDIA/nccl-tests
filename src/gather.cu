@@ -121,8 +121,8 @@ testResult_t GatherRunTest(struct threadArgs* args, int root, ncclDataType_t typ
 }
 
 struct testEngine gatherEngine = {
-  GatherGetBuffSize,
-  GatherRunTest
+  .getBuffSize = GatherGetBuffSize,
+  .runTest = GatherRunTest
 };
 
 #pragma weak ncclTestEngine=gatherEngine
