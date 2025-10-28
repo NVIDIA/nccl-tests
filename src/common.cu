@@ -97,6 +97,7 @@ static int streamnull = 0;
 static int timeout = 0;
 int cudaGraphLaunches = 0;
 static int report_cputime = 0;
+static int report_timestamps = 0;
 static int deviceImpl = 0;
 
 int deviceCtaCount = 16; // Default number of CTAs for device implementation
@@ -660,7 +661,7 @@ testResult_t BenchTime(struct threadArgs* args, ncclDataType_t type, ncclRedOp_t
   }
 
   double timeUsec = (report_cputime ? cputimeSec : deltaSec)*1.0E6;
-  writeBenchmarkLineBody(timeUsec, algBw, busBw, args->reportErrors, wrongElts, report_cputime, in_place==0);
+  writeBenchmarkLineBody(timeUsec, algBw, busBw, args->reportErrors, wrongElts, report_cputime, report_timestamps, in_place==0);
 
   args->bw[0] += busBw;
   args->bw_count[0]++;
@@ -871,6 +872,7 @@ int main(int argc, char* argv[], char **envp) {
     {"timeout", required_argument, 0, 'T'},
     {"cudagraph", required_argument, 0, 'G'},
     {"report_cputime", required_argument, 0, 'C'},
+    {"report_timestamps", required_argument, 0, 'S'},
     {"output_file", required_argument, 0, 'J'},
     {"average", required_argument, 0, 'a'},
     {"local_register", required_argument, 0, 'R'},
@@ -883,7 +885,7 @@ int main(int argc, char* argv[], char **envp) {
 
   while(1) {
     int c;
-    c = getopt_long(argc, argv, "t:g:b:e:i:f:n:m:w:N:p:c:o:d:r:z:y:T:hG:C:a:R:x:D:V:J:", longopts, &longindex);
+    c = getopt_long(argc, argv, "t:g:b:e:i:f:n:m:w:N:p:c:o:d:r:z:y:T:hG:C:a:R:x:D:V:J:S:", longopts, &longindex);
 
     if (c == -1)
       break;
@@ -975,6 +977,9 @@ int main(int argc, char* argv[], char **envp) {
       case 'J':
         output_file = strdup(optarg);
         break;
+      case 'S':
+        report_timestamps = strtol(optarg, NULL, 0);
+        break;
       case 'a':
         average = (int)strtol(optarg, NULL, 0);
         break;
@@ -1053,6 +1058,7 @@ int main(int argc, char* argv[], char **envp) {
             "[-T,--timeout <time in seconds>] \n\t"
             "[-G,--cudagraph <num graph launches>] \n\t"
             "[-C,--report_cputime <0/1>] \n\t"
+            "[-S,--report_timestamps <0/1> report timestamps (default 0)] \n\t"
             "[-J,--output_file <file> write output to filepath, if accessible. Infer type from suffix (only json supported presently.)] \n\t"
             "[-a,--average <0/1/2/3> report average iteration time <0=RANK0/1=AVG/2=MIN/3=MAX>] \n\t"
             "[-R,--local_register <0/1/2> enable local (1) or symmetric (2) buffer registration on send/recv buffers (default: disable (0))] \n\t"
@@ -1316,7 +1322,7 @@ testResult_t run() {
 
   fflush(stdout);
 
-  writeResultHeader(report_cputime);
+  writeResultHeader(report_cputime, report_timestamps);
 
   struct testThread threads[nThreads];
   memset(threads, 0, sizeof(struct testThread)*nThreads);

@@ -41,6 +41,8 @@ static thread_local bool write_json;
 
 #define JSON_FILE_VERSION 1
 
+#define TIME_STRING_FORMAT "%Y-%m-%d %H:%M:%S"
+
 typedef enum {
   JSON_NONE, // A pseudo-state meaning that the document is empty
   JSON_KEY,
@@ -274,7 +276,7 @@ void formatNow(char *buff, int len) {
   time(&now);
   struct tm *timeinfo = localtime(&now);
 
-  strftime(buff, len, "%Y-%m-%d %H:%M:%S", timeinfo);
+  strftime(buff, len, TIME_STRING_FORMAT, timeinfo);
 }
 
 // We provide some status line to stdout.
@@ -464,7 +466,7 @@ void getFloatStr(double value, int width, char* str) {
 // Write the performance-related payload to stdout/json.
 // We call this function twice at the top level per test: once for out-of-place, and once for in-place.
 // The Json output assumes out-of-place happens first.
-void writeBenchmarkLineBody(double timeUsec, double algBw, double busBw, bool reportErrors, int64_t wrongElts, bool report_cputime, bool out_of_place) {
+void writeBenchmarkLineBody(double timeUsec, double algBw, double busBw, bool reportErrors, int64_t wrongElts, bool report_cputime, bool report_timestamps, bool out_of_place) {
   char timeStr[8];
   getFloatStr(timeUsec, 7, timeStr);
 
@@ -478,6 +480,12 @@ void writeBenchmarkLineBody(double timeUsec, double algBw, double busBw, bool re
     PRINT("  %7s  %6s  %6s  %6g", timeStr, algBwStr, busBwStr, (double)wrongElts);
   } else {
     PRINT("  %7s  %6s  %6s    N/A", timeStr, algBwStr, busBwStr);
+  }
+
+  if (!out_of_place && report_timestamps) {
+    char timebuffer[128];
+    formatNow(timebuffer, sizeof(timebuffer));
+    PRINT("%21s", timebuffer);
   }
 
   if(write_json) {
@@ -607,14 +615,16 @@ testResult_t writeDeviceReport(size_t *maxMem, int localRank, int proc, int tota
 
 // Write a result header to stdout/json.
 // Json results object and contained table list are left open
-void writeResultHeader(bool report_cputime) {
+void writeResultHeader(bool report_cputime, bool report_timestamps) {
+  const char* tsLbl  = report_timestamps ? "timestamp" : "";
+  const char* tsFmt = report_timestamps ? TIME_STRING_FORMAT : "";
   const char* timeStr = report_cputime ? "cputime" : "time";
   PRINT("#\n");
   PRINT("# %10s  %12s  %8s  %6s  %6s           out-of-place                       in-place          \n", "", "", "", "", "");
-  PRINT("# %10s  %12s  %8s  %6s  %6s  %7s  %6s  %6s  %6s  %7s  %6s  %6s  %6s\n", "size", "count", "type", "redop", "root",
-      timeStr, "algbw", "busbw", "#wrong", timeStr, "algbw", "busbw", "#wrong");
-  PRINT("# %10s  %12s  %8s  %6s  %6s  %7s  %6s  %6s  %5s  %7s  %6s  %6s  %5s\n", "(B)", "(elements)", "", "", "",
-      "(us)", "(GB/s)", "(GB/s)", "", "(us)", "(GB/s)", "(GB/s)", "");
+  PRINT("# %10s  %12s  %8s  %6s  %6s  %7s  %6s  %6s  %6s  %7s  %6s  %6s  %6s %20s\n", "size", "count", "type", "redop", "root",
+        timeStr, "algbw", "busbw", "#wrong", timeStr, "algbw", "busbw", "#wrong", tsLbl);
+  PRINT("# %10s  %12s  %8s  %6s  %6s  %7s  %6s  %6s  %6s  %7s  %6s  %6s  %6s %20s\n", "(B)", "(elements)", "", "", "",
+        "(us)", "(GB/s)", "(GB/s)", "", "(us)", "(GB/s)", "(GB/s)", "", tsFmt);
 
   if(write_json) {
     jsonKey("results"); jsonStartList();
