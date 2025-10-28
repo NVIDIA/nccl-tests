@@ -79,6 +79,7 @@ All tests support the same set of arguments :
   * `-G,--cudagraph <num graph launches>` Capture iterations as a CUDA graph and then replay specified number of times. Default : 0.
   * `-C,--report_cputime <0/1>` Report CPU time instead of latency. Default : 0.
   * `-R,--local_register <0/1/2>` enable local (1) or symmetric (2) buffer registration on send/recv buffers. Default : 0.
+  * `-S,--report_timestamps <0/1>` Add timestamp ("%Y-%m-%d %H:%M:%S") to each performance report line. Default : 0.
   * `-T,--timeout <time in seconds>` timeout each test after specified number of seconds. Default : disabled.
 
 ### Running multiple operations in parallel
