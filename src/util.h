@@ -28,9 +28,9 @@ void jsonOutputFinalize();
 void writeBenchmarkLinePreamble(size_t nBytes, size_t nElem, const char typeName[], const char opName[], int root);
 void writeBenchmarkLineTerminator(int actualIters, const char *name);
 void writeBenchMarkLineNullBody();
-void writeBenchmarkLineBody(double timeUsec, double algBw, double busBw, bool reportErrors, int64_t wrongElts, bool report_cputime, bool out_of_place);
+void writeBenchmarkLineBody(double timeUsec, double algBw, double busBw, bool reportErrors, int64_t wrongElts, bool report_cputime, bool report_timestamps, bool out_of_place);
 testResult_t writeDeviceReport(size_t *maxMem, int localRank, int proc, int totalProcs, int color, const char hostname[], const char *program_name);
-void writeResultHeader(bool report_cputime);
+void writeResultHeader(bool report_cputime, bool report_timestamps);
 void writeResultFooter(const int errors[], const double bw[], double check_avg_bw, const char *program_name);
 void writeErrors();
 
