@@ -11,6 +11,8 @@
 #include "vector_types.h"
 #endif
 
+#pragma weak ncclAlltoAll
+
 void AlltoAllGetCollByteCount(size_t *sendcount, size_t *recvcount, size_t *paramcount, size_t *sendInplaceOffset, size_t *recvInplaceOffset, size_t count, size_t eltSize, int nranks) {
   *paramcount = (count/nranks) & -(16/eltSize);
   *sendcount = nranks*(*paramcount);
@@ -60,11 +62,13 @@ bool AlltoAllGetDevCommRequirements(int deviceImpl, ncclDevCommRequirements* req
     case 2: // NvlAlltoAllKernelOptimized
       reqs->lsaBarrierCount = deviceCtaCount;
       return true;
+#if NCCL_VERSION_CODE >= NCCL_VERSION(2,28,7)
     case 3: // GinAlltoAllKernel
     case 4: // HybridAlltoAllKernel (LSA+GIN)
       reqs->barrierCount = deviceCtaCount;
       reqs->ginSignalCount = deviceCtaCount;
       return true;
+#endif
     default:
       return false;
   }
@@ -180,6 +184,7 @@ __global__ void NvlAlltoAllKernelOptimized(ncclWindow_t sendwin, size_t sendoffs
   bar.sync(ncclCoopCta(), cuda::memory_order_release);
 }
 
+#if NCCL_VERSION_CODE >= NCCL_VERSION(2,28,7)
 template <typename T>
 __global__ void GinAlltoAllKernel(ncclWindow_t sendwin, size_t sendoffset, ncclWindow_t recvwin, size_t recvoffset, size_t count, int root, struct ncclDevComm devComm) {
   int ginContext = 0;
@@ -258,14 +263,20 @@ __global__ void HybridAlltoAllKernel(ncclWindow_t sendwin, size_t sendoffset, nc
   bar.sync(ncclCoopCta(), cuda::memory_order_release, ncclGinFenceLevel::Relaxed);
 }
 #endif
+#endif
 
 testResult_t AlltoAllRunColl(void* sendbuff, size_t sendoffset, void* recvbuff, size_t recvoffset, size_t count, ncclDataType_t type, ncclRedOp_t op, int root, ncclComm_t comm, cudaStream_t stream, int deviceImpl) {
   if (deviceImpl == 0) {
     char* sptr = (char*)sendbuff + sendoffset;
     char* rptr = (char*)recvbuff + recvoffset;
 #if NCCL_VERSION_CODE >= NCCL_VERSION(2,28,0)
-    NCCLCHECK(ncclAlltoAll(sptr, rptr, count, type, comm, stream));
-#elif NCCL_VERSION_CODE >= NCCL_VERSION(2,7,0)
+    if (test_ncclVersion >= NCCL_VERSION(2,28,0)) {
+      NCCLCHECK(ncclAlltoAll(sptr, rptr, count, type, comm, stream));
+      return testSuccess;
+    }
+    // fall-through to send/recv implementation if ncclAlltoAll is not available
+#endif
+#if NCCL_VERSION_CODE >= NCCL_VERSION(2,7,0)
     int nRanks;
     NCCLCHECK(ncclCommCount(comm, &nRanks));
     size_t rankOffset = count * wordSize(type);
@@ -281,18 +292,22 @@ testResult_t AlltoAllRunColl(void* sendbuff, size_t sendoffset, void* recvbuff, 
 #endif
   } else {
     switch(deviceImpl) {
+#if NCCL_VERSION_CODE >= NCCL_VERSION(2,28,0)
       case 1:
         TESTCHECK(testLaunchDeviceKernel(SPECIALIZE_KERNEL(NvlAlltoAllKernel, type, op), sendbuff, sendoffset, recvbuff, recvoffset, count, type, op, root, comm, stream));
         return testSuccess;
       case 2:
         TESTCHECK(testLaunchDeviceKernel(SPECIALIZE_KERNEL(NvlAlltoAllKernelOptimized, type, op), sendbuff, sendoffset, recvbuff, recvoffset, count, type, op, root, comm, stream));
         return testSuccess;
+#endif
+#if NCCL_VERSION_CODE >= NCCL_VERSION(2,28,7)
       case 3:
         TESTCHECK(testLaunchDeviceKernel(SPECIALIZE_KERNEL(GinAlltoAllKernel, type, op), sendbuff, sendoffset, recvbuff, recvoffset, count, type, op, root, comm, stream));
         return testSuccess;
       case 4:
         TESTCHECK(testLaunchDeviceKernel(SPECIALIZE_KERNEL(HybridAlltoAllKernel, type, op), sendbuff, sendoffset, recvbuff, recvoffset, count, type, op, root, comm, stream));
         return testSuccess;
+#endif
       default:
         return testNotImplemented;
     }
