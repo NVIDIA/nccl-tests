@@ -99,6 +99,7 @@ int cudaGraphLaunches = 0;
 static int report_cputime = 0;
 static int report_timestamps = 0;
 static int deviceImpl = 0;
+int memory_report = 0;
 
 int deviceCtaCount = 16; // Default number of CTAs for device implementation
 
@@ -710,24 +711,51 @@ testResult_t TimeTest(struct threadArgs* args, ncclDataType_t type, const char* 
   return testSuccess;
 }
 
+static void getGPUMemoryInfo(int64_t* ptotalGpuMem, int64_t* pfreeGpuMem) {
+  size_t freeGpuMem, totalGpuMem = 0;
+  cudaMemGetInfo(&freeGpuMem, &totalGpuMem);
+  if (ptotalGpuMem != nullptr) *ptotalGpuMem = totalGpuMem;
+  if (pfreeGpuMem != nullptr) *pfreeGpuMem = freeGpuMem;
+}
+
 testResult_t threadRunTests(struct threadArgs* args) {
+  //  capture the free memory before
+  int64_t* totalGpuFreeMem = (int64_t*)calloc(args->nGpus*2, sizeof(int64_t));
+  for (int g = 0; g < args->nGpus; ++g) {
+    CUDACHECK(cudaSetDevice(args->gpus[g]));
+    getGPUMemoryInfo(nullptr, &totalGpuFreeMem[g]);
+  }
+
   // Set device to the first of our GPUs. If we don't do that, some operations
   // will be done on the current GPU (by default : 0) and if the GPUs are in
   // exclusive mode those operations will fail.
   CUDACHECK(cudaSetDevice(args->gpus[0]));
   TESTCHECK(ncclTestEngine.runTest(args, ncclroot, (ncclDataType_t)nccltype, test_typenames[nccltype], (ncclRedOp_t)ncclop, test_opnames[ncclop]));
+
+  // Capture the memory used by the GPUs
+  for (int g = 0; g < args->nGpus; ++g) {
+    CUDACHECK(cudaSetDevice(args->gpus[g]));
+    getGPUMemoryInfo(nullptr, &totalGpuFreeMem[g + args->nGpus]);
+    *args->devMemUsed = std::max(*args->devMemUsed, totalGpuFreeMem[g] - totalGpuFreeMem[g + args->nGpus]);
+  }
+  free(totalGpuFreeMem);
   return testSuccess;
 }
 
 testResult_t threadInit(struct threadArgs* args) {
-  char hostname[1024];
-  getHostName(hostname, 1024);
   int nranks =  args->nProcs*args->nThreads*args->nGpus;
 
   //set main thread again
   is_main_thread = (is_main_proc && args->thread == 0) ? 1 : 0;
 
   jsonIdentifyWriter(is_main_thread);
+
+  // Capture GPU memory before initializing the NCCL communicators
+  int64_t* initFreeGpuMem = (int64_t*)calloc(args->nGpus*3, sizeof(int64_t));
+  for (int g = 0; g < args->nGpus; ++g) {
+    CUDACHECK(cudaSetDevice(args->gpus[g]));
+    getGPUMemoryInfo(nullptr, &initFreeGpuMem[g]);
+  }
 
 #if NCCL_VERSION_CODE >= NCCL_VERSION(2,14,0)
      ncclConfig_t config = NCCL_CONFIG_INITIALIZER;
@@ -751,6 +779,14 @@ testResult_t threadInit(struct threadArgs* args) {
 #endif
   }
   NCCLCHECK(ncclGroupEnd());
+
+  // Capture the memory used by the GPUs after initializing the NCCL communicators
+  for (int g = 0; g < args->nGpus; ++g) {
+    CUDACHECK(cudaSetDevice(args->gpus[g]));
+    getGPUMemoryInfo(nullptr, &initFreeGpuMem[g + args->nGpus]);
+    *args->initGpuMem = std::max(*args->initGpuMem, initFreeGpuMem[g] - initFreeGpuMem[g + args->nGpus]);
+  }
+
 #if NCCL_VERSION_CODE >= NCCL_VERSION(2,19,0)
   NCCLCHECK(ncclGroupStart());
   for (int i=0; i<args->nGpus; i++) {
@@ -767,6 +803,12 @@ testResult_t threadInit(struct threadArgs* args) {
   }
   NCCLCHECK(ncclGroupEnd());
 #endif
+  // Capture memory used by test buffers
+  for (int g = 0; g < args->nGpus; ++g) {
+    CUDACHECK(cudaSetDevice(args->gpus[g]));
+    getGPUMemoryInfo(nullptr, &initFreeGpuMem[g + args->nGpus*2]);
+    args->bufferMemory[args->thread] = std::max(args->bufferMemory[args->thread], initFreeGpuMem[g + args->nGpus] - initFreeGpuMem[g + args->nGpus*2]);
+  }
 #if NCCL_VERSION_CODE >= NCCL_VERSION(2,28,0)
   /* Create device communicators based on test-specific requirements */
   if (deviceImpl) {
@@ -783,7 +825,17 @@ testResult_t threadInit(struct threadArgs* args) {
     }
     NCCLCHECK(ncclGroupEnd());
   }
+  // Capture memory used by test buffers
+  int64_t deviceCommMaxMem = 0;
+  for (int g = 0; g < args->nGpus; ++g) {
+    CUDACHECK(cudaSetDevice(args->gpus[g]));
+    int64_t freeGpuMem;
+    getGPUMemoryInfo(nullptr, &freeGpuMem);
+    deviceCommMaxMem = std::max(deviceCommMaxMem, initFreeGpuMem[g + args->nGpus*2] - freeGpuMem);
+  }
+  *args->initGpuMem += deviceCommMaxMem;
 #endif
+  free(initFreeGpuMem);
 
   TESTCHECK(threadRunTests(args));
 
@@ -879,13 +931,15 @@ int main(int argc, char* argv[], char **envp) {
     {"cta_policy", required_argument, 0, 'x'},
     {"device_implementation", required_argument, 0, 'D'},
     {"device_cta_count", required_argument, 0, 'V'},
+    {"memory", required_argument, 0, 'M'},
+
     {"help", no_argument, 0, 'h'},
     {}
   };
 
   while(1) {
     int c;
-    c = getopt_long(argc, argv, "t:g:b:e:i:f:n:m:w:N:p:c:o:d:r:z:y:T:hG:C:a:R:x:D:V:J:S:", longopts, &longindex);
+    c = getopt_long(argc, argv, "t:g:b:e:i:f:n:m:w:N:p:c:o:d:r:z:y:T:hG:C:a:R:x:D:V:J:S:M:", longopts, &longindex);
 
     if (c == -1)
       break;
@@ -994,6 +1048,9 @@ int main(int argc, char* argv[], char **envp) {
         printf("Option -R (register) is not supported before NCCL 2.19. Ignoring\n");
 #endif
         break;
+      case 'M':
+        memory_report = (int)strtol(optarg, NULL, 0);
+        break;
       case 'x':
 #if NCCL_VERSION_CODE >= NCCL_VERSION(2,27,0)
         ctaPolicy = (int)strtol(optarg, NULL, 0);
@@ -1008,8 +1065,7 @@ int main(int argc, char* argv[], char **envp) {
       case 'D':
 	if (test_ncclVersion >= NCCL_VERSION(2,28,0)) {
           deviceImpl = (int)strtol(optarg, NULL, 0);
-	}
-	else {
+        } else {
           fprintf(stderr, "Option -D (device implementation) requires NCCL >= 2.28.0\n");
           return -1;
         }
@@ -1021,9 +1077,8 @@ int main(int argc, char* argv[], char **envp) {
             fprintf(stderr, "device_cta_count (-V) must be positive and less than 128, got %d. "
                     "Using default value 16.\n", deviceCtaCount);
             deviceCtaCount = 16;
-	  }
-        }
-	else {
+          }
+        } else {
           fprintf(stderr, "Option -V (device CTA count) requires NCCL >= 2.28.0\n");
           return -1;
 	}
@@ -1065,6 +1120,7 @@ int main(int argc, char* argv[], char **envp) {
             "[-x,--cta_policy <0/1/2> set CTA policy (NCCL_CTA_POLICY_DEFAULT (0), NCCL_CTA_POLICY_EFFICIENCY (1), NCCL_CTA_POLICY_ZERO (2)) (default: do not set)] \n\t"
             "[-D,--device_implementation <implementation number> enable device implementation (default: 0, use NCCL implementation; requires -R 2 if > 0)] \n\t"
             "[-V,--device_cta_count <number> set number of CTAs for device implementation (default: 16)] \n\t"
+            "[-M,--memory_report <0/1> enable memory usage report (default: 0)] \n\t"
             "[-h,--help]\n",
           basename(argv[0]));
         return 0;
@@ -1213,7 +1269,6 @@ testResult_t run() {
   for (int i=0; i<nGpus*nThreads; i++) {
     gpus[i] = (gpu0 != -1 ? gpu0 : localRank*nThreads*nGpus) + i;
     CUDACHECK(cudaSetDevice(gpus[i]));
-    TESTCHECK(AllocateBuffs(sendbuffs+i, sendBytes, recvbuffs+i, recvBytes, expected+i, (size_t)maxBytes));
     if (streamnull) {
       streams[i] = NULL;
     }
@@ -1256,7 +1311,16 @@ testResult_t run() {
 #if NCCL_VERSION_CODE >= NCCL_VERSION(2,28,0)
   ncclDevComm devComms[nThreads*nGpus];
 #endif
+  int64_t initGpuMem[nThreads] = {0};
+  int64_t bufferMemory[nThreads] = {0};
   if (!parallel_init) {
+    // Capture the memory used by the GPUs before initializing the NCCL communicators
+    int64_t* initFreeGpuMem = (int64_t*)calloc(nGpus*3, sizeof(int64_t));
+    for (int g = 0; g < nGpus; ++g) {
+      CUDACHECK(cudaSetDevice(gpus[g]));
+      getGPUMemoryInfo(nullptr, &initFreeGpuMem[g]);
+    }
+    //if parallel init is not selected, use main thread to initialize NCCL
 #if NCCL_VERSION_CODE >= NCCL_VERSION(2,14,0)
      ncclConfig_t config = NCCL_CONFIG_INITIALIZER;
 #if NCCL_VERSION_CODE >= NCCL_VERSION(2,27,0)
@@ -1277,9 +1341,22 @@ testResult_t run() {
 #endif
      }
      NCCLCHECK(ncclGroupEnd());
+
+     // Capture the memory used by the GPUs after initializing the NCCL communicators
+     for (int g = 0; g < nGpus; ++g) {
+       CUDACHECK(cudaSetDevice(gpus[g]));
+       getGPUMemoryInfo(nullptr, &initFreeGpuMem[g + nGpus]);
+     }
+     for ( size_t t = 0; t < nThreads; ++t) {
+       for (int g = 0; g < nGpus; ++g) {
+         initGpuMem[t] = std::max(initGpuMem[t], initFreeGpuMem[g] - initFreeGpuMem[g + nGpus]);
+       }
+     }
 #if NCCL_VERSION_CODE >= NCCL_VERSION(2,19,0)
      NCCLCHECK(ncclGroupStart());
      for (int i=0; i<nGpus*nThreads; i++) {
+       CUDACHECK(cudaSetDevice(gpus[i]));
+       TESTCHECK(AllocateBuffs(sendbuffs+i, sendBytes, recvbuffs+i, recvBytes, expected+i, (size_t)maxBytes));
 #if NCCL_VERSION_CODE >= NCCL_VERSION(2,27,0)
        if (test_ncclVersion >= NCCL_VERSION(2,27,0) && (local_register == SYMMETRIC_REGISTER)) {
          NCCLCHECK(ncclCommWindowRegister(comms[i], sendbuffs[i], maxBytes, (ncclWindow_t*)&sendRegHandles[i], NCCL_WIN_COLL_SYMMETRIC));
@@ -1293,6 +1370,16 @@ testResult_t run() {
      }
      NCCLCHECK(ncclGroupEnd());
 #endif
+     // Capture memory used by after allocating buffers
+     for (int g = 0; g < nGpus; ++g) {
+       CUDACHECK(cudaSetDevice(gpus[g]));
+       getGPUMemoryInfo(nullptr, &initFreeGpuMem[g + nGpus*2]);
+     }
+     for ( size_t t = 0; t < nThreads; ++t) {
+      for (int g = 0; g < nGpus; ++g) {
+        bufferMemory[t] = std::max(bufferMemory[t], initFreeGpuMem[g + nGpus] - initFreeGpuMem[g + nGpus*2]);
+      }
+     }
 #if NCCL_VERSION_CODE >= NCCL_VERSION(2,28,0)
      /* Create device communicators based on test-specific requirements */
      if (deviceImpl) {
@@ -1309,15 +1396,28 @@ testResult_t run() {
        }
        NCCLCHECK(ncclGroupEnd());
      }
+     int64_t deviceCommMaxMem = 0;
+     for (int g = 0; g < nGpus; ++g) {
+       CUDACHECK(cudaSetDevice(gpus[g]));
+       int64_t freeGpuMem;
+       getGPUMemoryInfo(nullptr, &freeGpuMem);
+       deviceCommMaxMem = std::max(deviceCommMaxMem, initFreeGpuMem[g + nGpus*2] - freeGpuMem);
+     }
+     for ( size_t t = 0; t < nThreads; ++t) {
+       initGpuMem[t] += deviceCommMaxMem;
+     }
 #endif
+    free(initFreeGpuMem);
   }
 
   int errors[nThreads];
   double bw[nThreads];
+  int64_t devMemUsed[nThreads];
   int bw_count[nThreads];
   for (int t=0; t<nThreads; t++) {
     bw[t] = 0.0;
     errors[t] = bw_count[t] = 0;
+    devMemUsed[t] = std::numeric_limits<int64_t>::min();
   }
 
   fflush(stdout);
@@ -1358,6 +1458,9 @@ testResult_t run() {
     threads[t].args.errors=errors+t;
     threads[t].args.bw=bw+t;
     threads[t].args.bw_count=bw_count+t;
+    threads[t].args.initGpuMem = initGpuMem + t;
+    threads[t].args.bufferMemory = bufferMemory + t;
+    threads[t].args.devMemUsed = devMemUsed + t;
 
     threads[t].args.reportErrors = datacheck;
 
@@ -1376,11 +1479,17 @@ testResult_t run() {
       errors[0] += errors[t];
       bw[0] += bw[t];
       bw_count[0] += bw_count[t];
+      devMemUsed[0] = std::max(devMemUsed[0], devMemUsed[t]);
+      initGpuMem[0] = std::max(initGpuMem[0], initGpuMem[t]);
+      bufferMemory[0] = std::max(bufferMemory[0], bufferMemory[t]);
     }
   }
 
 #ifdef MPI_SUPPORT
   MPI_Allreduce(MPI_IN_PLACE, &errors[0], 1, MPI_INT, MPI_SUM, MPI_COMM_WORLD);
+  MPI_Allreduce(MPI_IN_PLACE, &devMemUsed[0], 1, MPI_INT64_T, MPI_MAX, MPI_COMM_WORLD);
+  MPI_Allreduce(MPI_IN_PLACE, &initGpuMem[0], 1, MPI_INT64_T, MPI_MAX, MPI_COMM_WORLD);
+  MPI_Allreduce(MPI_IN_PLACE, &bufferMemory[0], 1, MPI_INT64_T, MPI_MAX, MPI_COMM_WORLD);
 #endif
 
   if (!parallel_init) {
@@ -1416,10 +1525,18 @@ testResult_t run() {
   }
 
   envstr = getenv("NCCL_TESTS_MIN_BW");
-  double check_avg_bw = envstr ? atof(envstr) : -1;
+  const double check_avg_bw = envstr ? atof(envstr) : -1;
   bw[0] /= bw_count[0];
 
   writeResultFooter(errors, bw, check_avg_bw, program_invocation_short_name);
+  if (memory_report) {
+    memInfo_t memInfos[3];
+    memInfos[0] = { initGpuMem[0], "Initialization" };
+    memInfos[1] = { bufferMemory[0], "User-Allocated" };
+    memInfos[2] = { devMemUsed[0], "Collective" };
+    writeMemInfo(memInfos, 3);
+  }
+  finalizeFooter();
 
 #ifdef MPI_SUPPORT
   MPI_Comm_free(&mpi_comm);
