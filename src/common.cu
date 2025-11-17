@@ -8,6 +8,7 @@
 #include <pthread.h>
 #include <cstdio>
 #include <type_traits>
+#include <limits>
 #include <getopt.h>
 #include <libgen.h>
 #include <string.h>
