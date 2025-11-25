@@ -72,7 +72,8 @@ typedef enum {
   testNcclError = 3,
   testTimeout = 4,
   testNotImplemented = 5,
-  testNumResults = 6
+  testInvalidUsage = 6,
+  testNumResults = 7, // Must be last
 } testResult_t;
 
 // Relay errors up and trace
