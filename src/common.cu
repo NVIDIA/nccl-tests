@@ -1507,6 +1507,11 @@ testResult_t run() {
         if (local_register) NCCLCHECK(ncclCommDeregister(comms[i], recvRegHandles[i]));
       }
 #endif
+#if NCCL_VERSION_CODE >= NCCL_VERSION(2,28,0)
+      if (deviceImpl) {
+        NCCLCHECK(ncclDevCommDestroy(comms[i], devComms+i));
+      }
+#endif
       NCCLCHECK(ncclCommDestroy(comms[i]));
     }
     free(comms);
