@@ -72,7 +72,8 @@ typedef enum {
   testNcclError = 3,
   testTimeout = 4,
   testNotImplemented = 5,
-  testNumResults = 6
+  testInvalidUsage = 6,
+  testNumResults = 7, // Must be last
 } testResult_t;
 
 // Relay errors up and trace
@@ -111,7 +112,10 @@ struct testEngine {
   void (*getBuffSize)(size_t *sendcount, size_t *recvcount, size_t count, int nranks);
   testResult_t (*runTest)(struct threadArgs* args, int root, ncclDataType_t type,
       const char* typeName, ncclRedOp_t op, const char* opName);
-#if NCCL_VERSION_CODE >= NCCL_VERSION(2,28,0)
+
+#if NCCL_VERSION_CODE >= NCCL_VERSION(2,29,0)
+  testResult_t (*getDevCommRequirements)(int deviceImpl, ncclDevCommRequirements* reqs, ncclCommProperties_t* commProperties);
+#elif NCCL_VERSION_CODE >= NCCL_VERSION(2,28,0)
   bool (*getDevCommRequirements)(int deviceImpl, ncclDevCommRequirements* reqs);
 #endif
 };

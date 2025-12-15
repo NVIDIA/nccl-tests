@@ -51,7 +51,30 @@ void AlltoAllGetBw(size_t count, int typesize, double sec, double* algBw, double
   *busBw = baseBw * factor;
 }
 
-#if NCCL_VERSION_CODE >= NCCL_VERSION(2,28,0)
+#if NCCL_VERSION_CODE >= NCCL_VERSION(2,29,0)
+// set devComm reqs for alltoall device kernels
+testResult_t AlltoAllGetDevCommRequirements(int deviceImpl, ncclDevCommRequirements* reqs, ncclCommProperties_t* commProperties) {
+  if (!reqs || !commProperties) return testInternalError;
+
+  switch(deviceImpl) {
+    case 1: // NvlAlltoAllKernel
+    case 2: // NvlAlltoAllKernelOptimized
+      reqs->lsaBarrierCount = deviceCtaCount;
+      return testSuccess;
+    case 3: // GinAlltoAllKernel
+    case 4: // HybridAlltoAllKernel (LSA+GIN)
+      if (commProperties->ginType == NCCL_GIN_TYPE_NONE) {
+        fprintf(stderr, "This test requires GIN support, but GIN support is not enabled for this communicator.\n");
+        return testInternalError;
+      }
+      reqs->barrierCount = deviceCtaCount;
+      reqs->ginSignalCount = deviceCtaCount;
+      return testSuccess;
+    default:
+      return testNotImplemented;
+  }
+}
+#elif NCCL_VERSION_CODE >= NCCL_VERSION(2,28,0)
 // set devComm reqs for alltoall device kernels
 bool AlltoAllGetDevCommRequirements(int deviceImpl, ncclDevCommRequirements* reqs) {
   if (!reqs) return false;
@@ -73,7 +96,9 @@ bool AlltoAllGetDevCommRequirements(int deviceImpl, ncclDevCommRequirements* req
       return false;
   }
 }
+#endif
 
+#if NCCL_VERSION_CODE >= NCCL_VERSION(2,28,0)
 // shared scalar AlltoAll implementation used by both kernels
 template <typename T>
 __device__ void AlltoAllScalarImpl(ncclWindow_t sendwin, size_t sendoffset, ncclWindow_t recvwin, size_t recvoffset, size_t count, int rank, int nRanks, int tid, int nthreads) {
