@@ -6,7 +6,12 @@
 #ifndef __COMMON_H__
 #define __COMMON_H__
 
+#define NCCL_TESTS_VERSION "2.17.6"
+
 #include "nccl.h"
+#if NCCL_VERSION_CODE >= NCCL_VERSION(2,28,0)
+#include "nccl_device.h"
+#endif
 #include <stdio.h>
 #include <cstdint>
 #include <algorithm>
@@ -66,7 +71,8 @@ typedef enum {
   testCudaError = 2,
   testNcclError = 3,
   testTimeout = 4,
-  testNumResults = 5
+  testNotImplemented = 5,
+  testNumResults = 6
 } testResult_t;
 
 // Relay errors up and trace
@@ -87,18 +93,21 @@ struct testColl {
   void (*getCollByteCount)(
       size_t *sendcount, size_t *recvcount, size_t *paramcount,
       size_t *sendInplaceOffset, size_t *recvInplaceOffset,
-      size_t count, int nranks);
+      size_t count, size_t eltSize, int nranks);
   testResult_t (*initData)(struct threadArgs* args, ncclDataType_t type,
       ncclRedOp_t op, int root, int rep, int in_place);
   void (*getBw)(size_t count, int typesize, double sec, double* algBw, double* busBw, int nranks);
-  testResult_t (*runColl)(void* sendbuff, void* recvbuff, size_t count, ncclDataType_t type,
-      ncclRedOp_t op, int root, ncclComm_t comm, cudaStream_t stream);
+  testResult_t (*runColl)(void* sendbuff, size_t sendoffset, void* recvbuff, size_t recvoffset,
+      size_t count, ncclDataType_t type, ncclRedOp_t op, int root, ncclComm_t comm, cudaStream_t stream, int implIndex);
 };
 
 struct testEngine {
   void (*getBuffSize)(size_t *sendcount, size_t *recvcount, size_t count, int nranks);
   testResult_t (*runTest)(struct threadArgs* args, int root, ncclDataType_t type,
       const char* typeName, ncclRedOp_t op, const char* opName);
+#if NCCL_VERSION_CODE >= NCCL_VERSION(2,28,0)
+  bool (*getDevCommRequirements)(int deviceImpl, ncclDevCommRequirements* reqs);
+#endif
 };
 
 extern struct testEngine ncclTestEngine;
@@ -125,6 +134,9 @@ struct threadArgs {
   size_t recvInplaceOffset;
   ncclUniqueId ncclId;
   ncclComm_t* comms;
+#if NCCL_VERSION_CODE >= NCCL_VERSION(2,28,0)
+  ncclDevComm* devComms;
+#endif
   cudaStream_t* streams;
 
   void** expected;
@@ -136,6 +148,11 @@ struct threadArgs {
   int reportErrors;
 
   struct testColl* collTest;
+
+#if NCCL_VERSION_CODE >= NCCL_VERSION(2,19,0)
+  void** sendRegHandles;
+  void** recvRegHandles;
+#endif
 };
 
 typedef testResult_t (*threadFunc_t)(struct threadArgs* args);
@@ -165,6 +182,9 @@ static void getHostName(char* hostname, int maxlen) {
     }
   }
   for (int i=0; i< maxlen; i++) {
+    if (hostname[i] == '\0') {
+      return;
+    }
     if (hostname[i] == '.') {
       hostname[i] = '\0';
       return;
@@ -214,6 +234,20 @@ static uint64_t getHostHash(const char* hostname) {
   return getHash(hostHash, strlen(hostHash));
 }
 
+#define HAVE_BF16 0
+#define HAVE_FP8 0
+
+#if NCCL_MAJOR >= 2
+  #if defined(__CUDA_BF16_TYPES_EXIST__) && NCCL_VERSION_CODE >= NCCL_VERSION(2,10,0)
+    #undef HAVE_BF16
+    #define HAVE_BF16 1
+    #if defined(__CUDA_FP8_TYPES_EXIST__) && NCCL_VERSION_CODE >= NCCL_VERSION(2,24,0)
+      #undef HAVE_FP8
+      #define HAVE_FP8 1
+    #endif
+  #endif
+#endif
+
 static size_t wordSize(ncclDataType_t type) {
   switch(type) {
     case ncclChar:
@@ -221,9 +255,13 @@ static size_t wordSize(ncclDataType_t type) {
     //case ncclInt8:
     case ncclUint8:
 #endif
+#if HAVE_FP8
+    case ncclFloat8e4m3:
+    case ncclFloat8e5m2:
+#endif
       return 1;
     case ncclHalf:
-#if defined(__CUDA_BF16_TYPES_EXIST__)
+#if HAVE_BF16
     case ncclBfloat16:
 #endif
     //case ncclFloat16:
@@ -246,6 +284,7 @@ static size_t wordSize(ncclDataType_t type) {
 }
 
 extern int test_ncclVersion; // init'd with ncclGetVersion()
+extern int deviceCtaCount; // number of CTAs for device implementation
 constexpr int test_opNumMax = (int)ncclNumOps + (NCCL_VERSION_CODE >= NCCL_VERSION(2,11,0) ? 1 : 0);
 extern int test_opnum;
 extern int test_typenum;
@@ -282,6 +321,38 @@ static int ncclstringtoop (char *str) {
 
 extern int is_main_proc;
 extern thread_local int is_main_thread;
-#define PRINT if (is_main_thread) printf
+
+#if NCCL_VERSION_CODE >= NCCL_VERSION(2,28,0)
+template <typename F>
+testResult_t testLaunchDeviceKernel(F kernel, void* sendbuff, size_t sendoffset, void* recvbuff, size_t recvoffset, size_t count, ncclDataType_t type, ncclRedOp_t op, int root, ncclComm_t comm, cudaStream_t stream) {
+  if (kernel == nullptr) return testNotImplemented;
+  ncclDevComm* devComm = (ncclDevComm*)comm;
+
+  ncclWindow_t sendwin = (ncclWindow_t)sendbuff;
+  ncclWindow_t recvwin = (ncclWindow_t)recvbuff;
+  kernel<<<deviceCtaCount, 512, 0, stream>>>(sendwin, sendoffset, recvwin, recvoffset, count, root, *devComm);
+  return testSuccess;
+}
+
+#define SPECIALIZE_KERNEL(kernel, type, op) \
+  ( op != ncclSum ? nullptr : \
+   type == ncclInt8 ? kernel<int8_t> : \
+   type == ncclUint8 ? kernel<uint8_t> : \
+   type == ncclInt32 ? kernel<int32_t> : \
+   type == ncclUint32 ? kernel<uint32_t> : \
+   type == ncclInt64 ? kernel<int64_t> : \
+   type == ncclUint64 ? kernel<uint64_t> : \
+   type == ncclFloat16 ? kernel<half> : \
+   type == ncclFloat32 ? kernel<float> : \
+   type == ncclFloat64 ? kernel<double> : \
+   nullptr \
+  )
+#else
+template <typename F>
+testResult_t testLaunchDeviceKernel(F kernel, void* sendbuff, size_t sendoffset, void* recvbuff, size_t recvoffset, size_t count, ncclDataType_t type, ncclRedOp_t op, int root, ncclComm_t comm, cudaStream_t stream) {
+  return testNotImplemented;
+}
+#define SPECIALIZE_KERNEL(kernel, type, op) nullptr
+#endif
 
 #endif

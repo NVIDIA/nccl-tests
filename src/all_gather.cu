@@ -7,10 +7,8 @@
 #include "cuda_runtime.h"
 #include "common.h"
 
-#define ALIGN 4
-
-void AllGatherGetCollByteCount(size_t *sendcount, size_t *recvcount, size_t *paramcount, size_t *sendInplaceOffset, size_t *recvInplaceOffset, size_t count, int nranks) {
-  size_t base = (count/(ALIGN*nranks))*ALIGN;
+void AllGatherGetCollByteCount(size_t *sendcount, size_t *recvcount, size_t *paramcount, size_t *sendInplaceOffset, size_t *recvInplaceOffset, size_t count, size_t eltSize, int nranks) {
+  size_t base = (count/nranks) & -(16/eltSize);
   *sendcount = base;
   *recvcount = base*nranks;
   *sendInplaceOffset = base;
@@ -45,8 +43,14 @@ void AllGatherGetBw(size_t count, int typesize, double sec, double* algBw, doubl
   *busBw = baseBw * factor;
 }
 
-testResult_t AllGatherRunColl(void* sendbuff, void* recvbuff, size_t count, ncclDataType_t type, ncclRedOp_t op, int root, ncclComm_t comm, cudaStream_t stream) {
-  NCCLCHECK(ncclAllGather(sendbuff, recvbuff, count, type, comm, stream));
+testResult_t AllGatherRunColl(void* sendbuff,  size_t sendoffset,void* recvbuff, size_t recvoffset, size_t count, ncclDataType_t type, ncclRedOp_t op, int root, ncclComm_t comm, cudaStream_t stream, int deviceImpl) {
+  if (deviceImpl == 0) {
+    char* sptr = (char*)sendbuff + sendoffset;
+    char* rptr = (char*)recvbuff + recvoffset;
+    NCCLCHECK(ncclAllGather(sptr, rptr, count, type, comm, stream));
+  } else {
+    return testNotImplemented;
+  }
   return testSuccess;
 }
 
@@ -60,7 +64,7 @@ struct testColl allGatherTest = {
 
 void AllGatherGetBuffSize(size_t *sendcount, size_t *recvcount, size_t count, int nranks) {
   size_t paramcount, sendInplaceOffset, recvInplaceOffset;
-  AllGatherGetCollByteCount(sendcount, recvcount, &paramcount, &sendInplaceOffset, &recvInplaceOffset, count, nranks);
+  AllGatherGetCollByteCount(sendcount, recvcount, &paramcount, &sendInplaceOffset, &recvInplaceOffset, count, /*eltSize=*/1, nranks);
 }
 
 testResult_t AllGatherRunTest(struct threadArgs* args, int root, ncclDataType_t type, const char* typeName, ncclRedOp_t op, const char* opName) {
@@ -86,8 +90,8 @@ testResult_t AllGatherRunTest(struct threadArgs* args, int root, ncclDataType_t 
 }
 
 struct testEngine allGatherEngine = {
-  AllGatherGetBuffSize,
-  AllGatherRunTest
+  .getBuffSize = AllGatherGetBuffSize,
+  .runTest = AllGatherRunTest
 };
 
 #pragma weak ncclTestEngine=allGatherEngine

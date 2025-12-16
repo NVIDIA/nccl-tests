@@ -7,10 +7,8 @@
 #include "cuda_runtime.h"
 #include "common.h"
 
-#define ALIGN 4
-
-void ReduceScatterGetCollByteCount(size_t *sendcount, size_t *recvcount, size_t *paramcount, size_t *sendInplaceOffset, size_t *recvInplaceOffset, size_t count, int nranks) {
-  size_t base = (count/(ALIGN*nranks))*ALIGN;
+void ReduceScatterGetCollByteCount(size_t *sendcount, size_t *recvcount, size_t *paramcount, size_t *sendInplaceOffset, size_t *recvInplaceOffset, size_t count, size_t eltSize, int nranks) {
+  size_t base = (count/nranks) & -(16/eltSize);
   *sendcount = base*nranks;
   *recvcount = base;
   *sendInplaceOffset = 0;
@@ -44,8 +42,14 @@ void ReduceScatterGetBw(size_t count, int typesize, double sec, double* algBw, d
   *busBw = baseBw * factor;
 }
 
-testResult_t ReduceScatterRunColl(void* sendbuff, void* recvbuff, size_t count, ncclDataType_t type, ncclRedOp_t op, int root, ncclComm_t comm, cudaStream_t stream) {
-  NCCLCHECK(ncclReduceScatter(sendbuff, recvbuff, count, type, op, comm, stream));
+testResult_t ReduceScatterRunColl(void* sendbuff, size_t sendoffset, void* recvbuff, size_t recvoffset, size_t count, ncclDataType_t type, ncclRedOp_t op, int root, ncclComm_t comm, cudaStream_t stream, int deviceImpl) {
+  if (deviceImpl == 0) {
+    char* sptr = (char*)sendbuff + sendoffset;
+    char* rptr = (char*)recvbuff + recvoffset;
+    NCCLCHECK(ncclReduceScatter(sptr, rptr, count, type, op, comm, stream));
+  } else {
+    return testNotImplemented;
+  }
   return testSuccess;
 }
 
@@ -59,7 +63,7 @@ struct testColl reduceScatterTest = {
 
 void ReduceScatterGetBuffSize(size_t *sendcount, size_t *recvcount, size_t count, int nranks) {
   size_t paramcount, sendInplaceOffset, recvInplaceOffset;
-  ReduceScatterGetCollByteCount(sendcount, recvcount, &paramcount, &sendInplaceOffset, &recvInplaceOffset, count, nranks);
+  ReduceScatterGetCollByteCount(sendcount, recvcount, &paramcount, &sendInplaceOffset, &recvInplaceOffset, count, /*eltSize=*/1, nranks);
 }
 
 testResult_t ReduceScatterRunTest(struct threadArgs* args, int root, ncclDataType_t type, const char* typeName, ncclRedOp_t op, const char* opName) {
@@ -98,8 +102,8 @@ testResult_t ReduceScatterRunTest(struct threadArgs* args, int root, ncclDataTyp
 }
 
 struct testEngine reduceScatterEngine = {
-  ReduceScatterGetBuffSize,
-  ReduceScatterRunTest
+  .getBuffSize = ReduceScatterGetBuffSize,
+  .runTest = ReduceScatterRunTest
 };
 
 #pragma weak ncclTestEngine=reduceScatterEngine

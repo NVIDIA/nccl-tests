@@ -1,66 +1,16 @@
 #
-# Copyright (c) 2015-2022, NVIDIA CORPORATION. All rights reserved.
+# Copyright (c) 2015-2025, NVIDIA CORPORATION. All rights reserved.
 #
 # See LICENSE.txt for license information
 #
+include common.mk
 
-CUDA_HOME ?= /usr/local/cuda
-PREFIX ?= /usr/local
-VERBOSE ?= 0
-DEBUG ?= 0
-
-CUDA_LIB ?= $(CUDA_HOME)/lib64
-CUDA_INC ?= $(CUDA_HOME)/include
-NVCC ?= $(CUDA_HOME)/bin/nvcc
-CUDARTLIB ?= cudart
-
-CUDA_VERSION = $(strip $(shell which $(NVCC) >/dev/null && $(NVCC) --version | grep release | sed 's/.*release //' | sed 's/\,.*//'))
-CUDA_MAJOR = $(shell echo $(CUDA_VERSION) | cut -d "." -f 1)
-
-# Better define NVCC_GENCODE in your environment to the minimal set
-# of archs to reduce compile time.
-ifeq ($(shell test "0$(CUDA_MAJOR)" -ge 12; echo $$?),0)
-NVCC_GENCODE ?= -gencode=arch=compute_70,code=sm_70 \
-                -gencode=arch=compute_80,code=sm_80 \
-                -gencode=arch=compute_86,code=sm_86 \
-                -gencode=arch=compute_89,code=sm_89 \
-                -gencode=arch=compute_90,code=sm_90 \
-                -gencode=arch=compute_90,code=compute_90
-else ifeq ($(shell test "0$(CUDA_MAJOR)" -ge 11; echo $$?),0)
-NVCC_GENCODE ?= -gencode=arch=compute_60,code=sm_60 \
-                -gencode=arch=compute_61,code=sm_61 \
-                -gencode=arch=compute_70,code=sm_70 \
-                -gencode=arch=compute_80,code=sm_80 \
-                -gencode=arch=compute_80,code=compute_80
-else
-NVCC_GENCODE ?= -gencode=arch=compute_35,code=sm_35 \
-                -gencode=arch=compute_50,code=sm_50 \
-                -gencode=arch=compute_60,code=sm_60 \
-                -gencode=arch=compute_61,code=sm_61 \
-                -gencode=arch=compute_70,code=sm_70 \
-                -gencode=arch=compute_70,code=compute_70
-endif
-$(info NVCC_GENCODE is ${NVCC_GENCODE})
-
-NVCUFLAGS  := -ccbin $(CXX) $(NVCC_GENCODE) -std=c++11
-CXXFLAGS   := -std=c++11
-
-LDFLAGS    := -L${CUDA_LIB} -lcudart -lrt
-NVLDFLAGS  := -L${CUDA_LIB} -l${CUDARTLIB} -lrt
-
-ifeq ($(DEBUG), 0)
-NVCUFLAGS += -O3 -g
-CXXFLAGS  += -O3 -g
-else
-NVCUFLAGS += -O0 -G -g
-CXXFLAGS  += -O0 -g -ggdb3
-endif
-
-ifneq ($(VERBOSE), 0)
-NVCUFLAGS += -Xcompiler -Wall,-Wextra,-Wno-unused-parameter
-else
-.SILENT:
-endif
+# Set to 1 to enable MPI support (multi-process/multi-node)
+MPI ?= 0
+# e.g. Set to _mpi when using MPI=1
+NAME_SUFFIX ?=
+# Set to 1 to create and use libverifiable.so to reduce binary size
+DSO ?= 0
 
 .PHONY: build clean
 
@@ -85,7 +35,7 @@ DST_DIR := $(BUILDDIR)
 SRC_FILES := $(wildcard *.cu)
 OBJ_FILES := $(SRC_FILES:%.cu=${DST_DIR}/%.o)
 BIN_FILES_LIST := all_reduce all_gather broadcast reduce_scatter reduce alltoall scatter gather sendrecv hypercube
-BIN_FILES := $(BIN_FILES_LIST:%=${DST_DIR}/%_perf)
+BIN_FILES := $(BIN_FILES_LIST:%=${DST_DIR}/%_perf${NAME_SUFFIX})
 
 build: ${BIN_FILES}
 
@@ -96,7 +46,14 @@ TEST_VERIFIABLE_SRCDIR := ../verifiable
 TEST_VERIFIABLE_BUILDDIR := $(BUILDDIR)/verifiable
 include ../verifiable/verifiable.mk
 
-${DST_DIR}/%.o: %.cu common.h $(TEST_VERIFIABLE_HDRS)
+.PRECIOUS: ${DST_DIR}/%.o
+
+${DST_DIR}/%.o: %.cu common.h util.h $(TEST_VERIFIABLE_HDRS)
+	@printf "Compiling  %-35s > %s\n" $< $@
+	@mkdir -p ${DST_DIR}
+	$(NVCC) -o $@ $(NVCUFLAGS) -c $<
+
+${DST_DIR}/%$(NAME_SUFFIX).o: %.cu common.h util.h $(TEST_VERIFIABLE_HDRS)
 	@printf "Compiling  %-35s > %s\n" $< $@
 	@mkdir -p ${DST_DIR}
 	$(NVCC) -o $@ $(NVCUFLAGS) -c $<
@@ -104,15 +61,25 @@ ${DST_DIR}/%.o: %.cu common.h $(TEST_VERIFIABLE_HDRS)
 ${DST_DIR}/timer.o: timer.cc timer.h
 	@printf "Compiling  %-35s > %s\n" $< $@
 	@mkdir -p ${DST_DIR}
-	$(CXX) $(CXXFLAGS) -o $@ -c timer.cc
+	$(CXX) $(CXXFLAGS) -o $@ -c $<
 
 ${DST_DIR}/ucommd.o: ucommd.cc ucommd.h
 	@printf "Compiling  %-35s > %s\n" $< $@
 	@mkdir -p ${DST_DIR}
 	$(CXX) $(CXXFLAGS) -o $@ -c ucommd.cc
 
-${DST_DIR}/%_perf:${DST_DIR}/%.o ${DST_DIR}/common.o ${DST_DIR}/timer.o ${DST_DIR}/ucommd.o $(TEST_VERIFIABLE_OBJS)
+ifeq ($(DSO), 1)
+${DST_DIR}/%_perf$(NAME_SUFFIX): ${DST_DIR}/%.o ${DST_DIR}/common$(NAME_SUFFIX).o ${DST_DIR}/util$(NAME_SUFFIX).o ${DST_DIR}/timer.o ${DST_DIR}/ucommd.o $(TEST_VERIFIABLE_LIBS)
 	@printf "Linking  %-35s > %s\n" $< $@
 	@mkdir -p ${DST_DIR}
-	$(NVCC) -o $@ $(NVCUFLAGS) $^ ${NVLDFLAGS} -Xcompiler \"-Wl,-rpath,/usr/local/sihpc/lib\"
+	$(NVCC) -o $@ $(NVCUFLAGS) $^ -L$(TEST_VERIFIABLE_BUILDDIR) -lverifiable ${NVLDFLAGS} -Xlinker "--enable-new-dtags" -Xlinker "-rpath,\$$ORIGIN:\$$ORIGIN/verifiable"
+else
+${DST_DIR}/%_perf$(NAME_SUFFIX):${DST_DIR}/%.o ${DST_DIR}/common$(NAME_SUFFIX).o ${DST_DIR}/util$(NAME_SUFFIX).o ${DST_DIR}/timer.o $(TEST_VERIFIABLE_OBJS)
+	@printf "Linking  %-35s > %s\n" $< $@
+	@mkdir -p ${DST_DIR}
+	$(NVCC) -o $@ $(NVCUFLAGS) $^ ${NVLDFLAGS}
+endif
+
+clean_intermediates:
+	rm -f ${DST_DIR}/*.o $(TEST_VERIFIABLE_OBJS)
 

@@ -7,12 +7,12 @@
 #include "cuda_runtime.h"
 #include "common.h"
 
-void ScatterGetCollByteCount(size_t *sendcount, size_t *recvcount, size_t *paramcount, size_t *sendInplaceOffset, size_t *recvInplaceOffset, size_t count, int nranks) {
-  *sendcount = (count/nranks)*nranks;
-  *recvcount = count/nranks;
+void ScatterGetCollByteCount(size_t *sendcount, size_t *recvcount, size_t *paramcount, size_t *sendInplaceOffset, size_t *recvInplaceOffset, size_t count, size_t eltSize, int nranks) {
+  *recvcount = (count/nranks) & -(16/eltSize);
+  *sendcount = (*recvcount)*nranks;
   *sendInplaceOffset = 0;
-  *recvInplaceOffset = count/nranks;
-  *paramcount = count/nranks;
+  *recvInplaceOffset = *recvcount;
+  *paramcount = *recvcount;
 }
 
 testResult_t ScatterInitData(struct threadArgs* args, ncclDataType_t type, ncclRedOp_t op, int root, int rep, int in_place) {
@@ -39,23 +39,35 @@ void ScatterGetBw(size_t count, int typesize, double sec, double* algBw, double*
   *busBw = baseBw * factor;
 }
 
-testResult_t ScatterRunColl(void* sendbuff, void* recvbuff, size_t count, ncclDataType_t type, ncclRedOp_t op, int root, ncclComm_t comm, cudaStream_t stream) {
-  int nRanks;
-  NCCLCHECK(ncclCommCount(comm, &nRanks));
-  int rank;
-  NCCLCHECK(ncclCommUserRank(comm, &rank));
-  size_t rankOffset = count * wordSize(type);
-  if (count == 0) return testSuccess;
+testResult_t ScatterRunColl(void* sendbuff, size_t sendoffset, void* recvbuff, size_t recvoffset, size_t count, ncclDataType_t type, ncclRedOp_t op, int root, ncclComm_t comm, cudaStream_t stream, int deviceImpl) {
+  if (deviceImpl == 0) {
+    int nRanks;
+    NCCLCHECK(ncclCommCount(comm, &nRanks));
+    int rank;
+    NCCLCHECK(ncclCommUserRank(comm, &rank));
+    size_t rankOffset = count * wordSize(type);
+    if (count == 0) return testSuccess;
 
-  NCCLCHECK(ncclGroupStart());
-  if (rank == root) {
-    for (int r=0; r<nRanks; r++) {
-      NCCLCHECK(ncclSend(((char*)sendbuff)+r*rankOffset, count, type, r, comm, stream));
+    char* sptr = (char*)sendbuff + sendoffset;
+    char* rptr = (char*)recvbuff + recvoffset;
+#if NCCL_VERSION_CODE >= NCCL_VERSION(2,28,0)
+    NCCLCHECK(ncclScatter(sptr, rptr, count, type, root, comm, stream));
+#elif NCCL_VERSION_CODE >= NCCL_VERSION(2,7,0)
+    NCCLCHECK(ncclGroupStart());
+    if (rank == root) {
+      for (int r=0; r<nRanks; r++) {
+        NCCLCHECK(ncclSend(sptr + r * rankOffset, count, type, r, comm, stream));
+      }
     }
+    NCCLCHECK(ncclRecv(rptr, count, type, root, comm, stream));
+    NCCLCHECK(ncclGroupEnd());
+#else
+    printf("NCCL 2.7 or later is needed for scatter. This test was compiled with %d.%d.\n", NCCL_MAJOR, NCCL_MINOR);
+    return testNcclError;
+#endif
+  } else {
+    return testNotImplemented;
   }
-  NCCLCHECK(ncclRecv(recvbuff, count, type, root, comm, stream));
-  NCCLCHECK(ncclGroupEnd());
-
   return testSuccess;
 }
 
@@ -69,7 +81,7 @@ struct testColl scatterTest = {
 
 void ScatterGetBuffSize(size_t *sendcount, size_t *recvcount, size_t count, int nranks) {
   size_t paramcount, sendInplaceOffset, recvInplaceOffset;
-  ScatterGetCollByteCount(sendcount, recvcount, &paramcount, &sendInplaceOffset, &recvInplaceOffset, count, nranks);
+  ScatterGetCollByteCount(sendcount, recvcount, &paramcount, &sendInplaceOffset, &recvInplaceOffset, count, /*eltSize=*/1, nranks);
 }
 
 testResult_t ScatterRunTest(struct threadArgs* args, int root, ncclDataType_t type, const char* typeName, ncclRedOp_t op, const char* opName) {
@@ -105,8 +117,8 @@ testResult_t ScatterRunTest(struct threadArgs* args, int root, ncclDataType_t ty
 }
 
 struct testEngine scatterEngine = {
-  ScatterGetBuffSize,
-  ScatterRunTest
+  .getBuffSize = ScatterGetBuffSize,
+  .runTest = ScatterRunTest
 };
 
 #pragma weak ncclTestEngine=scatterEngine

@@ -7,7 +7,7 @@
 #include "cuda_runtime.h"
 #include "common.h"
 
-void SendRecvGetCollByteCount(size_t *sendcount, size_t *recvcount, size_t *paramcount, size_t *sendInplaceOffset, size_t *recvInplaceOffset, size_t count, int nranks) {
+void SendRecvGetCollByteCount(size_t *sendcount, size_t *recvcount, size_t *paramcount, size_t *sendInplaceOffset, size_t *recvInplaceOffset, size_t count, size_t eltSize, int nranks) {
   *sendcount = count;
   *recvcount = count;
   *sendInplaceOffset = 0;
@@ -43,18 +43,24 @@ void SendRecvGetBw(size_t count, int typesize, double sec, double* algBw, double
   *busBw = baseBw * factor;
 }
 
-testResult_t SendRecvRunColl(void* sendbuff, void* recvbuff, size_t count, ncclDataType_t type, ncclRedOp_t op, int root, ncclComm_t comm, cudaStream_t stream) {
-  int nRanks;
-  NCCLCHECK(ncclCommCount(comm, &nRanks));
-  int rank;
-  NCCLCHECK(ncclCommUserRank(comm, &rank));
-  int recvPeer = (rank-1+nRanks) % nRanks;
-  int sendPeer = (rank+1) % nRanks;
+testResult_t SendRecvRunColl(void* sendbuff, size_t sendoffset, void* recvbuff, size_t recvoffset, size_t count, ncclDataType_t type, ncclRedOp_t op, int root, ncclComm_t comm, cudaStream_t stream, int deviceImpl) {
+  if (deviceImpl == 0) {
+    int nRanks;
+    NCCLCHECK(ncclCommCount(comm, &nRanks));
+    int rank;
+    NCCLCHECK(ncclCommUserRank(comm, &rank));
+    int recvPeer = (rank-1+nRanks) % nRanks;
+    int sendPeer = (rank+1) % nRanks;
 
-  NCCLCHECK(ncclGroupStart());
-  NCCLCHECK(ncclSend(sendbuff, count, type, sendPeer, comm, stream));
-  NCCLCHECK(ncclRecv(recvbuff, count, type, recvPeer, comm, stream));
-  NCCLCHECK(ncclGroupEnd());
+    char* sptr = (char*)sendbuff + sendoffset;
+    char* rptr = (char*)recvbuff + recvoffset;
+    NCCLCHECK(ncclGroupStart());
+    NCCLCHECK(ncclSend(sptr, count, type, sendPeer, comm, stream));
+    NCCLCHECK(ncclRecv(rptr, count, type, recvPeer, comm, stream));
+    NCCLCHECK(ncclGroupEnd());
+  } else {
+    return testNotImplemented;
+  }
   return testSuccess;
 }
 
@@ -68,7 +74,7 @@ struct testColl sendRecvTest = {
 
 void SendRecvGetBuffSize(size_t *sendcount, size_t *recvcount, size_t count, int nranks) {
   size_t paramcount, sendInplaceOffset, recvInplaceOffset;
-  SendRecvGetCollByteCount(sendcount, recvcount, &paramcount, &sendInplaceOffset, &recvInplaceOffset, count, nranks);
+  SendRecvGetCollByteCount(sendcount, recvcount, &paramcount, &sendInplaceOffset, &recvInplaceOffset, count, /*eltSize=*/1, nranks);
 }
 
 testResult_t SendRecvRunTest(struct threadArgs* args, int root, ncclDataType_t type, const char* typeName, ncclRedOp_t op, const char* opName) {
@@ -107,8 +113,8 @@ testResult_t SendRecvRunTest(struct threadArgs* args, int root, ncclDataType_t t
 }
 
 struct testEngine sendRecvEngine = {
-  SendRecvGetBuffSize,
-  SendRecvRunTest
+  .getBuffSize = SendRecvGetBuffSize,
+  .runTest = SendRecvRunTest
 };
 
 #pragma weak ncclTestEngine=sendRecvEngine
