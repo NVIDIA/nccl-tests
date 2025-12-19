@@ -18,7 +18,6 @@ echo "=============================="
 echo "deleting $SIHPC_ROOT ..."
 rm -rf "$SIHPC_ROOT"
 
-# 尝试清理 PATH 中的 sihpc/bin（如果用户在 .bashrc 中手动添加过，可以提示用户）
 echo "please check shell config（~/.bashrc, ~/.zshrc etc.），"
 echo "remove $SIHPC_ROOT/bin from  PATH"
 
