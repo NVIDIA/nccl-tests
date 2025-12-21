@@ -21,7 +21,7 @@ jobs:
           docker buildx build \
             -f docker/Dockerfile.cuda13.x.ubuntu22.04 \
             --platform linux/amd64 \
-            --target package \
+            --target build \
             --output type=local,dest=dist \
             .
       - name: List artifacts

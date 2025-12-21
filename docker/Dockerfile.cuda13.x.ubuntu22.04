@@ -24,7 +24,7 @@ ARG BUILD_DATE=20251221
 ###########################
 # Build Stage
 ###########################
-FROM nvidia/cuda:${CUDA_VERSION}-devel-ubuntu${UBUNTU_VERSION}
+FROM nvidia/cuda:${CUDA_VERSION}-devel-ubuntu${UBUNTU_VERSION} AS build
 
 # Re-declare build args for this stage (values are inherited)
 ARG UBUNTU_VERSION
