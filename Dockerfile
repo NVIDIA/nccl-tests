@@ -1,0 +1,153 @@
+###########################
+# Build-time configuration
+###########################
+
+# Base OS and CUDA versions
+ARG UBUNTU_VERSION=22.04
+ARG CUDA_VERSION=13.1.0
+ARG CUDART_VERSION=13.1.80
+ARG CUDART_MAJOR_VERSION=13
+
+# NCCL versions
+ARG NCCL_PACKAGE_VERSION=2.28.9-1+cuda13.0
+ARG NCCL_SO_VERSION=2.28.9
+
+# OpenMPI versions
+# - MPI_VERSION: full OpenMPI version
+# - MPI_SERIES: major.minor series used in download URL
+ARG MPI_VERSION=4.1.8
+ARG MPI_SERIES=4.1
+
+# Build date (override at build time)
+ARG BUILD_DATE=20251221
+
+###########################
+# Build Stage
+###########################
+FROM nvidia/cuda:${CUDA_VERSION}-devel-ubuntu${UBUNTU_VERSION} AS build
+
+# Re-declare build args for this stage (values are inherited)
+ARG UBUNTU_VERSION
+ARG CUDA_VERSION
+ARG CUDART_VERSION
+ARG NCCL_PACKAGE_VERSION
+ARG NCCL_SO_VERSION
+ARG MPI_VERSION
+ARG MPI_SERIES
+ARG BUILD_DATE
+
+ENV DEBIAN_FRONTEND=noninteractive
+WORKDIR /workspace
+
+# -------------------------
+# 1. Base build dependencies
+# -------------------------
+RUN apt-get -o Acquire::http::No-Cache=true update && \
+    apt-get install -y --no-install-recommends \
+        build-essential gcc g++ curl git wget ca-certificates \
+        make automake autoconf libtool pkg-config \
+        python3 python3-pip gzip xz-utils && \
+    rm -rf /var/lib/apt/lists/*
+
+# -------------------------
+# 2. Install CUDA keyring and restore NVIDIA repository
+# -------------------------
+RUN wget https://developer.download.nvidia.com/compute/cuda/repos/ubuntu2204/x86_64/cuda-keyring_1.1-1_all.deb && \
+    dpkg -i cuda-keyring_1.1-1_all.deb && \
+    apt-get update
+
+# -------------------------
+# 3. Install NCCL (pinned version)
+# -------------------------
+RUN apt-get install -y --no-install-recommends \
+    libnccl2=${NCCL_PACKAGE_VERSION} \
+    libnccl-dev=${NCCL_PACKAGE_VERSION} && \
+    ldconfig && \
+    rm -rf /var/lib/apt/lists/*
+
+# -------------------------
+# 4. Build OpenMPI from source
+# -------------------------
+RUN wget https://download.open-mpi.org/release/open-mpi/v${MPI_SERIES}/openmpi-${MPI_VERSION}.tar.gz && \
+    tar zxvf openmpi-${MPI_VERSION}.tar.gz && \
+    cd openmpi-${MPI_VERSION} && \
+    ./configure --prefix=/usr/local/sihpc --with-cuda=/usr/local/cuda && \
+    make -j$(nproc) && make install
+
+# -------------------------
+# 5. Build nccl-tests
+# -------------------------
+RUN cd /tmp && \
+    git clone https://github.com/scitix/nccl-tests.git -b sync/upstream-20251216 && \
+    cd nccl-tests && \
+    make MPI=1 MPI_HOME=/usr/local/sihpc && \
+    mkdir -p /usr/local/sihpc/libexec/nccl-tests && \
+    cp -rf build/*_perf /usr/local/sihpc/libexec/nccl-tests/ && \
+    mkdir -p /usr/local/sihpc/bin && \
+    cp scripts/nccl_perf /usr/local/sihpc/bin/nccl_perf && \
+    cp scripts/nccl_test /usr/local/sihpc/libexec/nccl-tests/nccl_test && \
+    cp scripts/env.sh /usr/local/sihpc/env.sh && \
+    cp scripts/install_sihpc /usr/local/sihpc/bin/install_sihpc && \
+    cp scripts/uninstall_sihpc /usr/local/sihpc/bin/uninstall_sihpc
+
+# -------------------------
+# 6. Collect runtime libraries (strict selection)
+# -------------------------
+RUN set -eux && \
+    mkdir -p /usr/local/sihpc/lib && \
+    cp /usr/local/cuda/lib64/libcudart* /usr/local/sihpc/lib/ && \
+    cp /usr/lib/x86_64-linux-gnu/libnccl.so* /usr/local/sihpc/lib/
+#    cp /lib/x86_64-linux-gnu/libltdl.so.7.3.1 /usr/local/sihpc/lib/; \
+#    cp /usr/lib/x86_64-linux-gnu/libhwloc.so* /usr/local/sihpc/lib/; \
+#    cp /usr/lib/x86_64-linux-gnu/libevent_core* /usr/local/sihpc/lib/; \
+#    cp /usr/lib/x86_64-linux-gnu/libevent_pthreads* /usr/local/sihpc/lib/; \
+
+# -------------------------
+# 7. Fix library symlinks
+# -------------------------
+RUN cd /usr/local/sihpc/lib && \
+    rm -f libcudart.so libcudart.so.${CUDART_MAJOR_VERSION} && \
+    ln -sf libnccl.so.${NCCL_SO_VERSION} libnccl.so.2 && \
+    ln -sf libnccl.so.2 libnccl.so && \
+    ln -sf libcudart.so.${CUDART_VERSION} libcudart.so.${CUDART_MAJOR_VERSION} && \
+    ln -sf libcudart.so.${CUDART_MAJOR_VERSION} libcudart.so
+#    rm -f libevent_core-2.1.so.7 && \
+#    ln -sf libhwloc.so.15.1.0 libhwloc.so.15 && \
+#    ln -sf libhwloc.so.15.1.0 libhwloc.so && \
+#    ln -sf libevent_core-2.1.so.7.0.0 libevent_core-2.1.so.7 && \
+#    ln -sf libevent_core-2.1.so.7 libevent_core-2.1.so && \
+#    ln -sf libevent_pthreads-2.1.so.7.0.0 libevent_pthreads-2.1.so.7 && \
+#    ln -sf libevent_pthreads-2.1.so.7 libevent_pthreads-2.1.so && \
+#    ln -sf libltdl.so.7.3.1 libltdl.so.7 && \
+#    ln -sf libltdl.so.7 libltdl.so
+
+###########################
+# Package Stage
+###########################
+FROM ubuntu:${UBUNTU_VERSION} AS package
+
+# Re-declare args for this stage (values are inherited)
+ARG UBUNTU_VERSION
+ARG NCCL_PACKAGE_VERSION
+ARG MPI_VERSION
+ARG BUILD_DATE
+
+# Expose versions/date as environment variables for runtime shell expansion
+ENV NCCL_PACKAGE_VERSION=${NCCL_PACKAGE_VERSION} \
+    MPI_VERSION=${MPI_VERSION} \
+    BUILD_DATE=${BUILD_DATE}
+
+WORKDIR /build
+COPY --from=build /usr/local/sihpc /usr/local/sihpc
+
+WORKDIR /build
+RUN apt-get update && apt-get install -y --no-install-recommends makeself && \
+    chmod +x /usr/local/sihpc/bin/install_sihpc && \
+    SAFE_NCCL_PKG="${NCCL_PACKAGE_VERSION//+/-}" && \
+    PACKAGE_FILENAME="sicl-nccl${SAFE_NCCL_PKG}-ompi${MPI_VERSION}-ubuntu${UBUNTU_VERSION}-${BUILD_DATE}.run" && \
+    makeself --gzip /usr/local/sihpc \
+    "${PACKAGE_FILENAME}" \
+    "SiHPC MPI + NCCL + NCCL-tests Portable Installer" \
+    ./bin/install_sihpc
+
+CMD ["bash", "-c", "SAFE_NCCL_PKG=${NCCL_PACKAGE_VERSION//+/-}; FILE=\"sicl-nccl${SAFE_NCCL_PKG}-ompi${MPI_VERSION}-ubuntu${UBUNTU_VERSION}-${BUILD_DATE}.run\"; ls -lh \"/build/$FILE\" && echo 'Build complete.'"]
