@@ -47,7 +47,7 @@ RUN mv /etc/apt/sources.list.d/cuda*.list /tmp/disabled-cuda.list || true && \
     apt-get install -y --no-install-recommends \
         build-essential gcc g++ curl git wget ca-certificates \
         make automake autoconf libtool pkg-config \
-        python3 python3-pip gzip xz-utils && \
+        python3 python3-pip gzip xz-utils makeself && \
     rm -rf /var/lib/apt/lists/*
 
 # -------------------------
