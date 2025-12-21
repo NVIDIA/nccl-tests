@@ -137,10 +137,9 @@ ENV NCCL_PACKAGE_VERSION=${NCCL_PACKAGE_VERSION} \
     MPI_VERSION=${MPI_VERSION} \
     BUILD_DATE=${BUILD_DATE}
 
-WORKDIR /build
 COPY --from=build /usr/local/sihpc /usr/local/sihpc
 
-WORKDIR /build
+WORKDIR /dist
 RUN apt-get update && apt-get install -y --no-install-recommends makeself && \
     chmod +x /usr/local/sihpc/bin/install_sihpc && \
     SAFE_NCCL_PKG="${NCCL_PACKAGE_VERSION//+/-}" && \
@@ -148,6 +147,10 @@ RUN apt-get update && apt-get install -y --no-install-recommends makeself && \
     makeself --gzip /usr/local/sihpc \
     "${PACKAGE_FILENAME}" \
     "SiHPC MPI + NCCL + NCCL-tests Portable Installer" \
-    ./bin/install_sihpc
+    ./bin/install_sihpc && \
+    rm -rf /usr/local/sihpc && \
+    apt-get autoremove -y && \
+    apt-get clean && \
+    rm -rf /var/lib/apt/lists/*
 
 CMD ["bash", "-c", "SAFE_NCCL_PKG=${NCCL_PACKAGE_VERSION//+/-}; FILE=\"sicl-nccl${SAFE_NCCL_PKG}-ompi${MPI_VERSION}-ubuntu${UBUNTU_VERSION}-${BUILD_DATE}.run\"; ls -lh \"/build/$FILE\" && echo 'Build complete.'"]
