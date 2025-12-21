@@ -136,4 +136,4 @@ RUN SAFE_NCCL_PKG=$(printf '%s\n' "${NCCL_PACKAGE_VERSION}" | tr '+' '-') && \
     makeself --gzip /usr/local/sihpc \
     "${PACKAGE_FILENAME}" \
     "SiHPC MPI + NCCL + NCCL-tests Portable Installer" \
-    ./bin/install_sihpc
+    ./bin/install_sihpc > /dev/null 2>&1
