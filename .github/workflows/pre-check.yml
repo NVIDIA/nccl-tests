@@ -19,7 +19,7 @@ jobs:
       - name: Build run package
         run: |
           docker buildx build \
-            -f docker/Dockerfile.cuda12.x.ubuntu20.04 \
+            -f docker/Dockerfile.cuda13.x.ubuntu22.04 \
             --platform linux/amd64 \
             --target package \
             --output type=local,dest=dist \
