@@ -1,0 +1,25 @@
+#!/bin/bash
+# sihpc-uninstaller.sh
+
+set -e
+
+SIHPC_ROOT="/usr/local/sihpc"
+
+if [ ! -d "$SIHPC_ROOT" ]; then
+    echo "sihpc install dir $SIHPC_ROOT not exist."
+    exit 1
+fi
+
+echo "=============================="
+echo " uninstall sihpc"
+echo " install dir: $SIHPC_ROOT"
+echo "=============================="
+
+echo "deleting $SIHPC_ROOT ..."
+rm -rf "$SIHPC_ROOT"
+
+echo "please check shell config（~/.bashrc, ~/.zshrc etc.），"
+echo "remove $SIHPC_ROOT/bin from  PATH"
+
+echo "sihpc unintall done！"
+exit 0
