@@ -1,0 +1,27 @@
+#!/usr/bin/env bash
+BASE_DIR=$(cd $(dirname $0) && pwd)
+TEST_DIR=$BASE_DIR/../libexec/nccl-tests
+COLL=all_reduce
+while [[ -n $1 ]]; do
+  case $1 in
+  -l*)
+    case ${1:2} in
+    Broadcast|broadcast|Bcast|bcast) COLL=broadcast;;
+    Reduce|reduce) COLL=reduce;;
+    Gather|gather) COLL=gather;;
+    Scatter|scatter) COLL=scatter;;
+    AllToAll|alltoall) COLL=alltoall;;
+    AllGather|allgather) COLL=all_gather;;
+    ReduceScatter|reducescatter) COLL=reduce_scatter;;
+    HyperCube|Hypercube|hypercube) COLL=hypercube;;
+    SendRecv|sendrecv) COLL=sendrecv;;
+    esac;;
+  *) OPTIONS="$OPTIONS $1";;
+  esac
+  shift 1
+done
+export OMPI_ALLOW_RUN_AS_ROOT=1
+export OMPI_ALLOW_RUN_AS_ROOT_CONFIRM=1
+export OMPI_MCA_btl=self,tcp
+export OMPI_MCA_pml=^ucx
+$TEST_DIR/${COLL}_perf$OPTIONS

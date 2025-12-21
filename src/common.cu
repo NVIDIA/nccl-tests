@@ -1,5 +1,6 @@
 /*************************************************************************
  * Copyright (c) 2016-2022, NVIDIA CORPORATION. All rights reserved.
+ * Copyright (c) 2024, Scitix Tech PTE. LTD. All rights reserved.
  *
  * See LICENSE.txt for license information
  ************************************************************************/
@@ -17,6 +18,10 @@
 
 #include "util.h"
 #include "../verifiable/verifiable.h"
+
+#include "ucommd.h"
+
+static Ucommd ucommd_;
 
 #pragma weak ncclCommWindowRegister
 #pragma weak ncclCommWindowDeregister
@@ -82,14 +87,18 @@ int nGpus = 1;
 size_t minBytes = 32*1024*1024;
 size_t maxBytes = 32*1024*1024;
 size_t stepBytes = 1*1024*1024;
-size_t stepFactor = 1;
+size_t stepFactor = 2;
 int datacheck = 1;
 int warmup_iters = 1;
 int iters = 20;
 int agg_iters = 1;
 static int run_cycles = 1;
 static int ncclop = ncclSum;
-static int nccltype = ncclFloat;
+#if defined(__CUDA_BF16_TYPES_EXIST__) && NCCL_VERSION_CODE >= NCCL_VERSION(2,10,0)
+static int nccltype = ncclBfloat16;
+#else
+static int nccltype = ncclHalf;
+#endif
 static int ncclroot = 0;
 int parallel_init = 0;
 int blocking_coll = 0;
@@ -846,13 +855,17 @@ int main(int argc, char* argv[], char **envp) {
     #endif
   #endif
 
+  nGpus = ucommd_.getNGpusPerProc();
+  minBytes = maxBytes = ucommd_.getBytes();
+  timeout = ucommd_.getTimeoutSec();
+
   // Parse args
   double parsed;
   int longindex;
   char *output_file = nullptr;
 
   static struct option longopts[] = {
-    {"nthreads", required_argument, 0, 't'},
+  //{"nthreads", required_argument, 0, 't'},
     {"ngpus", required_argument, 0, 'g'},
     {"minbytes", required_argument, 0, 'b'},
     {"maxbytes", required_argument, 0, 'e'},
@@ -885,15 +898,17 @@ int main(int argc, char* argv[], char **envp) {
 
   while(1) {
     int c;
-    c = getopt_long(argc, argv, "t:g:b:e:i:f:n:m:w:N:p:c:o:d:r:z:y:T:hG:C:a:R:x:D:V:J:S:", longopts, &longindex);
+    // c = getopt_long(argc, argv, "t:g:b:e:i:f:n:m:w:N:p:c:o:d:r:z:y:T:hG:C:a:R:x:D:V:J:S:", longopts, &longindex);
+    c = getopt_long(argc, argv, "g:b:e:i:f:n:m:w:N:p:c:o:d:r:z:y:T:hG:C:a:R:x:D:V:J:S:", longopts, &longindex);
+    
 
     if (c == -1)
       break;
 
     switch(c) {
-      case 't':
-        nThreads = strtol(optarg, NULL, 0);
-        break;
+    //case 't':
+    //  nThreads = strtol(optarg, NULL, 0);
+    //  break;
       case 'g':
         nGpus = strtol(optarg, NULL, 0);
         break;
@@ -1032,7 +1047,7 @@ int main(int argc, char* argv[], char **envp) {
       default:
         if (c != 'h') printf("invalid option '%c'\n", c);
         printf("USAGE: %s \n\t"
-            "[-t,--nthreads <num threads>] \n\t"
+        //  "[-t,--nthreads <num threads>] \n\t"
             "[-g,--ngpus <gpus per thread>] \n\t"
             "[-b,--minbytes <min size in bytes>] \n\t"
             "[-e,--maxbytes <max size in bytes>] \n\t"
@@ -1416,7 +1431,9 @@ testResult_t run() {
   }
 
   envstr = getenv("NCCL_TESTS_MIN_BW");
-  double check_avg_bw = envstr ? atof(envstr) : -1;
+//double check_avg_bw = envstr ? atof(envstr) : -1;
+  double check_avg_bw = envstr ? atof(envstr) :
+      (!strcmp(threads[0].args.collTest->name, "AllReduce") && minBytes == maxBytes && minBytes >= ucommd_.getBytes()) ? ucommd_.getBw(nGpus) : -1;
   bw[0] /= bw_count[0];
 
   writeResultFooter(errors, bw, check_avg_bw, program_invocation_short_name);

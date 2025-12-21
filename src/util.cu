@@ -20,6 +20,10 @@
 #include <assert.h>
 #include <errno.h>
 
+#include "ucommd.h"
+
+static Ucommd ucommd_;
+
 #define PRINT if (is_main_thread) printf
 
 extern int nThreads;
@@ -512,8 +516,9 @@ void writeBenchmarkLineBody(double timeUsec, double algBw, double busBw, bool re
 testResult_t writeDeviceReport(size_t *maxMem, int localRank, int proc, int totalProcs, int color, const char hostname[], const char *program_name) {
   PRINT("# nccl-tests version %s nccl-headers=%d nccl-library=%d\n", NCCL_TESTS_VERSION, NCCL_VERSION_CODE, test_ncclVersion);
   PRINT("# Collective test starting: %s\n", program_name);
-  PRINT("# nThread %d nGpus %d minBytes %ld maxBytes %ld step: %ld(%s) warmup iters: %d iters: %d agg iters: %d validation: %d graph: %d\n",
-        nThreads, nGpus, minBytes, maxBytes,
+  // PRINT("# nThread %d nGpus %d minBytes %ld maxBytes %ld step: %ld(%s) warmup iters: %d iters: %d agg iters: %d validation: %d graph: %d\n",
+  PRINT("# nGpus %d minBytes %ld maxBytes %ld step: %ld(%s) warmup iters: %d iters: %d agg iters: %d validation: %d graph: %d\n",
+      nGpus, minBytes, maxBytes,
         (stepFactor > 1)?stepFactor:stepBytes, (stepFactor > 1)?"factor":"bytes",
         warmup_iters, iters, agg_iters, datacheck, cudaGraphLaunches);
   if (blocking_coll) PRINT("# Blocking Enabled: wait for completion and barrier after each collective \n");
@@ -582,6 +587,8 @@ testResult_t writeDeviceReport(size_t *maxMem, int localRank, int proc, int tota
       jsonStartList();
     }
     for (int p = 0; p < totalProcs; p++) {
+    int stride = ucommd_.getLocalSize() > 0 ? ucommd_.getLocalSize() : 1;
+    for (int p = stride-1; p < totalProcs; p+=stride)
       PRINT("%s", lines+MAX_LINE*p);
       if(write_json) {
         rankInfo_t rankinfo;
@@ -642,7 +649,9 @@ void writeResultFooter(const int errors[], const double bw[], double check_avg_b
   }
 
   PRINT("# Out of bounds values : %d %s\n", errors[0], errors[0] ? "FAILED" : "OK");
-  PRINT("# Avg bus bandwidth    : %g %s\n", bw[0], check_avg_bw == -1 ? "" : (bw[0] < check_avg_bw*(0.9) ? "FAILED" : "OK"));
+  // PRINT("# Avg bus bandwidth    : %g %s\n", bw[0], check_avg_bw == -1 ? "" : (bw[0] < check_avg_bw*(0.9) ? "FAILED" : "OK"));
+  PRINT("# Avg bus bandwidth    : %g %s\n", bw[0], check_avg_bw == -1 ? "" : (bw[0] < check_avg_bw/**(0.9)*/ ? "FAILED" : "OK"));
+  if (bw[0] < check_avg_bw) PRINT("# Expected min bandwidth : %g\n", check_avg_bw);
   PRINT("#\n");
   PRINT("# Collective test concluded: %s\n", program_name);
 
@@ -655,7 +664,8 @@ void writeResultFooter(const int errors[], const double bw[], double check_avg_b
     jsonKey("average_bus_bandwidith");
     jsonStartObject();
     jsonKey("bandwidith"); jsonDouble(bw[0]);
-    jsonKey("okay");       check_avg_bw == -1 ? jsonStr("unchecked") : jsonBool(bw[0] >= check_avg_bw*(0.9));
+    // jsonKey("okay");       check_avg_bw == -1 ? jsonStr("unchecked") : jsonBool(bw[0] >= check_avg_bw*(0.9));
+    jsonKey("okay");       check_avg_bw == -1 ? jsonStr("unchecked") : jsonBool(bw[0] >= check_avg_bw/**(0.9)*/);
     jsonFinishObject();
   }
 }
