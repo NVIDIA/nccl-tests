@@ -1,0 +1,52 @@
+name: release
+
+on:
+  push:
+    tags:
+      - "v*"
+
+permissions:
+  contents: write   # permit uploading Release assets
+
+jobs:
+  build-and-release:
+    name: build-run (${{ matrix.name }})
+    runs-on: ubuntu-22.04
+
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - name: cuda13-ubuntu22.04
+            dockerfile: docker/Dockerfile.cuda13.ubuntu22.04
+
+          # - name: cuda12-ubuntu20.04
+          #   dockerfile: docker/Dockerfile.cuda12.ubuntu20.04
+
+    steps:
+      - name: Checkout source
+        uses: actions/checkout@v4
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Build run package
+        run: |
+          BUILD_DATE=$(date +%Y%m%d)
+
+          docker buildx build \
+            --platform linux/amd64 \
+            --progress=plain \
+            -f ${{ matrix.dockerfile }} \
+            --build-arg BUILD_DATE=${BUILD_DATE} \
+            --output type=local,dest=dist/${{ matrix.name }} \
+            .
+
+          echo "Produced files:"
+          ls -lh dist/${{ matrix.name }}
+
+      - name: Upload run to GitHub Release
+        uses: softprops/action-gh-release@v2
+        with:
+          files: |
+            dist/${{ matrix.name }}/*.run
