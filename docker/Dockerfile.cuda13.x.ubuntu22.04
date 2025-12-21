@@ -68,7 +68,7 @@ RUN apt-get install -y --no-install-recommends \
 # -------------------------
 # 4. Build OpenMPI from source
 # -------------------------
-RUN wget https://download.open-mpi.org/release/open-mpi/v${MPI_SERIES}/openmpi-${MPI_VERSION}.tar.gz && \
+RUN wget https://download.open-mpi.org/release/open-mpi/v${MPI_SERIES}/openmpi-${MPI_VERSION}.tar.gz > /dev/null 2>&1 && \
     tar zxvf openmpi-${MPI_VERSION}.tar.gz > /dev/null 2>&1 && \
     cd openmpi-${MPI_VERSION} && \
     ./configure --prefix=/usr/local/sihpc --with-cuda=/usr/local/cuda > /dev/null  2>&1 && \
