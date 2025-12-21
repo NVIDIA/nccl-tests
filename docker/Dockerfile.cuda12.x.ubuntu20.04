@@ -74,8 +74,8 @@ RUN apt-mark unhold libnccl2 libnccl-dev || true && \
 RUN wget https://download.open-mpi.org/release/open-mpi/v${MPI_SERIES}/openmpi-${MPI_VERSION}.tar.gz && \
     tar zxvf openmpi-${MPI_VERSION}.tar.gz && \
     cd openmpi-${MPI_VERSION} && \
-    ./configure --prefix=/usr/local/sihpc --with-cuda=/usr/local/cuda  > /dev/null && \
-    make -j$(nproc) > /dev/null && make install && \
+    ./configure --prefix=/usr/local/sihpc --with-cuda=/usr/local/cuda > /dev/null  2>&1 && \
+    make -j$(nproc) > /dev/null 2>&1 && make install && \
     rm -rf /workspace/openmpi-${MPI_VERSION} /workspace/openmpi-${MPI_VERSION}.tar.gz
 
 # -------------------------

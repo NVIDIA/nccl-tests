@@ -39,7 +39,7 @@ jobs:
           sudo docker system prune -af || true
           df -h
 
-          - name: Build run package
+      - name: Build run package
         run: |
           BUILD_DATE=$(date +%Y%m%d)
 
