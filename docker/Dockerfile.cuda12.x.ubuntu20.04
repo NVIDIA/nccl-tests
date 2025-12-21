@@ -86,6 +86,7 @@ RUN git clone https://github.com/scitix/nccl-tests.git -b sicl && \
     make MPI=1 MPI_HOME=/usr/local/sihpc && \
     mkdir -p /usr/local/sihpc/libexec/nccl-tests && \
     cp -rf build/*_perf /usr/local/sihpc/libexec/nccl-tests/ && \
+    mkdir -p /usr/local/sihpc/bin && \
     cp scripts/nccl_perf /usr/local/sihpc/bin/nccl_perf && \
     cp scripts/nccl_test /usr/local/sihpc/libexec/nccl-tests/nccl_test && \
     cp scripts/env.sh /usr/local/sihpc/env.sh && \
@@ -124,28 +125,13 @@ RUN cd /usr/local/sihpc/lib && \
     # ln -sf libltdl.so.7.3.1 libltdl.so.7 && \
     # ln -sf libltdl.so.7 libltdl.so
 
-###########################
-# Package Stage
-###########################
-FROM ubuntu:20.04 AS package
-
-# Re-declare args for this stage (values are inherited)
-ARG UBUNTU_VERSION
-ARG NCCL_PACKAGE_VERSION
-ARG MPI_VERSION
-ARG BUILD_DATE
-
 # Expose versions/date as environment variables for runtime shell expansion
 ENV NCCL_PACKAGE_VERSION=${NCCL_PACKAGE_VERSION} \
     MPI_VERSION=${MPI_VERSION} \
     BUILD_DATE=${BUILD_DATE}
 
-COPY --from=build /usr/local/sihpc /usr/local/sihpc
-
 WORKDIR /
-RUN apt-get update && apt-get install -y --no-install-recommends makeself && \
-    chmod +x /usr/local/sihpc/bin/install_sihpc && \
-    SAFE_NCCL_PKG=$(printf '%s\n' "${NCCL_PACKAGE_VERSION}" | tr '+' '-') && \
+RUN SAFE_NCCL_PKG=$(printf '%s\n' "${NCCL_PACKAGE_VERSION}" | tr '+' '-') && \
     PACKAGE_FILENAME="sicl-nccl${SAFE_NCCL_PKG}-ompi${MPI_VERSION}-ubuntu${UBUNTU_VERSION}-${BUILD_DATE}.run" && \
     makeself --gzip /usr/local/sihpc \
     "${PACKAGE_FILENAME}" \

@@ -72,7 +72,8 @@ RUN wget https://download.open-mpi.org/release/open-mpi/v${MPI_SERIES}/openmpi-$
     tar zxvf openmpi-${MPI_VERSION}.tar.gz && \
     cd openmpi-${MPI_VERSION} && \
     ./configure --prefix=/usr/local/sihpc --with-cuda=/usr/local/cuda && \
-    make -j$(nproc) && make install
+    make -j$(nproc) && make install && \
+    rm -rf /workspace/openmpi-${MPI_VERSION} /workspace/openmpi-${MPI_VERSION}.tar.gz
 
 # -------------------------
 # 5. Build nccl-tests
@@ -87,7 +88,8 @@ RUN git clone https://github.com/scitix/nccl-tests.git -b sync/upstream-20251216
     cp scripts/nccl_test /usr/local/sihpc/libexec/nccl-tests/nccl_test && \
     cp scripts/env.sh /usr/local/sihpc/env.sh && \
     cp scripts/install_sihpc /usr/local/sihpc/bin/install_sihpc && \
-    cp scripts/uninstall_sihpc /usr/local/sihpc/bin/uninstall_sihpc
+    cp scripts/uninstall_sihpc /usr/local/sihpc/bin/uninstall_sihpc && \
+    rm -rf /workspace/nccl-tests
 
 # -------------------------
 # 6. Collect runtime libraries (strict selection)
