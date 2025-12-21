@@ -6,7 +6,7 @@ on:
       - "v*"
 
 permissions:
-  contents: write   # permit uploading Release assets
+  contents: write
 
 jobs:
   build-and-release:
@@ -30,7 +30,16 @@ jobs:
       - name: Set up Docker Buildx
         uses: docker/setup-buildx-action@v3
 
-      - name: Build run package
+      - name: Free disk space
+        run: |
+          sudo rm -rf /usr/share/dotnet
+          sudo rm -rf /usr/local/lib/android
+          sudo rm -rf /opt/ghc
+          sudo rm -rf /opt/hostedtoolcache
+          sudo docker system prune -af || true
+          df -h
+
+          - name: Build run package
         run: |
           BUILD_DATE=$(date +%Y%m%d)
 
