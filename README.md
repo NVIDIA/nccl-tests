@@ -32,13 +32,14 @@ NCCL tests can run on multiple processes, multiple threads, and multiple CUDA de
 
 ### Quick examples
 
-Run on single node with 8 GPUs (`-g 8`), scanning from 8 Bytes to 128MBytes :
+Run on single node with 8 GPUs (`-g 8`), scanning from 8 Bytes to 128MiB (Mebibytes), doubling between each test (`-f 2`) :
 
 ```shell
 $ ./build/all_reduce_perf -b 8 -e 128M -f 2 -g 8
 ```
 
-Run 64 MPI processes on nodes with 8 GPUs each, for a total of 64 GPUs spread across 8 nodes :
+Run 64 MPI processes on nodes with 8 GPUs each, for a total of 64 GPUs spread across 8 nodes.
+Scanning from 8 Bytes to 32GiB (Gibibytes), doubling between each test (`-f 2`).
 (NB: The nccl-tests binaries must be compiled with `MPI=1` for this case)
 
 ```shell
@@ -57,10 +58,10 @@ All tests support the same set of arguments :
   * `-t,--nthreads <num threads>` number of threads per process. Default : 1.
   * `-g,--ngpus <GPUs per thread>` number of gpus per thread. Default : 1.
 * Sizes to scan
-  * `-b,--minbytes <min size in bytes>` minimum size to start with. Default : 32M.
-  * `-e,--maxbytes <max size in bytes>` maximum size to end at. Default : 32M.
-  * Increments can be either fixed or a multiplication factor. Only one of those should be used
-    * `-i,--stepbytes <increment size>` fixed increment between sizes. Default : 1M.
+  * `-b,--minbytes <min size in bytes>` minimum size to start with. Default : 32M (Mebibytes).
+  * `-e,--maxbytes <max size in bytes>` maximum size to end at. Default : 32M (Mebibytes).
+  * Increments can be either fixed or a multiplication factor. Only one of those should be used.
+    * `-i,--stepbytes <increment size>` fixed increment between sizes. Default : 1M (Mebibytes).
     * `-f,--stepfactor <increment factor>` multiplication factor between sizes. Default : disabled.
 * NCCL operations arguments
   * `-o,--op <sum/prod/min/max/avg/all>` Specify which reduction operation to perform. Only relevant for reduction operations like Allreduce, Reduce or ReduceScatter. Default : Sum.
@@ -79,7 +80,8 @@ All tests support the same set of arguments :
   * `-G,--cudagraph <num graph launches>` Capture iterations as a CUDA graph and then replay specified number of times. Default : 0.
   * `-C,--report_cputime <0/1>` Report CPU time instead of latency. Default : 0.
   * `-R,--local_register <0/1/2>` enable local (1) or symmetric (2) buffer registration on send/recv buffers. Default : 0.
-  * `-S,--report_timestamps <0/1>` Add timestamp ("%Y-%m-%d %H:%M:%S") to each performance report line. Default : 0.
+  * `-S,--report_timestamps <0/1>` Add timestamp (`"%Y-%m-%d %H:%M:%S"`) to each performance report line. Default : 0.
+  * `-J,--output_file <file>` Write [JSON] output to filepath. Infer type from suffix (only `json` supported presently).
   * `-T,--timeout <time in seconds>` timeout each test after specified number of seconds. Default : disabled.
 
 ### Running multiple operations in parallel

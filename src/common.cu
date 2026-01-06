@@ -210,6 +210,7 @@ testResult_t initComms(ncclComm_t* comms, int nComms, int firstRank, int nRanks,
   return testSuccess;
 }
 
+// NOTE: We use the binary system, so M=Mebibytes and G=Gibibytes
 static double parsesize(const char *value) {
     long long int units;
     double size;
