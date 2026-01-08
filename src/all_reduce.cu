@@ -78,7 +78,7 @@ testResult_t AllReduceGetDevCommRequirements(int deviceImpl, ncclDevCommRequirem
     case 4: // allReduceMultimemVectorizedKernel
       if (!commProperties->multimemSupport) {
         fprintf(stderr, "This test requires multimem support, but multimem support is not enabled for this communicator.\n");
-        return testInternalError;
+        return testInvalidUsage;
       }
       reqs->lsaMultimem = true;
       reqs->lsaBarrierCount = deviceCtaCount;
