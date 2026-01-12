@@ -74,6 +74,14 @@ testResult_t AllReduceGetDevCommRequirements(int deviceImpl, ncclDevCommRequirem
     return testNcclError;
   }
 
+  if (deviceImpl > 0 && commProperties.nRanks != ncclTeamLsa(comm).nRanks) {
+    fprintf(
+        stderr,
+        "DeviceImplementation > 1 requires CUDA P2P connectivity across all "
+        "ranks. Not all ranks of this communicator have P2P connectivity.\n");
+    return testInvalidUsage;
+  }
+
   switch(deviceImpl) {
     case 1: // allReduceLsaKernel
     case 2: // allReduceLsaVectorizedKernel
