@@ -834,13 +834,7 @@ testResult_t threadInit(struct threadArgs* args) {
       fprintf(stderr, "Device implementation %d is not supported by this test\n", deviceImpl);
       return testNotImplemented;
     }
-    ncclCommProperties_t commProperties = NCCL_COMM_PROPERTIES_INITIALIZER;
-    NCCLCHECK(ncclCommQueryProperties(args->comms[0], &commProperties));
-    if (!commProperties.deviceApiSupport) {
-      fprintf(stderr, "Device API is not supported by this communicator.\n");
-      return testInvalidUsage;
-    }
-    TESTCHECK(ncclTestEngine.getDevCommRequirements(deviceImpl, &reqs, &commProperties));
+    TESTCHECK(ncclTestEngine.getDevCommRequirements(deviceImpl, &reqs, args->comms[0]));
 #else
     if (test_ncclVersion >= NCCL_VERSION(2,29,0)) {
       fprintf(stderr, "Incompatible NCCL versions. nccl-tests was compiled with NCCL 2.28, but is running with NCCL %d. "
@@ -1414,13 +1408,7 @@ testResult_t run() {
         fprintf(stderr, "Device implementation %d is not supported by this test\n", deviceImpl);
         return testNotImplemented;
       }
-      ncclCommProperties_t commProperties = NCCL_COMM_PROPERTIES_INITIALIZER;
-      NCCLCHECK(ncclCommQueryProperties(comms[0], &commProperties));
-      if (!commProperties.deviceApiSupport) {
-        fprintf(stderr, "Device API is not supported by this communicator.\n");
-        return testInvalidUsage;
-      }
-      TESTCHECK(ncclTestEngine.getDevCommRequirements(deviceImpl, &reqs, &commProperties));
+      TESTCHECK(ncclTestEngine.getDevCommRequirements(deviceImpl, &reqs, comms[0]));
 #else
       if (test_ncclVersion >= NCCL_VERSION(2,29,0)) {
         fprintf(stderr, "Incompatible NCCL versions. nccl-tests was compiled with NCCL 2.28, but is running with NCCL %d. "

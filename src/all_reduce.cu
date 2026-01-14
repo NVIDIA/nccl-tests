@@ -66,8 +66,21 @@ void AllReduceGetBw(size_t count, int typesize, double sec, double* algBw, doubl
 
 #if NCCL_VERSION_CODE >= NCCL_VERSION(2,29,0)
  // set devComm reqs for allreduce device kernels
-testResult_t AllReduceGetDevCommRequirements(int deviceImpl, ncclDevCommRequirements* reqs, ncclCommProperties_t* commProperties) {
-  if (!reqs || !commProperties) return testInternalError;
+testResult_t AllReduceGetDevCommRequirements(int deviceImpl, ncclDevCommRequirements* reqs, ncclComm_t comm) {
+  if (!reqs || !comm) return testInternalError;
+
+  ncclCommProperties_t commProperties = NCCL_COMM_PROPERTIES_INITIALIZER;
+  if (ncclCommQueryProperties(comm, &commProperties) != ncclSuccess) {
+    return testNcclError;
+  }
+
+  if (deviceImpl > 0 && commProperties.nRanks != ncclTeamLsa(comm).nRanks) {
+    fprintf(
+        stderr,
+        "DeviceImplementation > 1 requires CUDA P2P connectivity across all "
+        "ranks. Not all ranks of this communicator have P2P connectivity.\n");
+    return testInvalidUsage;
+  }
 
   switch(deviceImpl) {
     case 1: // allReduceLsaKernel
@@ -76,7 +89,7 @@ testResult_t AllReduceGetDevCommRequirements(int deviceImpl, ncclDevCommRequirem
       return testSuccess;
     case 3: // allReduceMultimemKernel
     case 4: // allReduceMultimemVectorizedKernel
-      if (!commProperties->multimemSupport) {
+      if (!commProperties.multimemSupport) {
         fprintf(stderr, "This test requires multimem support, but multimem support is not enabled for this communicator.\n");
         return testInvalidUsage;
       }
