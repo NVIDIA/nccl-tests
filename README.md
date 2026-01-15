@@ -83,6 +83,7 @@ All tests support the same set of arguments :
   * `-S,--report_timestamps <0/1>` Add timestamp (`"%Y-%m-%d %H:%M:%S"`) to each performance report line. Default : 0.
   * `-J,--output_file <file>` Write [JSON] output to filepath. Infer type from suffix (only `json` supported presently).
   * `-T,--timeout <time in seconds>` timeout each test after specified number of seconds. Default : disabled.
+  * `-M,--memory_report <0/1>` enable memory usage report. Default : 0
 
 ### Running multiple operations in parallel
 
