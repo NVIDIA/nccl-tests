@@ -17,11 +17,10 @@ jobs:
       fail-fast: false
       matrix:
         include:
+          - name: cuda12.9-ubuntu22.04
+            dockerfile: docker/Dockerfile.cuda12.9.ubuntu22.04
           - name: cuda13-ubuntu22.04
             dockerfile: docker/Dockerfile.cuda13.x.ubuntu22.04
-
-          # - name: cuda12-ubuntu20.04
-          #   dockerfile: docker/Dockerfile.cuda12.x.ubuntu20.04
 
     steps:
       - name: Checkout source

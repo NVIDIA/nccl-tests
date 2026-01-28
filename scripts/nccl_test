@@ -26,12 +26,12 @@ export OMPI_ALLOW_RUN_AS_ROOT_CONFIRM=1
 export OMPI_MCA_btl=self,tcp
 export OMPI_MCA_pml=^ucx
 
-if [ $OMPI_COMM_WORLD_SIZE -gt $OMPI_COMM_WORLD_LOCAL_SIZE ]; then
-  if [ $OMPI_COMM_WORLD_RANK -eq 0 ]; then
+if [ "${OMPI_COMM_WORLD_SIZE:-0}" -gt "${OMPI_COMM_WORLD_LOCAL_SIZE:-0}" ]; then
+  if [ "${OMPI_COMM_WORLD_RANK:-0}" -eq 0 ]; then
     export NCCL_DEBUG=${NCCL_DEBUG:-"INFO"}
   fi
 fi
-if [ $OMPI_COMM_WORLD_RANK -eq 0 ]; then
-  echo "[$(hostname)] running nccl test $COLL$OPTIONS, world_size=$OMPI_COMM_WORLD_SIZE"
+if [ "${OMPI_COMM_WORLD_RANK:-0}" -eq 0 ]; then
+  echo "[$(hostname)] running nccl test $COLL$OPTIONS, world_size=${OMPI_COMM_WORLD_SIZE:-0}"
 fi
 $TEST_DIR/${COLL}_perf -f2$OPTIONS
