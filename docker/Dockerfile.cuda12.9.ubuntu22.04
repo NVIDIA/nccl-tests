@@ -60,8 +60,10 @@ RUN { wget https://developer.download.nvidia.com/compute/cuda/repos/ubuntu2204/x
 # 3. Install NCCL (pinned version)
 # -------------------------
 RUN { apt-get install -y --no-install-recommends \
+    --allow-change-held-packages \
     libnccl2=${NCCL_PACKAGE_VERSION} \
     libnccl-dev=${NCCL_PACKAGE_VERSION} > build.log 2>&1 && \
+    apt-mark hold libnccl2 libnccl-dev >> build.log 2>&1 && \
     ldconfig >> build.log 2>&1 && \
     rm -rf /var/lib/apt/lists/* && rm -f build.log; } || (cat build.log && false)
 
@@ -126,7 +128,7 @@ RUN cd /usr/local/sihpc/lib && \
 ###########################
 # Package Stage
 ###########################
-FROM ubuntu:20.04 AS package
+FROM ubuntu:${UBUNTU_VERSION} AS package
 
 # Re-declare args for this stage (values are inherited)
 ARG UBUNTU_VERSION

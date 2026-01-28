@@ -126,7 +126,7 @@ RUN cd /usr/local/sihpc/lib && \
 ###########################
 # Package Stage
 ###########################
-FROM ubuntu:20.04 AS package
+FROM ubuntu:${UBUNTU_VERSION} AS package
 
 # Re-declare args for this stage (values are inherited)
 ARG UBUNTU_VERSION
