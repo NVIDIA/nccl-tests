@@ -654,9 +654,9 @@ void writeResultFooter(const int errors[], const double bw[], double check_avg_b
     jsonKey("count");      jsonInt(errors[0]);
     jsonKey("okay");       jsonBool(errors[0] == 0);
     jsonFinishObject();
-    jsonKey("average_bus_bandwidith");
+    jsonKey("average_bus_bandwidth");
     jsonStartObject();
-    jsonKey("bandwidith"); jsonDouble(bw[0]);
+    jsonKey("bandwidth"); jsonDouble(bw[0]);
     jsonKey("okay");       check_avg_bw == -1 ? jsonStr("unchecked") : jsonBool(bw[0] >= check_avg_bw*(0.9));
     jsonFinishObject();
   }
