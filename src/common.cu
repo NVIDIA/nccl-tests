@@ -1344,8 +1344,10 @@ testResult_t run() {
 #if NCCL_VERSION_CODE >= NCCL_VERSION(2,28,0)
   ncclDevComm devComms[nThreads*nGpus];
 #endif
-  int64_t initGpuMem[nThreads] = {0};
-  int64_t bufferMemory[nThreads] = {0};
+  int64_t initGpuMem[nThreads];
+  int64_t bufferMemory[nThreads];
+  memset(initGpuMem, 0, sizeof(initGpuMem));
+  memset(bufferMemory, 0, sizeof(bufferMemory));
   if (!parallel_init) {
     // Capture the memory used by the GPUs before initializing the NCCL communicators
     int64_t* initFreeGpuMem = (int64_t*)calloc(nGpus*3, sizeof(int64_t));
