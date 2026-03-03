@@ -69,6 +69,11 @@ testResult_t AlltoAllGetDevCommRequirements(int deviceImpl, ncclDevCommRequireme
       }
       reqs->barrierCount = deviceCtaCount;
       reqs->ginSignalCount = deviceCtaCount;
+#if NCCL_VERSION_CODE >= NCCL_VERSION(2, 29, 7)
+      reqs->ginConnectionType = NCCL_GIN_CONNECTION_FULL;
+#else
+      reqs->ginForceEnable = true;
+#endif
       return testSuccess;
     default:
       return testNotImplemented;
