@@ -6,7 +6,7 @@
 #ifndef __COMMON_H__
 #define __COMMON_H__
 
-#define NCCL_TESTS_VERSION "2.17.10"
+#define NCCL_TESTS_VERSION "2.18.0"
 
 #include "nccl.h"
 #if NCCL_VERSION_CODE >= NCCL_VERSION(2,28,0)
