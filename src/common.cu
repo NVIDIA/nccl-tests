@@ -101,6 +101,7 @@ int cudaGraphLaunches = 0;
 static int report_cputime = 0;
 static int report_timestamps = 0;
 static int deviceImpl = 0;
+static int unalign = 0;
 int memory_report = 0;
 
 int deviceCtaCount = 16; // Default number of CTAs for device implementation
@@ -716,6 +717,12 @@ testResult_t TimeTest(struct threadArgs* args, ncclDataType_t type, const char* 
   // Sync to avoid first-call timeout
   Barrier(args);
 
+  // Add forced misalignment
+  for (int i = 0; i < args->nGpus; i++) {
+    args->sendbuffs[i] = (char*)args->sendbuffs[i] + unalign * wordSize(type);
+    args->recvbuffs[i] = (char*)args->recvbuffs[i] + unalign * wordSize(type);
+  }
+
   // Warm-up for all sizes (using a stepfactor of 2)
   for (size_t size = args->minbytes; size <= args->maxbytes; size = size * 2) {
     setupArgs(size, type, args);
@@ -737,6 +744,11 @@ testResult_t TimeTest(struct threadArgs* args, ncclDataType_t type, const char* 
     }
   } while (--repeat);
 
+  // Revert forced misalignment
+  for (int i = 0; i < args->nGpus; i++) {
+    args->sendbuffs[i] = (char*)args->sendbuffs[i] - unalign * wordSize(type);
+    args->recvbuffs[i] = (char*)args->recvbuffs[i] - unalign * wordSize(type);
+  }
   return testSuccess;
 }
 
@@ -886,6 +898,7 @@ testResult_t threadLaunch(struct testThread* thread) {
 }
 
 testResult_t AllocateBuffs(void **sendbuff, size_t sendBytes, void **recvbuff, size_t recvBytes, void **expected, size_t nbytes) {
+    nbytes += 8*unalign; // pad with size of max datatype in case all datatypes selected
 #if NCCL_VERSION_CODE >= NCCL_VERSION(2,19,0)
     NCCLCHECK(ncclMemAlloc(sendbuff, nbytes));
     NCCLCHECK(ncclMemAlloc(recvbuff, nbytes));
@@ -965,14 +978,14 @@ int main(int argc, char* argv[], char **envp) {
     {"device_implementation", required_argument, 0, 'D'},
     {"device_cta_count", required_argument, 0, 'V'},
     {"memory", required_argument, 0, 'M'},
-
+    {"unalign", required_argument, 0, 'u'},
     {"help", no_argument, 0, 'h'},
     {}
   };
 
   while(1) {
     int c;
-    c = getopt_long(argc, argv, "t:g:b:e:i:f:n:m:w:N:p:c:o:d:r:z:y:T:hG:C:a:R:x:D:V:J:S:M:", longopts, &longindex);
+    c = getopt_long(argc, argv, "t:g:b:e:i:f:n:m:w:N:p:c:o:d:r:z:y:T:hG:C:a:R:x:D:V:J:S:M:u:", longopts, &longindex);
 
     if (c == -1)
       break;
@@ -1116,6 +1129,9 @@ int main(int argc, char* argv[], char **envp) {
           return -1;
 	}
         break;
+      case 'u':
+        unalign = (int)strtol(optarg, NULL, 0);
+        break;
       case 'h':
       default:
         if (c != 'h') printf("invalid option '%c'\n", c);
@@ -1154,6 +1170,7 @@ int main(int argc, char* argv[], char **envp) {
             "[-D,--device_implementation <implementation number> enable device implementation (default: 0, use NCCL implementation; requires -R 2 if > 0)] \n\t"
             "[-V,--device_cta_count <number> set number of CTAs for device implementation (default: 16)] \n\t"
             "[-M,--memory_report <0/1> enable memory usage report (default: 0)] \n\t"
+            "[-u,--unalign <index of first element>] \n\t"
             "[-h,--help]\n",
           basename(argv[0]));
         return 0;
