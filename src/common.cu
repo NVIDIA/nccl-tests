@@ -1170,7 +1170,7 @@ int main(int argc, char* argv[], char **envp) {
             "[-D,--device_implementation <implementation number> enable device implementation (default: 0, use NCCL implementation; requires -R 2 if > 0)] \n\t"
             "[-V,--device_cta_count <number> set number of CTAs for device implementation (default: 16)] \n\t"
             "[-M,--memory_report <0/1> enable memory usage report (default: 0)] \n\t"
-            "[-u,--unalign <index of first element>] \n\t"
+            "[-u,--unalign <index of first element> Misalign source and destination buffers (default: 0)] \n\t"
             "[-h,--help]\n",
           basename(argv[0]));
         return 0;

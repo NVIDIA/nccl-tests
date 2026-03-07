@@ -83,7 +83,8 @@ All tests support the same set of arguments :
   * `-S,--report_timestamps <0/1>` Add timestamp (`"%Y-%m-%d %H:%M:%S"`) to each performance report line. Default : 0.
   * `-J,--output_file <file>` Write [JSON] output to filepath. Infer type from suffix (only `json` supported presently).
   * `-T,--timeout <time in seconds>` timeout each test after specified number of seconds. Default : disabled.
-  * `-M,--memory_report <0/1>` enable memory usage report. Default : 0
+  * `-M,--memory_report <0/1>` enable memory usage report. Default : 0.
+  * `-u,--unalign <index of first element>` Misalign source and destination buffers. Default : 0.
 
 ### Running multiple operations in parallel
 
@@ -107,4 +108,4 @@ Note that the reported bandwidth is per group, hence to get the total bandwidth 
 
 ## Copyright
 
-NCCL tests are provided under the BSD license. All source code and accompanying documentation is copyright (c) 2016-2025, NVIDIA CORPORATION. All rights reserved.
+NCCL tests are provided under the BSD license. All source code and accompanying documentation is copyright (c) 2016-2026, NVIDIA CORPORATION. All rights reserved.
