@@ -801,6 +801,16 @@ testResult_t threadInit(struct threadArgs* args) {
   int firstRank = args->proc*args->nThreads*args->nGpus + args->thread*args->nGpus;
   TESTCHECK(initComms(args->comms, args->nGpus, firstRank, nranks, args->gpus, args->ncclId));
 
+  /* Allocate buffers for each GPU (parallel_init: each thread allocates its own) */
+  size_t sendBytes, recvBytes;
+  ncclTestEngine.getBuffSize(&sendBytes, &recvBytes, (size_t)args->maxbytes, (size_t)nranks);
+  NCCLCHECK(ncclGroupStart());
+  for (int i = 0; i < args->nGpus; i++) {
+    CUDACHECK(cudaSetDevice(args->gpus[i]));
+    TESTCHECK(AllocateBuffs(args->sendbuffs + i, sendBytes, args->recvbuffs + i, recvBytes, args->expected + i, (size_t)args->maxbytes));
+  }
+  NCCLCHECK(ncclGroupEnd());
+
   // Capture the memory used by the GPUs after initializing the NCCL communicators
   for (int g = 0; g < args->nGpus; ++g) {
     CUDACHECK(cudaSetDevice(args->gpus[g]));
