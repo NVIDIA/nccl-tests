@@ -518,7 +518,8 @@ testResult_t writeDeviceReport(size_t *maxMem, int localRank, int proc, int tota
         nThreads, nGpus, minBytes, maxBytes,
         (stepFactor > 1)?stepFactor:stepBytes, (stepFactor > 1)?"factor":"bytes",
         warmup_iters, iters, agg_iters, datacheck, cudaGraphLaunches);
-  if (blocking_coll) PRINT("# Blocking Enabled: wait for completion and barrier after each collective \n");
+  if (blocking_coll == 1) PRINT("# Blocking Enabled: wait for completion and barrier after each collective \n");
+  if (blocking_coll > 1)  PRINT("# Blocking Enabled: wait for completion after each collective (no barrier) \n");
   if (parallel_init) PRINT("# Parallel Init Enabled: threads call into NcclInitRank concurrently \n");
   PRINT("#\n");
 

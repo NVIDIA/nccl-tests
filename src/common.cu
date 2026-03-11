@@ -540,7 +540,7 @@ testResult_t startColl(struct threadArgs* args, ncclDataType_t type, ncclRedOp_t
     // Complete op before returning
     TESTCHECK(testStreamSynchronize(args->nGpus, args->streams, args->comms));
   }
-  if (blocking_coll) Barrier(args);
+  if (blocking_coll == 1) Barrier(args);
   return testSuccess;
 }
 
@@ -1167,7 +1167,7 @@ int main(int argc, char* argv[], char **envp) {
 #endif
             "[-d,--datatype <nccltype/all>] \n\t"
             "[-r,--root <root>] \n\t"
-            "[-z,--blocking <0/1>] \n\t"
+            "[-z,--blocking <0/1/2> 1=wait for completion and barrier (default behavior), 2=wait without barrier] \n\t"
             "[-y,--stream_null <0/1>] \n\t"
             "[-T,--timeout <time in seconds>] \n\t"
             "[-G,--cudagraph <num graph launches>] \n\t"
