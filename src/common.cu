@@ -101,7 +101,7 @@ int cudaGraphLaunches = 0;
 static int report_cputime = 0;
 static int report_timestamps = 0;
 static int deviceImpl = 0;
-static int unalign = 0;
+int unalign = 0;
 int memory_report = 0;
 
 int deviceCtaCount = 16; // Default number of CTAs for device implementation

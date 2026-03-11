@@ -37,6 +37,7 @@ extern int agg_iters;
 extern int parallel_init;
 extern int blocking_coll;
 extern int cudaGraphLaunches;
+extern int unalign;
 
 static FILE *json_report_fp;
 static thread_local bool write_json;
@@ -514,10 +515,10 @@ void writeBenchmarkLineBody(double timeUsec, double algBw, double busBw, bool re
 testResult_t writeDeviceReport(size_t *maxMem, int localRank, int proc, int totalProcs, int color, const char hostname[], const char *program_name) {
   PRINT("# nccl-tests version %s nccl-headers=%d nccl-library=%d\n", NCCL_TESTS_VERSION, NCCL_VERSION_CODE, test_ncclVersion);
   PRINT("# Collective test starting: %s\n", program_name);
-  PRINT("# nThread %d nGpus %d minBytes %ld maxBytes %ld step: %ld(%s) warmup iters: %d iters: %d agg iters: %d validation: %d graph: %d\n",
+  PRINT("# nThread %d nGpus %d minBytes %ld maxBytes %ld step: %ld(%s) warmup iters: %d iters: %d agg iters: %d validation: %d graph: %d unalign: %d\n",
         nThreads, nGpus, minBytes, maxBytes,
         (stepFactor > 1)?stepFactor:stepBytes, (stepFactor > 1)?"factor":"bytes",
-        warmup_iters, iters, agg_iters, datacheck, cudaGraphLaunches);
+        warmup_iters, iters, agg_iters, datacheck, cudaGraphLaunches, unalign);
   if (blocking_coll == 1) PRINT("# Blocking Enabled: wait for completion and barrier after each collective \n");
   if (blocking_coll > 1)  PRINT("# Blocking Enabled: wait for completion after each collective (no barrier) \n");
   if (parallel_init) PRINT("# Parallel Init Enabled: threads call into NcclInitRank concurrently \n");
