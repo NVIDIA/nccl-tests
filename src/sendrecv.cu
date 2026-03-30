@@ -64,6 +64,17 @@ testResult_t SendRecvRunColl(void* sendbuff, size_t sendoffset, void* recvbuff, 
   return testSuccess;
 }
 
+#if NCCL_VERSION_CODE >= NCCL_VERSION(2,14,0)
+static void SendRecvInitCommConfig(ncclConfig_t* config) {
+#if NCCL_VERSION_CODE >= NCCL_VERSION(2,30,0)
+  // Ring sendrecv uses two distinct peers per rank (send to rank+1, recv from rank-1).
+  config->maxP2pPeers = 2;
+#else
+  (void)config;
+#endif
+}
+#endif
+
 struct testColl sendRecvTest = {
   "SendRecv",
   SendRecvGetCollByteCount,
@@ -114,7 +125,10 @@ testResult_t SendRecvRunTest(struct threadArgs* args, int root, ncclDataType_t t
 
 struct testEngine sendRecvEngine = {
   .getBuffSize = SendRecvGetBuffSize,
-  .runTest = SendRecvRunTest
+  .runTest = SendRecvRunTest,
+#if NCCL_VERSION_CODE >= NCCL_VERSION(2,14,0)
+  .initCommConfig = SendRecvInitCommConfig,
+#endif
 };
 
 #pragma weak ncclTestEngine=sendRecvEngine
