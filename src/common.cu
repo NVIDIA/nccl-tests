@@ -195,6 +195,8 @@ testResult_t initComms(ncclComm_t* comms, int nComms, int firstRank, int nRanks,
   config.nvlinkCentricSched = 1;
 #endif
 #endif
+  if (ncclTestEngine.initCommConfig)
+    ncclTestEngine.initCommConfig(&config);
 #endif
 
   NCCLCHECK(ncclGroupStart());
