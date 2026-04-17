@@ -141,6 +141,9 @@ struct threadArgs {
   int nGpus;
   int* gpus;
   int localRank;
+#ifdef MPI_SUPPORT
+  MPI_Comm mpi_comm;  // split sub-communicator; used by Barrier/Allreduce
+#endif
   void** sendbuffs;
   size_t sendBytes;
   size_t sendInplaceOffset;
@@ -158,6 +161,15 @@ struct threadArgs {
   int* errors;
   double* bw;
   int* bw_count;
+  // Per-size full performance tracking for split verbose mode
+  // sv_data layout: [nSizes * 6] — for each size index:
+  //   [0] timeOop  [1] algBwOop  [2] busBwOop
+  //   [3] timeIp   [4] algBwIp   [5] busBwIp
+  size_t* sv_sizes;      // message sizes (bytes)
+  size_t* sv_counts;     // element counts
+  double* sv_data;       // packed perf data per size
+  int sv_nSizes;         // number of sizes recorded
+  int sv_maxSizes;       // allocated capacity
 
   int reportErrors;
 
