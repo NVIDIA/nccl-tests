@@ -7,7 +7,7 @@
 namespace {
   std::uint64_t now() {
     using clock = std::chrono::steady_clock;
-    return std::chrono::duration_cast<std::chrono::nanoseconds>(clock::now().time_since_epoch()).count();
+    return static_cast<std::uint64_t>(std::chrono::duration_cast<std::chrono::nanoseconds>(clock::now().time_since_epoch()).count());
   }
 }
 
@@ -17,12 +17,12 @@ timer::timer() {
 
 double timer::elapsed() const {
   std::uint64_t t1 = now();
-  return 1.e-9*(t1 - t0);
+  return 1.e-9*static_cast<double>(t1 - t0);
 }
 
 double timer::reset() {
   std::uint64_t t1 = now();
-  double ans = 1.e-9*(t1 - t0);
+  double ans = 1.e-9*static_cast<double>(t1 - t0);
   t0 = t1;
   return ans;
 }
