@@ -277,9 +277,10 @@ static void jsonDouble(const double val) {
 void formatNow(char *buff, int len) {
   time_t now;
   time(&now);
-  struct tm *timeinfo = localtime(&now);
+  struct tm timeinfo;
+  localtime_r(&now, &timeinfo);
 
-  strftime(buff, len, TIME_STRING_FORMAT, timeinfo);
+  strftime(buff, len, TIME_STRING_FORMAT, &timeinfo);
 }
 
 // We provide some status line to stdout.
@@ -423,7 +424,7 @@ static void jsonRankInfo(const rankInfo_t *ri) {
 // op type, both to stdout and to json if we are writing there.
 void writeBenchmarkLinePreamble(size_t nBytes, size_t nElem, const char typeName[], const char opName[], int root) {
   char rootName[100];
-  sprintf(rootName, "%6i", root);
+  snprintf(rootName, sizeof(rootName), "%6i", root);
   PRINT("%12li  %12li  %8s  %6s  %6s", nBytes, nElem, typeName, opName, rootName);
 
   if(write_json) {
@@ -454,16 +455,16 @@ void writeBenchMarkLineNullBody() {
   }
 }
 
-void getFloatStr(double value, int width, char* str) {
+void getFloatStr(double value, int width, size_t size, char* str) {
   int power = 0;
   for (uint64_t val = 1; value >= val; val *= 10) power++;
 
-  if (power < width-2) sprintf(str, "%*.2f", width, value);
-  else if (power < width-1) sprintf(str, "%*.1f", width, value);
-  else if (power < width+1) sprintf(str, "%*.0f", width, value);
-  else if (width >= 7) sprintf(str, "%*.1e", width, value);
-  else if (width >= 8) sprintf(str, "%*.2e", width, value);
-  else sprintf(str, "%*.0e", width, value);
+  if (power < width-2) snprintf(str, size, "%*.2f", width, value);
+  else if (power < width-1) snprintf(str, size, "%*.1f", width, value);
+  else if (power < width+1) snprintf(str, size, "%*.0f", width, value);
+  else if (width >= 7) snprintf(str, size, "%*.1e", width, value);
+  else if (width >= 8) snprintf(str, size, "%*.2e", width, value);
+  else snprintf(str, size, "%*.0e", width, value);
 }
 
 // Write the performance-related payload to stdout/json.
@@ -471,13 +472,13 @@ void getFloatStr(double value, int width, char* str) {
 // The Json output assumes out-of-place happens first.
 void writeBenchmarkLineBody(double timeUsec, double algBw, double busBw, bool reportErrors, int64_t wrongElts, bool report_cputime, bool report_timestamps, bool out_of_place) {
   char timeStr[8];
-  getFloatStr(timeUsec, 7, timeStr);
+  getFloatStr(timeUsec, 7, sizeof(timeStr), timeStr);
 
   char algBwStr[7];
-  getFloatStr(algBw, 6, algBwStr);
+  getFloatStr(algBw, 6, sizeof(algBwStr), algBwStr);
 
   char busBwStr[7];
-  getFloatStr(busBw, 6, busBwStr);
+  getFloatStr(busBw, 6, sizeof(busBwStr), busBwStr);
 
   if (reportErrors) {
     PRINT("  %7s  %6s  %6s  %6g", timeStr, algBwStr, busBwStr, (double)wrongElts);
@@ -573,7 +574,8 @@ testResult_t writeDeviceReport(size_t *maxMem, int localRank, int proc, int tota
     *maxMem = std::min(*maxMem, prop.totalGlobalMem);
   }
   if (len >= MAX_LINE) {
-    strcpy(line+MAX_LINE-5, "...\n");
+    memcpy(line+MAX_LINE-5, "...\n", 4);
+    line[MAX_LINE-1] = '\0';
   }
 
 #if MPI_SUPPORT
