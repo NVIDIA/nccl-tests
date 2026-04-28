@@ -19,6 +19,7 @@
 #include "util.h"
 #include <assert.h>
 #include <errno.h>
+#include <climits>
 #include <string>
 #include <iomanip>
 
@@ -552,7 +553,17 @@ testResult_t writeDeviceReport(size_t *maxMem, int localRank, int proc, int tota
   char line[MAX_LINE];
   int len = 0;
   const char* envstr = getenv("NCCL_TESTS_DEVICE");
-  const int gpu0 = envstr ? atoi(envstr) : -1;
+  int gpu0 = -1;
+  if (envstr) {
+    char *end;
+    errno = 0;
+    long val = strtol(envstr, &end, 10);
+    if (end == envstr || *end != '\0' || errno == ERANGE || val < INT_MIN || val > INT_MAX) {
+      fprintf(stderr, "Warning: invalid NCCL_TESTS_DEVICE='%s', ignoring\n", envstr);
+    } else {
+      gpu0 = (int)val;
+    }
+  }
   int available_devices;
   CUDACHECK(cudaGetDeviceCount(&available_devices));
   for (int i=0; i<nThreads*nGpus; i++) {
