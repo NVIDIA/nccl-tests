@@ -9,6 +9,7 @@
 #include <cstdio>
 #include <type_traits>
 #include <limits>
+#include <climits>
 #include <getopt.h>
 #include <libgen.h>
 #include <string.h>
@@ -1327,7 +1328,17 @@ testResult_t run() {
   ncclTestEngine.getBuffSize(&sendBytes, &recvBytes, (size_t)maxBytes, (size_t)ncclProcs*nGpus*nThreads);
 
   char* envstr = getenv("NCCL_TESTS_DEVICE");
-  int gpu0 = envstr ? atoi(envstr) : -1;
+  int gpu0 = -1;
+  if (envstr) {
+    char *end;
+    errno = 0;
+    long val = strtol(envstr, &end, 10);
+    if (end == envstr || *end != '\0' || errno == ERANGE || val < INT_MIN || val > INT_MAX) {
+      fprintf(stderr, "Warning: invalid NCCL_TESTS_DEVICE='%s', ignoring\n", envstr);
+    } else {
+      gpu0 = (int)val;
+    }
+  }
   for (int i=0; i<nGpus*nThreads; i++) {
     gpus[i] = (gpu0 != -1 ? gpu0 : localRank*nThreads*nGpus) + i;
     CUDACHECK(cudaSetDevice(gpus[i]));
@@ -1593,7 +1604,17 @@ testResult_t run() {
   }
 
   envstr = getenv("NCCL_TESTS_MIN_BW");
-  const double check_avg_bw = envstr ? atof(envstr) : -1;
+  double check_avg_bw = -1;
+  if (envstr) {
+    char *end;
+    errno = 0;
+    double val = strtod(envstr, &end);
+    if (end == envstr || *end != '\0' || errno == ERANGE) {
+      fprintf(stderr, "Warning: invalid NCCL_TESTS_MIN_BW='%s', ignoring\n", envstr);
+    } else {
+      check_avg_bw = val;
+    }
+  }
   bw[0] /= bw_count[0];
 
   writeResultFooter(errors, bw, check_avg_bw, program_invocation_short_name);
