@@ -24,6 +24,7 @@
 #pragma weak ncclDevCommCreate
 #pragma weak ncclDevCommDestroy
 #pragma weak ncclCommQueryProperties
+#pragma weak AlltoAllRunTest
 
 #define DIVUP(x, y) \
     (((x)+(y)-1)/(y))
@@ -825,8 +826,11 @@ testResult_t threadInit(struct threadArgs* args) {
   for (int i=0; i<args->nGpus; i++) {
 #if NCCL_VERSION_CODE >= NCCL_VERSION(2,27,0)
     if (test_ncclVersion >= NCCL_VERSION(2,27,0) && (local_register == SYMMETRIC_REGISTER)) {
-      NCCLCHECK(ncclCommWindowRegister(args->comms[i], args->sendbuffs[i], args->maxbytes, (ncclWindow_t*)&args->sendRegHandles[i], NCCL_WIN_COLL_SYMMETRIC));
-      NCCLCHECK(ncclCommWindowRegister(args->comms[i], args->recvbuffs[i], args->maxbytes, (ncclWindow_t*)&args->recvRegHandles[i], NCCL_WIN_COLL_SYMMETRIC));
+      // AlltoAll does not use the symk path (AllReduce/AllGather/ReduceScatter only),
+      // so NCCL_WIN_COLL_SYMMETRIC is unnecessary and NCCL_WIN_DEFAULT suffices.
+      int winFlags = (ncclTestEngine.runTest == AlltoAllRunTest) ? NCCL_WIN_DEFAULT : NCCL_WIN_COLL_SYMMETRIC;
+      NCCLCHECK(ncclCommWindowRegister(args->comms[i], args->sendbuffs[i], args->maxbytes, (ncclWindow_t*)&args->sendRegHandles[i], winFlags));
+      NCCLCHECK(ncclCommWindowRegister(args->comms[i], args->recvbuffs[i], args->maxbytes, (ncclWindow_t*)&args->recvRegHandles[i], winFlags));
     } else
 #endif
     {
@@ -1404,8 +1408,11 @@ testResult_t run() {
        TESTCHECK(AllocateBuffs(sendbuffs+i, sendBytes, recvbuffs+i, recvBytes, expected+i, (size_t)maxBytes));
 #if NCCL_VERSION_CODE >= NCCL_VERSION(2,27,0)
        if (test_ncclVersion >= NCCL_VERSION(2,27,0) && (local_register == SYMMETRIC_REGISTER)) {
-         NCCLCHECK(ncclCommWindowRegister(comms[i], sendbuffs[i], maxBytes, (ncclWindow_t*)&sendRegHandles[i], NCCL_WIN_COLL_SYMMETRIC));
-         NCCLCHECK(ncclCommWindowRegister(comms[i], recvbuffs[i], maxBytes, (ncclWindow_t*)&recvRegHandles[i], NCCL_WIN_COLL_SYMMETRIC));
+         // AlltoAll does not use the symk path (AllReduce/AllGather/ReduceScatter only),
+         // so NCCL_WIN_COLL_SYMMETRIC is unnecessary and NCCL_WIN_DEFAULT suffices.
+         int wf = (ncclTestEngine.runTest == AlltoAllRunTest) ? NCCL_WIN_DEFAULT : NCCL_WIN_COLL_SYMMETRIC;
+         NCCLCHECK(ncclCommWindowRegister(comms[i], sendbuffs[i], maxBytes, (ncclWindow_t*)&sendRegHandles[i], wf));
+         NCCLCHECK(ncclCommWindowRegister(comms[i], recvbuffs[i], maxBytes, (ncclWindow_t*)&recvRegHandles[i], wf));
        } else
 #endif
        {
