@@ -39,7 +39,7 @@ $ ./build/all_reduce_perf -b 8 -e 128M -f 2 -g 8
 ```
 
 Run 64 MPI processes on nodes with 8 GPUs each, for a total of 64 GPUs spread across 8 nodes.
-Scanning from 8 Bytes to 32GiB (Gibibytes), doubling between each test (`-f 2`).
+Scanning from 8 Bytes to 8GiB (Gibibytes), doubling between each test (`-f 2`).
 (NB: The nccl-tests binaries must be compiled with `MPI=1` for this case)
 
 ```shell
