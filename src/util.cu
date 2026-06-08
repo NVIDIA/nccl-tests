@@ -362,14 +362,25 @@ void jsonIdentifyWriter(bool is_writer) {
 void jsonOutputFinalize() {
   if(write_json) {
 
-    jsonKey("end_time");
-    char timebuffer[128];
-    formatNow(timebuffer, sizeof(timebuffer));
-    jsonStr(timebuffer);
+    // An early/error return from run() can leave nested objects/lists open
+    // on the state stack. Only append end_time when the root object is still
+    // the current container, then close whatever remains open so we always
+    // emit valid JSON instead of aborting on an assert.
+    if(state_n == 1 && (jsonCurrState() == JSON_OBJECT_EMPTY || jsonCurrState() == JSON_OBJECT_SOME)) {
+      jsonKey("end_time");
+      char timebuffer[128];
+      formatNow(timebuffer, sizeof(timebuffer));
+      jsonStr(timebuffer);
+    }
 
-    jsonFinishObject();
+    while(state_n > 0) {
+      switch(jsonCurrState()) {
+        case JSON_LIST_EMPTY: case JSON_LIST_SOME:     jsonFinishList();   break;
+        case JSON_OBJECT_EMPTY: case JSON_OBJECT_SOME: jsonFinishObject(); break;
+        default:                                       jsonPopState();     break;
+      }
+    }
 
-    assert(jsonCurrState() == JSON_NONE);
     free(states);
     states = nullptr;
     state_n = 0;
