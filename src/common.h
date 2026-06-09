@@ -124,6 +124,9 @@ struct testEngine {
 #endif
 };
 
+extern testResult_t AlltoAllRunTest(struct threadArgs* args, int root, ncclDataType_t type,
+    const char* typeName, ncclRedOp_t op, const char* opName);
+
 extern struct testEngine ncclTestEngine;
 
 struct threadArgs {
