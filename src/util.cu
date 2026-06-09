@@ -629,8 +629,11 @@ testResult_t writeDeviceReport(size_t *maxMem, int localRank, int proc, int tota
         nThreads, nGpus, minBytes, maxBytes,
         (stepFactor > 1)?stepFactor:stepBytes, (stepFactor > 1)?"factor":"bytes",
         warmup_iters, iters, agg_iters, datacheck, cudaGraphLaunches, unalign);
-  if (blocking_coll == 1) PRINT("# Blocking Enabled: wait for completion and barrier after each collective \n");
-  if (blocking_coll > 1)  PRINT("# Blocking Enabled: wait for completion after each collective (no barrier) \n");
+  if (blocking_coll == 1) PRINT("# Blocking Enabled: wait and barrier after each inner iteration (-m) \n");
+  if (blocking_coll == 2) PRINT("# Blocking Enabled: wait after each inner iteration (-m), no barrier \n");
+  if (blocking_coll == 3)
+    PRINT("# Blocking Enabled: wait and barrier after each outer iteration (-n); "
+          "time excludes barrier \n");
   if (per_iter_timing)
     PRINT("# Per-Iteration Report: CUDA event timing; "
           "i_* uses max over process rows \n");

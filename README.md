@@ -74,11 +74,16 @@ All tests support the same set of arguments :
   * `-N,--run_cycles <cycle count>` run & print each cycle. Default : 1; 0=infinite.
   * `-a,--average <0/1/2/3>` Report performance as an average across all ranks (MPI=1 only). <0=Rank0,1=Avg,2=Min,3=Max>. Default : 1.
   * `-I,--per_iter_timing <0/1>` collect per-iteration CUDA event timings and print summary columns.
-    `i_p99` uses nearest-rank percentile and may equal `i_max` with fewer than 100 samples. Default : 0.
+    `i_p99` uses nearest-rank percentile and may equal `i_max` with fewer than 100 samples.
+    Incompatible with CUDA graph capture (`-G`). Default : 0.
 * Test operation
   * `-p,--parallel_init <0/1>` use threads to initialize NCCL in parallel. Default : 0.
   * `-c,--check <check iteration count>` perform count iterations, checking correctness of results on each iteration. This can be quite slow on large numbers of GPUs. Default : 1.
-  * `-z,--blocking <0/1/2>` collective blocking: 1=wait for completion and barrier, 2=wait without barrier. Default : 0.
+  * `-z,--blocking <0/1/2/3>` collective blocking mode. Default: 0.
+    * `0` : non-blocking (default)
+    * `1` : wait and barrier after each inner iteration (`-m`)
+    * `2` : wait after each inner iteration, no barrier
+    * `3` : wait and barrier after each outer iteration (`-n`); reported time excludes barrier. Incompatible with CUDA graph capture (`-G`).
   * `-G,--cudagraph <num graph launches>` Capture iterations as a CUDA graph and then replay specified number of times. Default : 0.
   * `-C,--report_cputime <0/1>` Report CPU time instead of latency. Default : 0.
   * `-R,--local_register <0/1/2>` enable local (1) or symmetric (2) buffer registration on send/recv buffers. Default : 0.

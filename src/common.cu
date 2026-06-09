@@ -626,19 +626,27 @@ testResult_t startColl(struct threadArgs* args, ncclDataType_t type, ncclRedOp_t
 }
 
 testResult_t completeColl(struct threadArgs* args) {
-  if (blocking_coll) return testSuccess;
+  if (blocking_coll && agg_iters <= 1) return testSuccess;
 
   TESTCHECK(testStreamSynchronize(args->nGpus, args->streams, args->comms));
   return testSuccess;
 }
 
+static int getEventCount(int eventIters) {
+  return blocking_coll == 3 ? eventIters*2 : eventIters + 1;
+}
+
 testResult_t getElapsedTimes(struct threadArgs* args, int eventIters, int aggIters) {
   args->ms = (float*) malloc(sizeof(float)*args->nGpus*eventIters);
+  int pairedEvents = blocking_coll == 3;
+  int eventCount = getEventCount(eventIters);
   // Get timings
   for (int i = 0; i < args->nGpus; i++) {
     CUDACHECK(cudaSetDevice(args->gpus[i]));
     for (int j = 0; j < eventIters; j++) {
-      CUDACHECK(cudaEventElapsedTime(&args->ms[i*(eventIters) + j], args->events[i*(eventIters+1) + j], args->events[i*(eventIters+1) + j+1]));
+      int startEvent = pairedEvents ? 2*j : j;
+      int stopEvent = pairedEvents ? 2*j + 1 : j + 1;
+      CUDACHECK(cudaEventElapsedTime(&args->ms[i*(eventIters) + j], args->events[i*eventCount + startEvent], args->events[i*eventCount + stopEvent]));
 
       // This elapsed time is for iterations equal to agg_iters.
       // We need to divide by aggIters
@@ -648,30 +656,35 @@ testResult_t getElapsedTimes(struct threadArgs* args, int eventIters, int aggIte
   return testSuccess;
 }
 
-testResult_t recordEvents(struct threadArgs* args, int iterations, int iteration) {
+testResult_t recordEvents(struct threadArgs* args, int iterations, int iteration, int stopEvent = 0) {
+  int pairedEvents = blocking_coll == 3;
+  int eventCount = getEventCount(iterations);
+  int eventIndex = pairedEvents ? 2*iteration + stopEvent : iteration;
   for(int i = 0; i < args->nGpus; i++) {
     CUDACHECK(cudaSetDevice(args->gpus[i]));
-    CUDACHECK(cudaEventRecord(args->events[i*(iterations+1) + iteration], args->streams[i]));
+    CUDACHECK(cudaEventRecord(args->events[i*eventCount + eventIndex], args->streams[i]));
   }
   return testSuccess;
 }
 
 testResult_t initEvents(struct threadArgs* args, int eventIters) {
-  // Creating (iterations + 1) events and then calculate the time between two events.
-  args->events = (cudaEvent_t*) malloc(sizeof(cudaEvent_t)*args->nGpus*(eventIters + 1));
+  int eventCount = getEventCount(eventIters);
+  // Normal timing shares boundary events; z3 uses start/stop pairs to exclude barriers.
+  args->events = (cudaEvent_t*) malloc(sizeof(cudaEvent_t)*args->nGpus*eventCount);
   for (int i = 0; i < args->nGpus; i++) {
     CUDACHECK(cudaSetDevice(args->gpus[i]));
-    for (int j = 0; j < eventIters + 1; j++) {
-      CUDACHECK(cudaEventCreate(&args->events[(i*(eventIters+1) + j)]));
+    for (int j = 0; j < eventCount; j++) {
+      CUDACHECK(cudaEventCreate(&args->events[(i*eventCount + j)]));
     }
   }
   return testSuccess;
 }
 
 testResult_t destroyEvents(struct threadArgs* args, int eventIters) {
+  int eventCount = getEventCount(eventIters);
   for (int i = 0; i < args->nGpus; i++) {
-    for (int j = 0; j < eventIters + 1; j++)
-      CUDACHECK(cudaEventDestroy(args->events[i*(eventIters+1)+j]));
+    for (int j = 0; j < eventCount; j++)
+      CUDACHECK(cudaEventDestroy(args->events[i*eventCount+j]));
   }
   free(args->events);
   return testSuccess;
@@ -709,16 +722,25 @@ testResult_t BenchTime(struct threadArgs* args, ncclDataType_t type, ncclRedOp_t
   if (record) TESTCHECK(initEvents(args, iters));
 
   // Performance Benchmark
+  double collOnlySec = 0;
+  int pairedEvents = record && blocking_coll == 3;
   timer tim;
   for (int iter = 0; iter < iters; iter++) {
+    double t0 = tim.elapsed();
     if (agg_iters>1) NCCLCHECK(ncclGroupStart());
     if (record) TESTCHECK(recordEvents(args, iters, iter));
     for (int aiter = 0; aiter < agg_iters; aiter++) {
       TESTCHECK(startColl(args, type, op, root, in_place, iter*agg_iters+aiter));
     }
     if (agg_iters>1) NCCLCHECK(ncclGroupEnd());
+    if (blocking_coll == 3) {
+      TESTCHECK(testStreamSynchronize(args->nGpus, args->streams, args->comms));
+      if (pairedEvents) TESTCHECK(recordEvents(args, iters, iter, 1));
+      collOnlySec += tim.elapsed() - t0;
+      Barrier(args);
+    }
   }
-  if (record) TESTCHECK(recordEvents(args, iters, iters));
+  if (record && !pairedEvents) TESTCHECK(recordEvents(args, iters, iters));
 
 #if CUDART_VERSION >= 11030
   if (cudaGraphLaunches >= 1) {
@@ -741,18 +763,19 @@ testResult_t BenchTime(struct threadArgs* args, ncclDataType_t type, ncclRedOp_t
   }
 #endif
 
-  double cputimeSec = tim.elapsed()/(iters*agg_iters);
+  double cputimeSec = blocking_coll == 3 ? collOnlySec : tim.elapsed();
+  cputimeSec /= iters*agg_iters;
   TESTCHECK(completeColl(args));
 
+  // Exclude per-iteration result processing from the reported time.
+  double deltaSec = (blocking_coll == 3 ? collOnlySec : tim.elapsed())/(iters*agg_iters);
+  if (cudaGraphLaunches >= 1) deltaSec = deltaSec/cudaGraphLaunches;
+
   if (record) {
-    TESTCHECK(testStreamSynchronize(args->nGpus, args->streams, args->comms));
     TESTCHECK(getElapsedTimes(args, iters, agg_iters));
     TESTCHECK(destroyEvents(args, iters));
   }
 
-  double deltaSec = tim.elapsed();
-  deltaSec = deltaSec/(iters*agg_iters);
-  if (cudaGraphLaunches >= 1) deltaSec = deltaSec/cudaGraphLaunches;
   Allreduce(args, &deltaSec, average);
 
 #if CUDART_VERSION >= 11030
@@ -1348,7 +1371,7 @@ int main(int argc, char* argv[], char **envp) {
 #endif
             "[-d,--datatype <nccltype/all>] \n\t"
             "[-r,--root <root>] \n\t"
-            "[-z,--blocking <0/1/2> 1=wait for completion and barrier (default behavior), 2=wait without barrier] \n\t"
+            "[-z,--blocking <0/1/2/3> 1=barrier after each inner iter (-m), 2=no barrier, 3=wait and barrier after each outer iter (-n)] \n\t"
             "[-y,--stream_null <0/1>] \n\t"
             "[-T,--timeout <time in seconds>] \n\t"
             "[-G,--cudagraph <num graph launches>] \n\t"
@@ -1363,7 +1386,7 @@ int main(int argc, char* argv[], char **envp) {
             "[-M,--memory <0/1> enable memory usage report (default: 0)] \n\t"
             "[-u,--unalign <index of first element> Misalign source and destination buffers (default: 0)] \n\t"
             "[-I,--per_iter_timing <0/1> per-iteration CUDA event timing\n\t"
-            "    (best with -z 0 or -z 2; with -z 1 includes barrier wait;\n\t"
+            "    (best with -z 0, -z 2, or -z 3; with -z 1 includes barrier wait;\n\t"
             "    i_p99 uses nearest-rank percentile and may equal i_max\n\t"
             "    with <100 samples) (default: 0)] \n\t"
             "[-h,--help]\n",
@@ -1388,6 +1411,10 @@ int main(int argc, char* argv[], char **envp) {
   if (per_iter_timing && cudaGraphLaunches >= 1) {
     fprintf(stderr, "per-iteration timing (-I) is incompatible with CUDA graph mode (-G). Disabling.\n");
     per_iter_timing = 0;
+  }
+  if (blocking_coll == 3 && cudaGraphLaunches >= 1) {
+    fprintf(stderr, "blocking mode (-z 3) is incompatible with CUDA graph mode (-G). Disabling.\n");
+    blocking_coll = 0;
   }
 
 #ifdef MPI_SUPPORT
