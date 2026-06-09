@@ -232,6 +232,24 @@ static void jsonNull() {
   fprintf(json_report_fp, "null");
 }
 
+static void jsonFinishCurrent() {
+  switch(jsonCurrState()) {
+  case JSON_KEY:
+    jsonNull();
+    break;
+  case JSON_OBJECT_EMPTY:
+  case JSON_OBJECT_SOME:
+    jsonFinishObject();
+    break;
+  case JSON_LIST_EMPTY:
+  case JSON_LIST_SOME:
+    jsonFinishList();
+    break;
+  default:
+    assert(0);
+  }
+}
+
 // Write a (sanititzed) string
 static void jsonStr(const char *str) {
   if(str == nullptr) {
@@ -362,12 +380,17 @@ void jsonIdentifyWriter(bool is_writer) {
 void jsonOutputFinalize() {
   if(write_json) {
 
-    jsonKey("end_time");
-    char timebuffer[128];
-    formatNow(timebuffer, sizeof(timebuffer));
-    jsonStr(timebuffer);
+    if(state_n == 1 &&
+       (jsonCurrState() == JSON_OBJECT_EMPTY || jsonCurrState() == JSON_OBJECT_SOME)) {
+      jsonKey("end_time");
+      char timebuffer[128];
+      formatNow(timebuffer, sizeof(timebuffer));
+      jsonStr(timebuffer);
+    }
 
-    jsonFinishObject();
+    while(state_n > 0) {
+      jsonFinishCurrent();
+    }
 
     assert(jsonCurrState() == JSON_NONE);
     free(states);
