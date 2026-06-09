@@ -153,6 +153,8 @@ struct threadArgs {
   ncclDevComm* devComms;
 #endif
   cudaStream_t* streams;
+  cudaEvent_t* events;
+  float* ms;
 
   void** expected;
   size_t expectedBytes;

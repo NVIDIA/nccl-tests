@@ -30,10 +30,18 @@ void jsonIdentifyWriter(bool is_writer);
 // Write end time and close top-level object. Reset json state and close output file.
 void jsonOutputFinalize();
 
+struct IterStats {
+  double min, max, avg, p50, p95, p99, stdev;
+};
+
+void computeIterStats(const double* times, int n, struct IterStats* stats);
+
 void writeBenchmarkLinePreamble(size_t nBytes, size_t nElem, const char typeName[], const char opName[], int root);
 void writeBenchmarkLineTerminator(int actualIters, const char *name);
 void writeBenchMarkLineNullBody();
 void writeBenchmarkLineBody(double timeUsec, double algBw, double busBw, bool reportErrors, int64_t wrongElts, bool report_cputime, bool report_timestamps, bool out_of_place);
+void writePerIterReport(const struct IterStats* stats, const double* iterTimes, int nIters, bool out_of_place, const double* allProcessTimes, int nProcs);
+void writeTimestamp();
 testResult_t writeDeviceReport(size_t *maxMem, int localRank, int proc, int totalProcs, int color, const char hostname[], const char *program_name);
 void writeResultHeader(bool report_cputime, bool report_timestamps);
 void writeResultFooter(const int errors[], const double bw[], double check_avg_bw, const char *program_name);

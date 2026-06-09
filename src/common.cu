@@ -5,6 +5,7 @@
  ************************************************************************/
 
 #include "common.h"
+#include <algorithm>
 #include <cstdio>
 #include <type_traits>
 #include <limits>
@@ -102,6 +103,7 @@ static int nccltype = ncclFloat;
 static int ncclroot = 0;
 int parallel_init = 0;
 int blocking_coll = 0;
+int per_iter_timing = 0;
 static int streamnull = 0;
 static int timeout = 0;
 int cudaGraphLaunches = 0;
@@ -359,6 +361,76 @@ void Allreduce(struct threadArgs* args, T* value, int average) {
   epoch ^= 1;
 }
 
+// Reduce per-thread iteration times to a process-local max, then gather one row
+// per MPI process.
+void GatherProcessMaxIterTimes(struct threadArgs* args, double* localTimes, int nIters, double* recvBuf) {
+  thread_local int epoch = 0;
+  static std::mutex lock[2];
+  static std::condition_variable cond[2];
+  static double* sendBuf[2] = {NULL, NULL};
+  static int sendBufIters[2] = {0, 0};
+  static double* recvPtr[2];
+  static int counter[2] = {0, 0};
+
+  std::unique_lock<std::mutex> ul(lock[epoch]);
+
+  if (sendBufIters[epoch] < nIters) {
+    sendBuf[epoch] = (double*)realloc(sendBuf[epoch], nIters * sizeof(double));
+    sendBufIters[epoch] = nIters;
+  }
+
+  if (counter[epoch] == 0) {
+    memcpy(sendBuf[epoch], localTimes, nIters * sizeof(double));
+  } else {
+    for (int i = 0; i < nIters; i++)
+      sendBuf[epoch][i] = std::max(sendBuf[epoch][i], localTimes[i]);
+  }
+
+  if (args->thread == 0) {
+    recvPtr[epoch] = recvBuf;
+  }
+
+  if(++counter[epoch] == args->nThreads)
+    cond[epoch].notify_all();
+
+  if(args->thread+1 == args->nThreads) {
+    while(counter[epoch] != args->nThreads)
+      cond[epoch].wait(ul);
+
+    #ifdef MPI_SUPPORT
+    if (args->totalProcs > 1) {
+      MPI_Gather(sendBuf[epoch], nIters, MPI_DOUBLE,
+                 recvPtr[epoch], nIters, MPI_DOUBLE,
+                 0, MPI_COMM_WORLD);
+    }
+    #else
+    if (recvPtr[epoch])
+      memcpy(recvPtr[epoch], sendBuf[epoch], nIters * sizeof(double));
+    #endif
+
+    memcpy(localTimes, sendBuf[epoch], nIters * sizeof(double));
+    counter[epoch] = 0;
+    cond[epoch].notify_all();
+  }
+  else {
+    while(counter[epoch] != 0)
+      cond[epoch].wait(ul);
+    memcpy(localTimes, sendBuf[epoch], nIters * sizeof(double));
+  }
+  ul.unlock();
+  epoch ^= 1;
+}
+
+void ReduceProcessMaxIterTimes(double* iterTimes, const double* allProcessTimes,
+                               int nProcs, int nIters) {
+  for (int i = 0; i < nIters; i++) {
+    double maxSec = allProcessTimes[i];
+    for (int p = 1; p < nProcs; p++)
+      maxSec = std::max(maxSec, allProcessTimes[p * nIters + i]);
+    iterTimes[i] = maxSec;
+  }
+}
+
 testResult_t CheckData(struct threadArgs* args, ncclDataType_t type, ncclRedOp_t op, int root, int in_place, int64_t *wrongElts) {
   int nranks = args->nProcs*args->nGpus*args->nThreads;
   size_t count = args->expectedBytes/wordSize(type);
@@ -560,6 +632,51 @@ testResult_t completeColl(struct threadArgs* args) {
   return testSuccess;
 }
 
+testResult_t getElapsedTimes(struct threadArgs* args, int eventIters, int aggIters) {
+  args->ms = (float*) malloc(sizeof(float)*args->nGpus*eventIters);
+  // Get timings
+  for (int i = 0; i < args->nGpus; i++) {
+    CUDACHECK(cudaSetDevice(args->gpus[i]));
+    for (int j = 0; j < eventIters; j++) {
+      CUDACHECK(cudaEventElapsedTime(&args->ms[i*(eventIters) + j], args->events[i*(eventIters+1) + j], args->events[i*(eventIters+1) + j+1]));
+
+      // This elapsed time is for iterations equal to agg_iters.
+      // We need to divide by aggIters
+      args->ms[i*(eventIters)+j] /= aggIters;
+    }
+  }
+  return testSuccess;
+}
+
+testResult_t recordEvents(struct threadArgs* args, int iterations, int iteration) {
+  for(int i = 0; i < args->nGpus; i++) {
+    CUDACHECK(cudaSetDevice(args->gpus[i]));
+    CUDACHECK(cudaEventRecord(args->events[i*(iterations+1) + iteration], args->streams[i]));
+  }
+  return testSuccess;
+}
+
+testResult_t initEvents(struct threadArgs* args, int eventIters) {
+  // Creating (iterations + 1) events and then calculate the time between two events.
+  args->events = (cudaEvent_t*) malloc(sizeof(cudaEvent_t)*args->nGpus*(eventIters + 1));
+  for (int i = 0; i < args->nGpus; i++) {
+    CUDACHECK(cudaSetDevice(args->gpus[i]));
+    for (int j = 0; j < eventIters + 1; j++) {
+      CUDACHECK(cudaEventCreate(&args->events[(i*(eventIters+1) + j)]));
+    }
+  }
+  return testSuccess;
+}
+
+testResult_t destroyEvents(struct threadArgs* args, int eventIters) {
+  for (int i = 0; i < args->nGpus; i++) {
+    for (int j = 0; j < eventIters + 1; j++)
+      CUDACHECK(cudaEventDestroy(args->events[i*(eventIters+1)+j]));
+  }
+  free(args->events);
+  return testSuccess;
+}
+
 testResult_t BenchTime(struct threadArgs* args, ncclDataType_t type, ncclRedOp_t op, int root, int in_place) {
   size_t count = args->nbytes / wordSize(type);
   if (datacheck) {
@@ -588,15 +705,20 @@ testResult_t BenchTime(struct threadArgs* args, ncclDataType_t type, ncclRedOp_t
   }
 #endif
 
+  int record = per_iter_timing;
+  if (record) TESTCHECK(initEvents(args, iters));
+
   // Performance Benchmark
   timer tim;
   for (int iter = 0; iter < iters; iter++) {
     if (agg_iters>1) NCCLCHECK(ncclGroupStart());
+    if (record) TESTCHECK(recordEvents(args, iters, iter));
     for (int aiter = 0; aiter < agg_iters; aiter++) {
       TESTCHECK(startColl(args, type, op, root, in_place, iter*agg_iters+aiter));
     }
     if (agg_iters>1) NCCLCHECK(ncclGroupEnd());
   }
+  if (record) TESTCHECK(recordEvents(args, iters, iters));
 
 #if CUDART_VERSION >= 11030
   if (cudaGraphLaunches >= 1) {
@@ -621,6 +743,12 @@ testResult_t BenchTime(struct threadArgs* args, ncclDataType_t type, ncclRedOp_t
 
   double cputimeSec = tim.elapsed()/(iters*agg_iters);
   TESTCHECK(completeColl(args));
+
+  if (record) {
+    TESTCHECK(testStreamSynchronize(args->nGpus, args->streams, args->comms));
+    TESTCHECK(getElapsedTimes(args, iters, agg_iters));
+    TESTCHECK(destroyEvents(args, iters));
+  }
 
   double deltaSec = tim.elapsed();
   deltaSec = deltaSec/(iters*agg_iters);
@@ -702,6 +830,39 @@ testResult_t BenchTime(struct threadArgs* args, ncclDataType_t type, ncclRedOp_t
 
   double timeUsec = (report_cputime ? cputimeSec : deltaSec)*1.0E6;
   writeBenchmarkLineBody(timeUsec, algBw, busBw, args->reportErrors, wrongElts, report_cputime, report_timestamps, in_place==0);
+
+  if (record && args->ms) {
+    // Extract max-across-GPUs per iteration (convert ms to seconds)
+    double* iterTimes = (double*)calloc(iters, sizeof(double));
+    for (int iter = 0; iter < iters; iter++) {
+      double maxSec = 0;
+      for (int i = 0; i < args->nGpus; i++) {
+        double sec = (double)args->ms[i * iters + iter] * 1e-3;
+        if (sec > maxSec) maxSec = sec;
+      }
+      iterTimes[iter] = maxSec;
+    }
+
+    double* allProcessTimes = NULL;
+    int nProcessRows = args->totalProcs;
+    if (nProcessRows > 1) {
+      if (is_main_thread)
+        allProcessTimes = (double*)malloc(nProcessRows * iters * sizeof(double));
+    }
+    GatherProcessMaxIterTimes(args, iterTimes, iters, allProcessTimes);
+    if (allProcessTimes && nProcessRows > 1)
+      ReduceProcessMaxIterTimes(iterTimes, allProcessTimes, nProcessRows, iters);
+
+    struct IterStats stats;
+    computeIterStats(iterTimes, iters, &stats);
+    writePerIterReport(&stats, iterTimes, iters, in_place==0, allProcessTimes, nProcessRows);
+
+    if (in_place && report_timestamps) writeTimestamp();
+
+    free(allProcessTimes);
+    free(iterTimes);
+    free(args->ms);
+  }
 
   args->bw[0] += busBw;
   args->bw_count[0]++;
@@ -1005,13 +1166,14 @@ int main(int argc, char* argv[], char **envp) {
     {"device_cta_count", required_argument, 0, 'V'},
     {"memory", required_argument, 0, 'M'},
     {"unalign", required_argument, 0, 'u'},
+    {"per_iter_timing", required_argument, 0, 'I'},
     {"help", no_argument, 0, 'h'},
     {}
   };
 
   while(1) {
     int c;
-    c = getopt_long(argc, argv, "t:g:b:e:i:f:n:m:w:N:p:c:o:d:r:z:y:T:hG:C:a:R:x:D:V:J:S:M:u:", longopts, &longindex);
+    c = getopt_long(argc, argv, "t:g:b:e:i:f:n:m:w:N:p:I:c:o:d:r:z:y:T:hG:C:a:R:x:D:V:J:S:M:u:", longopts, &longindex);
 
     if (c == -1)
       break;
@@ -1123,6 +1285,9 @@ int main(int argc, char* argv[], char **envp) {
       case 'M':
         memory_report = (int)strtol(optarg, NULL, 0);
         break;
+      case 'I':
+        per_iter_timing = (int)strtol(optarg, NULL, 0);
+        break;
       case 'x':
 #if NCCL_VERSION_CODE >= NCCL_VERSION(2,27,0)
         ctaPolicy = (int)strtol(optarg, NULL, 0);
@@ -1197,6 +1362,10 @@ int main(int argc, char* argv[], char **envp) {
             "[-V,--device_cta_count <number> set number of CTAs for device implementation (default: 16)] \n\t"
             "[-M,--memory <0/1> enable memory usage report (default: 0)] \n\t"
             "[-u,--unalign <index of first element> Misalign source and destination buffers (default: 0)] \n\t"
+            "[-I,--per_iter_timing <0/1> per-iteration CUDA event timing\n\t"
+            "    (best with -z 0 or -z 2; with -z 1 includes barrier wait;\n\t"
+            "    i_p99 uses nearest-rank percentile and may equal i_max\n\t"
+            "    with <100 samples) (default: 0)] \n\t"
             "[-h,--help]\n",
           programName);
         return 0;
@@ -1211,6 +1380,14 @@ int main(int argc, char* argv[], char **envp) {
   if (deviceImpl > 0 && (local_register != SYMMETRIC_REGISTER)) {
     fprintf(stderr, "device implementation (-D > 0) requires enabling symmetric memory registration (-R 2)\n");
     return -1;
+  }
+  if (per_iter_timing != 0 && per_iter_timing != 1) {
+    fprintf(stderr, "per-iteration timing (-I) only supports 0=off or 1=on. Disabling.\n");
+    per_iter_timing = 0;
+  }
+  if (per_iter_timing && cudaGraphLaunches >= 1) {
+    fprintf(stderr, "per-iteration timing (-I) is incompatible with CUDA graph mode (-G). Disabling.\n");
+    per_iter_timing = 0;
   }
 
 #ifdef MPI_SUPPORT
