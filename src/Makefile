@@ -37,7 +37,13 @@ OBJ_FILES := $(SRC_FILES:%.cu=${DST_DIR}/%.o)
 BIN_FILES_LIST := all_reduce all_gather broadcast reduce_scatter reduce alltoall alltoallv scatter gather sendrecv hypercube
 BIN_FILES := $(BIN_FILES_LIST:%=${DST_DIR}/%_perf${NAME_SUFFIX})
 
-build: ${BIN_FILES}
+TEST_OS_SRCDIR := ../os
+TEST_OS_BUILDDIR := $(BUILDDIR)/os
+TEST_OS_LIB := $(TEST_OS_BUILDDIR)/libnccl_test_os.a
+NVCUFLAGS += -I$(TEST_OS_SRCDIR)
+NVLDFLAGS += -L$(TEST_OS_BUILDDIR) -lnccl_test_os
+
+build: os.build ${BIN_FILES}
 
 clean:
 	rm -rf ${DST_DIR}
@@ -45,6 +51,12 @@ clean:
 TEST_VERIFIABLE_SRCDIR := ../verifiable
 TEST_VERIFIABLE_BUILDDIR := $(BUILDDIR)/verifiable
 include ../verifiable/verifiable.mk
+
+$(TEST_OS_LIB): os.build
+	@:
+
+os.%:
+	${MAKE} -C $(TEST_OS_SRCDIR) $* BUILDDIR=$(BUILDDIR)
 
 .PRECIOUS: ${DST_DIR}/%.o
 
@@ -64,12 +76,12 @@ ${DST_DIR}/timer.o: timer.cc timer.h
 	$(CXX) $(CXXFLAGS) -o $@ -c $<
 
 ifeq ($(DSO), 1)
-${DST_DIR}/%_perf$(NAME_SUFFIX): ${DST_DIR}/%.o ${DST_DIR}/common$(NAME_SUFFIX).o ${DST_DIR}/util$(NAME_SUFFIX).o ${DST_DIR}/timer.o $(TEST_VERIFIABLE_LIBS)
+${DST_DIR}/%_perf$(NAME_SUFFIX): ${DST_DIR}/%.o ${DST_DIR}/common$(NAME_SUFFIX).o ${DST_DIR}/util$(NAME_SUFFIX).o ${DST_DIR}/timer.o $(TEST_VERIFIABLE_LIBS) $(TEST_OS_LIB)
 	@printf "Linking  %-35s > %s\n" $< $@
 	@mkdir -p ${DST_DIR}
 	$(NVCC) -o $@ $(NVCUFLAGS) $^ -L$(TEST_VERIFIABLE_BUILDDIR) -lverifiable ${NVLDFLAGS} -Xlinker "--enable-new-dtags" -Xlinker "-rpath,\$$ORIGIN:\$$ORIGIN/verifiable"
 else
-${DST_DIR}/%_perf$(NAME_SUFFIX):${DST_DIR}/%.o ${DST_DIR}/common$(NAME_SUFFIX).o ${DST_DIR}/util$(NAME_SUFFIX).o ${DST_DIR}/timer.o $(TEST_VERIFIABLE_OBJS)
+${DST_DIR}/%_perf$(NAME_SUFFIX):${DST_DIR}/%.o ${DST_DIR}/common$(NAME_SUFFIX).o ${DST_DIR}/util$(NAME_SUFFIX).o ${DST_DIR}/timer.o $(TEST_VERIFIABLE_OBJS) $(TEST_OS_LIB)
 	@printf "Linking  %-35s > %s\n" $< $@
 	@mkdir -p ${DST_DIR}
 	$(NVCC) -o $@ $(NVCUFLAGS) $^ ${NVLDFLAGS}
@@ -77,4 +89,3 @@ endif
 
 clean_intermediates:
 	rm -f ${DST_DIR}/*.o $(TEST_VERIFIABLE_OBJS)
-

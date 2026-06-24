@@ -17,9 +17,11 @@
 
 #include "nccl.h"
 #include "util.h"
+#include "os.h"
 #include <assert.h>
 #include <errno.h>
 #include <string>
+#include <sstream>
 #include <iomanip>
 
 #define PRINT if (is_main_thread) printf
@@ -332,7 +334,7 @@ void jsonOutputInit(const char *in_path,
       return;
     }
     free(try_path);
-    if(asprintf(&try_path, "%s.%d", in_path, try_count++) == -1) {
+    if(ncclTestAsprintf(&try_path, "%s.%d", in_path, try_count++) == -1) {
       printf("# skipping json output; failed to probe destination\n");
       return;
     }
@@ -591,7 +593,7 @@ testResult_t writeDeviceReport(size_t *maxMem, int localRank, int proc, int tota
     CUDACHECK(cudaGetDeviceProperties(&prop, cudaDev));
     if (len < MAX_LINE) {
       len += snprintf(line+len, MAX_LINE-len, "#  Rank %2d Group %2d Pid %6d on %10s device %2d [%04x:%02x:%02x] %s\n",
-                      rank, color, getpid(), hostname, cudaDev, prop.pciDomainID, prop.pciBusID, prop.pciDeviceID, prop.name);
+                      rank, color, ncclTestGetPid(), hostname, cudaDev, prop.pciDomainID, prop.pciBusID, prop.pciDeviceID, prop.name);
     }
     *maxMem = std::min(*maxMem, prop.totalGlobalMem);
   }

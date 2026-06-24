@@ -114,9 +114,7 @@ testResult_t HyperCubeRunTest(struct threadArgs* args, int root, ncclDataType_t 
   return testSuccess;
 }
 
-struct testEngine hyperCubeEngine = {
-  .getBuffSize = HyperCubeGetBuffSize,
-  .runTest = HyperCubeRunTest
+NCCL_WEAK struct testEngine ncclTestEngine = {
+  /* .getBuffSize = */ HyperCubeGetBuffSize,
+  /* .runTest = */ HyperCubeRunTest
 };
-
-#pragma weak ncclTestEngine=hyperCubeEngine

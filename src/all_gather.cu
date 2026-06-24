@@ -89,9 +89,7 @@ testResult_t AllGatherRunTest(struct threadArgs* args, int root, ncclDataType_t 
   return testSuccess;
 }
 
-struct testEngine allGatherEngine = {
-  .getBuffSize = AllGatherGetBuffSize,
-  .runTest = AllGatherRunTest
+NCCL_WEAK struct testEngine ncclTestEngine = {
+  /* .getBuffSize = */ AllGatherGetBuffSize,
+  /* .runTest = */ AllGatherRunTest
 };
-
-#pragma weak ncclTestEngine=allGatherEngine

@@ -11,7 +11,9 @@
 #include "vector_types.h"
 #endif
 
+#if defined(NCCL_OS_LINUX)
 #pragma weak ncclAlltoAll
+#endif
 
 void AlltoAllGetCollByteCount(size_t *sendcount, size_t *recvcount, size_t *paramcount, size_t *sendInplaceOffset, size_t *recvInplaceOffset, size_t count, size_t eltSize, int nranks) {
   *paramcount = (count/nranks) & -(16/eltSize);
@@ -72,6 +74,7 @@ testResult_t AlltoAllGetDevCommRequirements(int deviceImpl, ncclDevCommRequireme
       }
       reqs->lsaBarrierCount = deviceCtaCount;
       return testSuccess;
+    #if defined(NCCL_OS_LINUX)
     case 3: // GinAlltoAllKernel
     case 4: // HybridAlltoAllKernel (LSA+GIN)
       if (commProperties.ginType == NCCL_GIN_TYPE_NONE) {
@@ -86,6 +89,7 @@ testResult_t AlltoAllGetDevCommRequirements(int deviceImpl, ncclDevCommRequireme
       reqs->ginForceEnable = true;
 #endif
       return testSuccess;
+    #endif
     default:
       return testNotImplemented;
   }
@@ -101,7 +105,7 @@ bool AlltoAllGetDevCommRequirements(int deviceImpl, ncclDevCommRequirements* req
     case 2: // NvlAlltoAllKernelOptimized
       reqs->lsaBarrierCount = deviceCtaCount;
       return true;
-#if NCCL_VERSION_CODE >= NCCL_VERSION(2,28,7)
+#if NCCL_VERSION_CODE >= NCCL_VERSION(2,28,7) && defined(NCCL_OS_LINUX)
     case 3: // GinAlltoAllKernel
     case 4: // HybridAlltoAllKernel (LSA+GIN)
       reqs->barrierCount = deviceCtaCount;
@@ -225,7 +229,7 @@ __global__ void NvlAlltoAllKernelOptimized(ncclWindow_t sendwin, size_t sendoffs
   bar.sync(ncclCoopCta(), cuda::memory_order_release);
 }
 
-#if NCCL_VERSION_CODE >= NCCL_VERSION(2,28,7)
+#if NCCL_VERSION_CODE >= NCCL_VERSION(2,28,7) && defined(NCCL_OS_LINUX)
 template <typename T>
 __global__ void GinAlltoAllKernel(ncclWindow_t sendwin, size_t sendoffset, ncclWindow_t recvwin, size_t recvoffset, size_t count, int root, struct ncclDevComm devComm) {
   int ginContext = 0;
@@ -341,7 +345,7 @@ testResult_t AlltoAllRunColl(void* sendbuff, size_t sendoffset, void* recvbuff, 
         TESTCHECK(testLaunchDeviceKernel(SPECIALIZE_KERNEL(NvlAlltoAllKernelOptimized, type, op), sendbuff, sendoffset, recvbuff, recvoffset, count, type, op, root, comm, stream));
         return testSuccess;
 #endif
-#if NCCL_VERSION_CODE >= NCCL_VERSION(2,28,7)
+#if NCCL_VERSION_CODE >= NCCL_VERSION(2,28,7) && defined(NCCL_OS_LINUX)
       case 3:
         TESTCHECK(testLaunchDeviceKernel(SPECIALIZE_KERNEL(GinAlltoAllKernel, type, op), sendbuff, sendoffset, recvbuff, recvoffset, count, type, op, root, comm, stream));
         return testSuccess;
@@ -391,12 +395,13 @@ testResult_t AlltoAllRunTest(struct threadArgs* args, int root, ncclDataType_t t
   return testSuccess;
 }
 
-struct testEngine alltoAllEngine = {
-  .getBuffSize = AlltoAllGetBuffSize,
-  .runTest = AlltoAllRunTest,
+NCCL_WEAK struct testEngine ncclTestEngine = {
+  /* .getBuffSize = */ AlltoAllGetBuffSize,
+  /* .runTest = */ AlltoAllRunTest,
+#if NCCL_VERSION_CODE >= NCCL_VERSION(2,14,0)
+  /* .initCommConfig = */ nullptr,
+#endif
 #if NCCL_VERSION_CODE >= NCCL_VERSION(2,28,0)
-  .getDevCommRequirements = AlltoAllGetDevCommRequirements
+  /* .getDevCommRequirements = */ AlltoAllGetDevCommRequirements
 #endif
 };
-
-#pragma weak ncclTestEngine=alltoAllEngine

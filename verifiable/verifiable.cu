@@ -41,7 +41,11 @@
 #include <cstdio>
 #include <cstdint>
 #include <cmath>
+#if defined(NCCL_OS_LINUX)
 #include <unistd.h>
+#elif defined(NCCL_OS_WINDOWS)
+#include <intrin.h>
+#endif
 
 using std::size_t;
 using std::int8_t;
@@ -495,23 +499,31 @@ __host__ __device__ uint64_t umul32hi(uint32_t a, uint32_t b) {
 __host__ __device__ uint64_t umul64hi(uint64_t a, uint64_t b) {
 #ifdef __CUDA_ARCH__
   return __umul64hi(a, b);
-#else
+#elif defined(NCCL_OS_LINUX)
   return uint64_t(__uint128_t(a)*__uint128_t(b) >> 64);
+#elif defined(NCCL_OS_WINDOWS)
+  return __umulh(a, b);
 #endif
 }
 
 __host__ __device__ int clz32(int x) {
 #ifdef __CUDA_ARCH__
   return __clz(x);
-#else
+#elif defined(NCCL_OS_LINUX)
   return x==0 ? 32 : __builtin_clz(x);
+#elif defined(NCCL_OS_WINDOWS)
+  unsigned long idx;
+  return _BitScanReverse(&idx, (unsigned long)x) ? 31 - (int)idx : 32;
 #endif
 }
 __host__ __device__ int clz64(long long x) {
 #ifdef __CUDA_ARCH__
   return __clzll(x);
-#else
+#elif defined(NCCL_OS_LINUX)
   return x==0 ? 64 : __builtin_clzll(x);
+#elif defined(NCCL_OS_WINDOWS)
+  unsigned long idx;
+  return _BitScanReverse64(&idx, (unsigned long long)x) ? 63 - (int)idx : 64;
 #endif
 }
 }
@@ -906,7 +918,7 @@ __host__ __device__ void genInput(
   // limit to two ranks contributing non-zero values. This way there is no ambiguity
   // of summation.
   int r = shuffleRank(rank_n, rank_me, rng);
-  uint64_t m = (rng*(r ? 0xbeef : 1)) & ((1ul<<FloatLayout<T>::mantissa_bits)-1);
+  uint64_t m = (rng*(r ? 0xbeef : 1)) & ((1ull<<FloatLayout<T>::mantissa_bits)-1);
   ans = r < 2 ? castTo<T>(1+m) : castTo<T>((uint64_t)0);
 }
 
@@ -916,8 +928,8 @@ __host__ __device__ void genOutput(
     std::false_type /*integral*/
   ) {
   shuffleRank(rank_n, -1, rng);
-  uint64_t m0 = (rng*(0 ? 0xbeef : 1)) & ((1ul<<FloatLayout<T>::mantissa_bits)-1);
-  uint64_t m1 = (rng*(1 ? 0xbeef : 1)) & ((1ul<<FloatLayout<T>::mantissa_bits)-1);
+  uint64_t m0 = (rng*(0 ? 0xbeef : 1)) & ((1ull<<FloatLayout<T>::mantissa_bits)-1);
+  uint64_t m1 = (rng*(1 ? 0xbeef : 1)) & ((1ull<<FloatLayout<T>::mantissa_bits)-1);
   if (rank_n == 1) {
     ans = castTo<T>(1+m0);
   } else {

@@ -5,25 +5,27 @@
  ************************************************************************/
 
 #include "common.h"
-#include <pthread.h>
 #include <cstdio>
 #include <type_traits>
 #include <limits>
-#include <getopt.h>
-#include <libgen.h>
 #include <string.h>
 #include <ctype.h>
+#include <mutex>
+#include <condition_variable>
+#include <thread>
+#include <vector>
 #include "cuda.h"
-#include <errno.h>     /* program_invocation_short_name */
 
 #include "util.h"
 #include "../verifiable/verifiable.h"
 
+#if defined(NCCL_OS_LINUX)
 #pragma weak ncclCommWindowRegister
 #pragma weak ncclCommWindowDeregister
 #pragma weak ncclDevCommCreate
 #pragma weak ncclDevCommDestroy
 #pragma weak ncclCommQueryProperties
+#endif
 
 #define DIVUP(x, y) \
     (((x)+(y)-1)/(y))
@@ -71,12 +73,17 @@ int test_ncclVersion = 0; // init'd with ncclGetVersion()
 #endif
 
 // For libnccl's < 2.13
+#if defined(NCCL_OS_LINUX)
 extern "C" __attribute__((weak)) char const* ncclGetLastError(ncclComm_t comm) {
   return "";
 }
+#elif defined(NCCL_OS_WINDOWS)
+extern "C" char const* ncclGetLastError(ncclComm_t comm);
+#endif
 
 int is_main_proc = 0;
 thread_local int is_main_thread = 0;
+static const char* programName = nullptr;
 
 // Command line parameter defaults
 int nThreads = 1;
@@ -155,7 +162,7 @@ static const char *getExtension(const char *path) {
 
 static output_file_type_t classifyOutputFile(const char *filename) {
   const char *extension = getExtension(filename);
-  if (extension != nullptr && strcasecmp(extension, "json") == 0) {
+  if (extension != nullptr && ncclTestStrcasecmp(extension, "json") == 0) {
     return JSON_FILE_OUTPUT;
   }
 
@@ -268,28 +275,28 @@ testResult_t InitData(void* data, const size_t count, size_t offset, ncclDataTyp
 
 void Barrier(struct threadArgs *args) {
   thread_local int epoch = 0;
-  static pthread_mutex_t lock[2] = {PTHREAD_MUTEX_INITIALIZER, PTHREAD_MUTEX_INITIALIZER};
-  static pthread_cond_t cond[2] = {PTHREAD_COND_INITIALIZER, PTHREAD_COND_INITIALIZER};
+  static std::mutex lock[2];
+  static std::condition_variable cond[2];
   static int counter[2] = {0, 0};
 
-  pthread_mutex_lock(&lock[epoch]);
+  std::unique_lock<std::mutex> ul(lock[epoch]);
   if(++counter[epoch] == args->nThreads)
-    pthread_cond_broadcast(&cond[epoch]);
+    cond[epoch].notify_all();
 
   if(args->thread+1 == args->nThreads) {
     while(counter[epoch] != args->nThreads)
-      pthread_cond_wait(&cond[epoch], &lock[epoch]);
+      cond[epoch].wait(ul);
     #ifdef MPI_SUPPORT
       MPI_Barrier(MPI_COMM_WORLD);
     #endif
     counter[epoch] = 0;
-    pthread_cond_broadcast(&cond[epoch]);
+    cond[epoch].notify_all();
   }
   else {
     while(counter[epoch] != 0)
-      pthread_cond_wait(&cond[epoch], &lock[epoch]);
+      cond[epoch].wait(ul);
   }
-  pthread_mutex_unlock(&lock[epoch]);
+  ul.unlock();
   epoch ^= 1;
 }
 
@@ -299,12 +306,12 @@ void Barrier(struct threadArgs *args) {
 template<typename T>
 void Allreduce(struct threadArgs* args, T* value, int average) {
   thread_local int epoch = 0;
-  static pthread_mutex_t lock[2] = {PTHREAD_MUTEX_INITIALIZER, PTHREAD_MUTEX_INITIALIZER};
-  static pthread_cond_t cond[2] = {PTHREAD_COND_INITIALIZER, PTHREAD_COND_INITIALIZER};
+  static std::mutex lock[2];
+  static std::condition_variable cond[2];
   static T accumulator[2];
   static int counter[2] = {0, 0};
 
-  pthread_mutex_lock(&lock[epoch]);
+  std::unique_lock<std::mutex> ul(lock[epoch]);
   if(counter[epoch] == 0) {
     if(average != 0 || args->thread == 0) accumulator[epoch] = *value;
   } else {
@@ -318,11 +325,11 @@ void Allreduce(struct threadArgs* args, T* value, int average) {
   }
 
   if(++counter[epoch] == args->nThreads)
-    pthread_cond_broadcast(&cond[epoch]);
+    cond[epoch].notify_all();
 
   if(args->thread+1 == args->nThreads) {
     while(counter[epoch] != args->nThreads)
-      pthread_cond_wait(&cond[epoch], &lock[epoch]);
+      cond[epoch].wait(ul);
 
     #ifdef MPI_SUPPORT
     if(average != 0) {
@@ -340,13 +347,13 @@ void Allreduce(struct threadArgs* args, T* value, int average) {
 
     if(average == 1) accumulator[epoch] /= args->totalProcs*args->nThreads;
     counter[epoch] = 0;
-    pthread_cond_broadcast(&cond[epoch]);
+    cond[epoch].notify_all();
   }
   else {
     while(counter[epoch] != 0)
-      pthread_cond_wait(&cond[epoch], &lock[epoch]);
+      cond[epoch].wait(ul);
   }
-  pthread_mutex_unlock(&lock[epoch]);
+  ul.unlock();
 
   *value = accumulator[epoch];
   epoch ^= 1;
@@ -451,7 +458,7 @@ testResult_t testStreamSynchronize(int ngpus, cudaStream_t* streams, ncclComm_t*
    }
 
    // We might want to let other threads (including NCCL threads) use the CPU.
-   if (idle) sched_yield();
+   if (idle) std::this_thread::yield();
   }
   free(done);
   return testSuccess;
@@ -567,8 +574,8 @@ testResult_t BenchTime(struct threadArgs* args, ncclDataType_t type, ncclRedOp_t
   Barrier(args);
 
 #if CUDART_VERSION >= 11030
-  cudaGraph_t graphs[args->nGpus];
-  cudaGraphExec_t graphExec[args->nGpus];
+  std::vector<cudaGraph_t> graphs(args->nGpus);
+  std::vector<cudaGraphExec_t> graphExec(args->nGpus);
   if (cudaGraphLaunches >= 1) {
     // Begin cuda graph capture
     for (int i=0; i<args->nGpus; i++) {
@@ -595,11 +602,11 @@ testResult_t BenchTime(struct threadArgs* args, ncclDataType_t type, ncclRedOp_t
   if (cudaGraphLaunches >= 1) {
     // End cuda graph capture
     for (int i=0; i<args->nGpus; i++) {
-      CUDACHECK(cudaStreamEndCapture(args->streams[i], graphs+i));
+      CUDACHECK(cudaStreamEndCapture(args->streams[i], graphs.data()+i));
     }
     // Instantiate cuda graph
     for (int i=0; i<args->nGpus; i++) {
-      CUDACHECK(cudaGraphInstantiate(graphExec+i, graphs[i], NULL, NULL, 0));
+      CUDACHECK(cudaGraphInstantiate(graphExec.data()+i, graphs[i], NULL, NULL, 0));
     }
     // Resync CPU, restart timing, launch cuda graph
     Barrier(args);
@@ -636,7 +643,7 @@ testResult_t BenchTime(struct threadArgs* args, ncclDataType_t type, ncclRedOp_t
   Barrier(args);
 
   int64_t wrongElts = 0;
-  static __thread int rep = 0;
+  static thread_local int rep = 0;
   rep++;
   for (int c = 0; c < datacheck; c++) {
       // Initialize sendbuffs, recvbuffs and expected
@@ -658,11 +665,11 @@ testResult_t BenchTime(struct threadArgs* args, ncclDataType_t type, ncclRedOp_t
       if (cudaGraphLaunches >= 1) {
         // End cuda graph capture
         for (int i=0; i<args->nGpus; i++) {
-          CUDACHECK(cudaStreamEndCapture(args->streams[i], graphs+i));
+          CUDACHECK(cudaStreamEndCapture(args->streams[i], graphs.data()+i));
         }
         // Instantiate cuda graph
         for (int i=0; i<args->nGpus; i++) {
-          CUDACHECK(cudaGraphInstantiate(graphExec+i, graphs[i], NULL, NULL, 0));
+          CUDACHECK(cudaGraphInstantiate(graphExec.data()+i, graphs[i], NULL, NULL, 0));
         }
         // Launch cuda graph
         for (int i=0; i<args->nGpus; i++) {
@@ -897,13 +904,11 @@ testResult_t threadInit(struct threadArgs* args) {
   return testSuccess;
 }
 
-void* threadLauncher(void* thread_) {
-  struct testThread* thread = (struct testThread*)thread_;
+static void threadLauncher(struct testThread* thread) {
   thread->ret = thread->func(&thread->args);
-  return NULL;
 }
 testResult_t threadLaunch(struct testThread* thread) {
-  pthread_create(&thread->thread, NULL, threadLauncher, thread);
+  thread->thread = std::thread(threadLauncher, thread);
   return testSuccess;
 }
 
@@ -925,7 +930,18 @@ testResult_t run(); // Main function
 
 int main(int argc, char* argv[], char **envp) {
   // Make sure everyline is flushed so that we see the progress of the test
-  setlinebuf(stdout);
+  ncclTestSetlinebuf(stdout);
+  const char* slash = strrchr(argv[0], '/');
+  const char* backslash = strrchr(argv[0], '\\');
+  const char* sep = nullptr;
+  if (slash && backslash) {
+    sep = slash > backslash ? slash : backslash;
+  } else if (slash) {
+    sep = slash;
+  } else {
+    sep = backslash;
+  }
+  programName = sep ? sep + 1 : argv[0];
 
   #if NCCL_VERSION_CODE >= NCCL_VERSION(2,4,0)
     ncclGetVersion(&test_ncclVersion);
@@ -1182,7 +1198,7 @@ int main(int argc, char* argv[], char **envp) {
             "[-M,--memory <0/1> enable memory usage report (default: 0)] \n\t"
             "[-u,--unalign <index of first element> Misalign source and destination buffers (default: 0)] \n\t"
             "[-h,--help]\n",
-          basename(argv[0]));
+          programName);
         return 0;
     }
   }
@@ -1227,7 +1243,7 @@ static bool parseInt(char *s, int *num) {
   while (*s && isspace(*s)) ++s;
   if (!*s) return false;
 
-  if (strncasecmp(s, "0b", 2) == 0)
+  if (ncclTestStrncasecmp(s, "0b", 2) == 0)
     *num = (int)strtoul(s + 2, &p, 2);
   else
     *num = (int)strtoul(s, &p, 0);
@@ -1247,9 +1263,9 @@ testResult_t run() {
 #ifdef MPI_SUPPORT
   MPI_Comm_size(MPI_COMM_WORLD, &totalProcs);
   MPI_Comm_rank(MPI_COMM_WORLD, &proc);
-  uint64_t hostHashs[totalProcs];
+  std::vector<uint64_t> hostHashs(totalProcs);
   hostHashs[proc] = getHostHash(hostname);
-  MPI_Allgather(MPI_IN_PLACE, 0, MPI_DATATYPE_NULL, hostHashs, sizeof(uint64_t), MPI_BYTE, MPI_COMM_WORLD);
+  MPI_Allgather(MPI_IN_PLACE, 0, MPI_DATATYPE_NULL, hostHashs.data(), sizeof(uint64_t), MPI_BYTE, MPI_COMM_WORLD);
   for (int p=0; p<totalProcs; p++) {
     if (p == proc) break;
     if (hostHashs[p] == hostHashs[proc]) localRank++;
@@ -1260,23 +1276,23 @@ testResult_t run() {
     color = proc & strtoul(splitMaskEnv, NULL, 16);
   } else if (splitMaskEnv = getenv("NCCL_TESTS_SPLIT")) {
     if (
-      (strncasecmp(splitMaskEnv, "AND", strlen("AND")) == 0 && parseInt(splitMaskEnv + strlen("AND"), &color)) ||
-      (strncasecmp(splitMaskEnv, "&", strlen("&")) == 0 && parseInt(splitMaskEnv + strlen("&"), &color))
+      (ncclTestStrncasecmp(splitMaskEnv, "AND", strlen("AND")) == 0 && parseInt(splitMaskEnv + strlen("AND"), &color)) ||
+      (ncclTestStrncasecmp(splitMaskEnv, "&", strlen("&")) == 0 && parseInt(splitMaskEnv + strlen("&"), &color))
     )
         color = proc & color;
     if (
-      (strncasecmp(splitMaskEnv, "OR", strlen("OR")) == 0 && parseInt(splitMaskEnv + strlen("OR"), &color)) ||
-      (strncasecmp(splitMaskEnv, "|", strlen("|")) == 0 && parseInt(splitMaskEnv + strlen("|"), &color))
+      (ncclTestStrncasecmp(splitMaskEnv, "OR", strlen("OR")) == 0 && parseInt(splitMaskEnv + strlen("OR"), &color)) ||
+      (ncclTestStrncasecmp(splitMaskEnv, "|", strlen("|")) == 0 && parseInt(splitMaskEnv + strlen("|"), &color))
     )
         color = proc | color;
     if (
-      (strncasecmp(splitMaskEnv, "MOD", strlen("MOD")) == 0 && parseInt(splitMaskEnv + strlen("MOD"), &color)) ||
-      (strncasecmp(splitMaskEnv, "%", strlen("%")) == 0 && parseInt(splitMaskEnv + strlen("%"), &color))
+      (ncclTestStrncasecmp(splitMaskEnv, "MOD", strlen("MOD")) == 0 && parseInt(splitMaskEnv + strlen("MOD"), &color)) ||
+      (ncclTestStrncasecmp(splitMaskEnv, "%", strlen("%")) == 0 && parseInt(splitMaskEnv + strlen("%"), &color))
     )
         color = proc % color;
     if (
-      (strncasecmp(splitMaskEnv, "DIV", strlen("DIV")) == 0 && parseInt(splitMaskEnv + strlen("DIV"), &color)) ||
-      (strncasecmp(splitMaskEnv, "/", strlen("/")) == 0 && parseInt(splitMaskEnv + strlen("/"), &color))
+      (ncclTestStrncasecmp(splitMaskEnv, "DIV", strlen("DIV")) == 0 && parseInt(splitMaskEnv + strlen("DIV"), &color)) ||
+      (ncclTestStrncasecmp(splitMaskEnv, "/", strlen("/")) == 0 && parseInt(splitMaskEnv + strlen("/"), &color))
     )
         color = proc / color;
   }
@@ -1291,7 +1307,7 @@ testResult_t run() {
   jsonIdentifyWriter(is_main_thread);
 
   size_t maxMem = ~0;
-  testResult_t report_result = writeDeviceReport(&maxMem, localRank, proc, totalProcs, color, hostname, program_invocation_short_name);
+  testResult_t report_result = writeDeviceReport(&maxMem, localRank, proc, totalProcs, color, hostname, programName);
   if(report_result != testSuccess) {
     return report_result;
   }
@@ -1315,11 +1331,11 @@ testResult_t run() {
   MPI_Bcast(&ncclId, sizeof(ncclId), MPI_BYTE, 0, mpi_comm);
   MPI_Barrier(MPI_COMM_WORLD); // Ensure Bcast is complete for HCOLL
 #endif
-  int gpus[nGpus*nThreads];
-  cudaStream_t streams[nGpus*nThreads];
-  void* sendbuffs[nGpus*nThreads];
-  void* recvbuffs[nGpus*nThreads];
-  void* expected[nGpus*nThreads];
+  std::vector<int> gpus(nGpus*nThreads);
+  std::vector<cudaStream_t> streams(nGpus*nThreads);
+  std::vector<void*> sendbuffs(nGpus*nThreads);
+  std::vector<void*> recvbuffs(nGpus*nThreads);
+  std::vector<void*> expected(nGpus*nThreads);
   size_t sendBytes, recvBytes;
 
   ncclTestEngine.getBuffSize(&sendBytes, &recvBytes, (size_t)maxBytes, (size_t)ncclProcs*nGpus*nThreads);
@@ -1333,7 +1349,7 @@ testResult_t run() {
       streams[i] = NULL;
     }
     else {
-      CUDACHECK(cudaStreamCreateWithFlags(streams+i, cudaStreamNonBlocking));
+      CUDACHECK(cudaStreamCreateWithFlags(streams.data()+i, cudaStreamNonBlocking));
     }
     int archMajor, archMinor;
     CUDACHECK(cudaDeviceGetAttribute(&archMajor, cudaDevAttrComputeCapabilityMajor, gpus[i]));
@@ -1363,18 +1379,14 @@ testResult_t run() {
   //if parallel init is not selected, use main thread to initialize NCCL
   ncclComm_t* comms = (ncclComm_t*)malloc(sizeof(ncclComm_t)*nThreads*nGpus);
 #if NCCL_VERSION_CODE >= NCCL_VERSION(2,19,0)
-  void* sendRegHandles[nThreads*nGpus];
-  void* recvRegHandles[nThreads*nGpus];
-  memset(sendRegHandles, 0, sizeof(sendRegHandles));
-  memset(recvRegHandles, 0, sizeof(recvRegHandles));
+  std::vector<void*> sendRegHandles(nThreads*nGpus);
+  std::vector<void*> recvRegHandles(nThreads*nGpus);
 #endif
 #if NCCL_VERSION_CODE >= NCCL_VERSION(2,28,0)
-  ncclDevComm devComms[nThreads*nGpus];
+  std::vector<ncclDevComm> devComms(nThreads*nGpus);
 #endif
-  int64_t initGpuMem[nThreads];
-  int64_t bufferMemory[nThreads];
-  memset(initGpuMem, 0, sizeof(initGpuMem));
-  memset(bufferMemory, 0, sizeof(bufferMemory));
+  std::vector<int64_t> initGpuMem(nThreads);
+  std::vector<int64_t> bufferMemory(nThreads);
   if (!parallel_init) {
     // Capture the memory used by the GPUs before initializing the NCCL communicators
     int64_t* initFreeGpuMem = (int64_t*)calloc(nGpus*3, sizeof(int64_t));
@@ -1383,7 +1395,7 @@ testResult_t run() {
       getGPUMemoryInfo(nullptr, &initFreeGpuMem[g]);
     }
     //if parallel init is not selected, use main thread to initialize NCCL
-    TESTCHECK(initComms(comms, nGpus*nThreads, ncclProc*nThreads*nGpus, ncclProcs*nThreads*nGpus, gpus, ncclId));
+    TESTCHECK(initComms(comms, nGpus*nThreads, ncclProc*nThreads*nGpus, ncclProcs*nThreads*nGpus, gpus.data(), ncclId));
 
      // Capture the memory used by the GPUs after initializing the NCCL communicators
      for (int g = 0; g < nGpus; ++g) {
@@ -1399,7 +1411,7 @@ testResult_t run() {
      NCCLCHECK(ncclGroupStart());
      for (int i=0; i<nGpus*nThreads; i++) {
        CUDACHECK(cudaSetDevice(gpus[i]));
-       TESTCHECK(AllocateBuffs(sendbuffs+i, sendBytes, recvbuffs+i, recvBytes, expected+i, (size_t)maxBytes));
+       TESTCHECK(AllocateBuffs(sendbuffs.data()+i, sendBytes, recvbuffs.data()+i, recvBytes, expected.data()+i, (size_t)maxBytes));
 #if NCCL_VERSION_CODE >= NCCL_VERSION(2,27,0)
        if (test_ncclVersion >= NCCL_VERSION(2,27,0) && (local_register == SYMMETRIC_REGISTER)) {
          NCCLCHECK(ncclCommWindowRegister(comms[i], sendbuffs[i], maxBytes, (ncclWindow_t*)&sendRegHandles[i], NCCL_WIN_COLL_SYMMETRIC));
@@ -1456,7 +1468,7 @@ testResult_t run() {
 
        NCCLCHECK(ncclGroupStart());
        for (int i = 0; i < nGpus * nThreads; i++) {
-         NCCLCHECK(ncclDevCommCreate(comms[i], &reqs, devComms+i));
+         NCCLCHECK(ncclDevCommCreate(comms[i], &reqs, devComms.data()+i));
        }
        NCCLCHECK(ncclGroupEnd());
      }
@@ -1474,10 +1486,10 @@ testResult_t run() {
     free(initFreeGpuMem);
   }
 
-  int errors[nThreads];
-  double bw[nThreads];
-  int64_t devMemUsed[nThreads];
-  int bw_count[nThreads];
+  std::vector<int> errors(nThreads);
+  std::vector<double> bw(nThreads);
+  std::vector<int64_t> devMemUsed(nThreads);
+  std::vector<int> bw_count(nThreads);
   for (int t=0; t<nThreads; t++) {
     bw[t] = 0.0;
     errors[t] = bw_count[t] = 0;
@@ -1488,8 +1500,7 @@ testResult_t run() {
 
   writeResultHeader(report_cputime, report_timestamps);
 
-  struct testThread threads[nThreads];
-  memset(threads, 0, sizeof(struct testThread)*nThreads);
+  std::vector<struct testThread> threads(nThreads);
 
   for (int t=nThreads-1; t>=0; t--) {
     threads[t].args.minbytes=minBytes;
@@ -1504,40 +1515,40 @@ testResult_t run() {
     threads[t].args.nThreads=nThreads;
     threads[t].args.thread=t;
     threads[t].args.nGpus=nGpus;
-    threads[t].args.gpus=gpus+t*nGpus;
-    threads[t].args.sendbuffs = sendbuffs+t*nGpus;
-    threads[t].args.recvbuffs = recvbuffs+t*nGpus;
-    threads[t].args.expected = expected+t*nGpus;
+    threads[t].args.gpus=gpus.data()+t*nGpus;
+    threads[t].args.sendbuffs = sendbuffs.data()+t*nGpus;
+    threads[t].args.recvbuffs = recvbuffs.data()+t*nGpus;
+    threads[t].args.expected = expected.data()+t*nGpus;
 #if NCCL_VERSION_CODE >= NCCL_VERSION(2,28,0)
-    threads[t].args.devComms = devComms+t*nGpus;
+    threads[t].args.devComms = devComms.data()+t*nGpus;
 #endif
 #if NCCL_VERSION_CODE >= NCCL_VERSION(2,19,0)
-    threads[t].args.sendRegHandles = sendRegHandles+t*nGpus;
-    threads[t].args.recvRegHandles = recvRegHandles+t*nGpus;
+    threads[t].args.sendRegHandles = sendRegHandles.data()+t*nGpus;
+    threads[t].args.recvRegHandles = recvRegHandles.data()+t*nGpus;
 #endif
     threads[t].args.ncclId = ncclId;
     threads[t].args.comms=comms+t*nGpus;
-    threads[t].args.streams=streams+t*nGpus;
+    threads[t].args.streams=streams.data()+t*nGpus;
 
-    threads[t].args.errors=errors+t;
-    threads[t].args.bw=bw+t;
-    threads[t].args.bw_count=bw_count+t;
-    threads[t].args.initGpuMem = initGpuMem + t;
-    threads[t].args.bufferMemory = bufferMemory + t;
-    threads[t].args.devMemUsed = devMemUsed + t;
+    threads[t].args.errors=errors.data()+t;
+    threads[t].args.bw=bw.data()+t;
+    threads[t].args.bw_count=bw_count.data()+t;
+    threads[t].args.initGpuMem = initGpuMem.data() + t;
+    threads[t].args.bufferMemory = bufferMemory.data() + t;
+    threads[t].args.devMemUsed = devMemUsed.data() + t;
 
     threads[t].args.reportErrors = datacheck;
 
     threads[t].func = parallel_init ? threadInit : threadRunTests;
     if (t)
-      TESTCHECK(threadLaunch(threads+t));
+      TESTCHECK(threadLaunch(threads.data()+t));
     else
       TESTCHECK(threads[t].func(&threads[t].args));
   }
 
   // Wait for other threads and accumulate stats and errors
   for (int t=nThreads-1; t>=0; t--) {
-    if (t) pthread_join(threads[t].thread, NULL);
+    if (t) threads[t].thread.join();
     TESTCHECK(threads[t].ret);
     if (t) {
       errors[0] += errors[t];
@@ -1572,7 +1583,7 @@ testResult_t run() {
 #endif
 #if NCCL_VERSION_CODE >= NCCL_VERSION(2,28,0)
       if (deviceImpl) {
-        NCCLCHECK(ncclDevCommDestroy(comms[i], devComms+i));
+        NCCLCHECK(ncclDevCommDestroy(comms[i], devComms.data()+i));
       }
 #endif
       NCCLCHECK(ncclCommDestroy(comms[i]));
@@ -1597,7 +1608,7 @@ testResult_t run() {
   const double check_avg_bw = envstr ? atof(envstr) : -1;
   bw[0] /= bw_count[0];
 
-  writeResultFooter(errors, bw, check_avg_bw, program_invocation_short_name);
+  writeResultFooter(errors.data(), bw.data(), check_avg_bw, programName);
   if (memory_report) {
     memInfo_t memInfos[3];
     memInfos[0] = { initGpuMem[0], "Initialization" };

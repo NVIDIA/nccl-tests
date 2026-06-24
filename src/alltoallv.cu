@@ -117,10 +117,10 @@
 #include <stdio.h>
 #include <ctype.h>
 #include <errno.h>
-#include <pthread.h>
+#include <atomic>
+#include <mutex>
 #include <stdint.h>
 #include <stdlib.h>
-#include <sys/stat.h>
 
 #define PRINT if (is_main_thread) printf
 
@@ -134,16 +134,16 @@ static int traffic_matrix_dim = 0;
 static double traffic_matrix_scale = 1.0; // scale factor applied to traffic matrix values
 static double distance_weighted_spread = 1.0; // 0.0 => uniform, 1.0 => fully distance-weighted (default)
 
-static pthread_mutex_t alltoallv_lock = PTHREAD_MUTEX_INITIALIZER;
+static std::mutex alltoallv_lock;
 static int alltoallv_inited = 0;
 
 // atomics used for error flag, since init can be multi-threaded
-static int alltoallv_error_set = 0;
+static std::atomic<int> alltoallv_error_set{0};
 static inline int AlltoAllvHasError() {
-  return __atomic_load_n(&alltoallv_error_set, __ATOMIC_RELAXED);
+  return alltoallv_error_set.load(std::memory_order_relaxed);
 }
 static inline void AlltoAllvSetError() {
-  __atomic_store_n(&alltoallv_error_set, 1, __ATOMIC_RELAXED);
+  alltoallv_error_set.store(1, std::memory_order_relaxed);
 }
 
 static void AlltoAllvParseEnv() {
@@ -175,7 +175,6 @@ static int AlltoAllvReadTrafficMatrix() {
   FILE* f = NULL;
   char* buf = NULL;
   size_t* tmp_matrix_data = NULL;
-  struct stat st;
   size_t fileLen = 0;
   char* p = NULL;
   char* end = NULL;
@@ -184,6 +183,7 @@ static int AlltoAllvReadTrafficMatrix() {
   size_t rows = 0, cols = 0, tmp_cols = 0;
   size_t n_elts = 0;
   size_t k = 0;
+  long pos = 0;
   int rc = 1;
 
   f = fopen(traffic_matrix_file, "rb");
@@ -192,11 +192,20 @@ static int AlltoAllvReadTrafficMatrix() {
     goto exit;
   }
 
-  if (fstat(fileno(f), &st) != 0) {
-    PRINT("Unable to stat alltoallv traffic matrix file %s.\n", traffic_matrix_file);
+  if (fseek(f, 0, SEEK_END) != 0) {
+    PRINT("Unable to seek alltoallv traffic matrix file %s.\n", traffic_matrix_file);
     goto exit;
   }
-  fileLen = (size_t)st.st_size;
+  pos = ftell(f);
+  if (pos < 0) {
+    PRINT("Unable to tell alltoallv traffic matrix file size %s.\n", traffic_matrix_file);
+    goto exit;
+  }
+  fileLen = (size_t)pos;
+  if (fseek(f, 0, SEEK_SET) != 0) {
+    PRINT("Unable to rewind alltoallv traffic matrix file %s.\n", traffic_matrix_file);
+    goto exit;
+  }
 
   buf = (char*)malloc(fileLen + 1);
   if (!buf) {
@@ -319,7 +328,7 @@ exit:
 }
 
 static void AlltoAllvInit(int nranks) {
-  pthread_mutex_lock(&alltoallv_lock);
+  std::lock_guard<std::mutex> lock(alltoallv_lock);
 
   if (!alltoallv_inited) {
     AlltoAllvParseEnv();
@@ -339,7 +348,6 @@ static void AlltoAllvInit(int nranks) {
     AlltoAllvSetError();
   }
 
-  pthread_mutex_unlock(&alltoallv_lock);
 }
 
 // get peer-to-peer bytes from traffic matrix
@@ -569,14 +577,13 @@ void AlltoAllvGetBuffSize(size_t *sendcount, size_t *recvcount, size_t count, in
     // if using traffic matrix, validate that the max buffer size is large enough
     size_t total_bytes_req = MAX(*sendcount, *recvcount);
     if (count < total_bytes_req) {
-      pthread_mutex_lock(&alltoallv_lock);
+      std::lock_guard<std::mutex> lock(alltoallv_lock);
       if (!AlltoAllvHasError()) {
         if (is_main_proc)
           printf("maxBytes (-e) must be at least %zu bytes as required by traffic matrix file %s (got %zu). Increase -e.\n",
                  total_bytes_req, traffic_matrix_file, count);
         AlltoAllvSetError();
       }
-      pthread_mutex_unlock(&alltoallv_lock);
       *sendcount = *recvcount = 0;
       return;
     }
@@ -616,9 +623,7 @@ testResult_t AlltoAllvRunTest(struct threadArgs* args, int root, ncclDataType_t 
   return testSuccess;
 }
 
-struct testEngine alltoAllvEngine = {
-  .getBuffSize = AlltoAllvGetBuffSize,
-  .runTest = AlltoAllvRunTest
+NCCL_WEAK struct testEngine ncclTestEngine = {
+  /* .getBuffSize = */ AlltoAllvGetBuffSize,
+  /* .runTest = */ AlltoAllvRunTest
 };
-
-#pragma weak ncclTestEngine=alltoAllvEngine
