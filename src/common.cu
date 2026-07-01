@@ -104,6 +104,7 @@ static int ncclroot = 0;
 int parallel_init = 0;
 int blocking_coll = 0;
 int per_iter_timing = 0;
+int per_iter_skip = 0;
 static int streamnull = 0;
 static int timeout = 0;
 int cudaGraphLaunches = 0;
@@ -879,9 +880,10 @@ testResult_t BenchTime(struct threadArgs* args, ncclDataType_t type, ncclRedOp_t
     if (allProcessTimes && nProcessRows > 1)
       ReduceProcessMaxIterTimes(iterTimes, allProcessTimes, nProcessRows, iters);
 
+    int summaryIters = iters - per_iter_skip;
     struct IterStats stats;
-    computeIterStats(iterTimes, iters, &stats);
-    writePerIterReport(&stats, iterTimes, iters, in_place==0, allProcessTimes, nProcessRows);
+    computeIterStats(iterTimes + per_iter_skip, summaryIters, &stats);
+    writePerIterReport(&stats, iterTimes, iters, per_iter_skip, in_place==0, allProcessTimes, nProcessRows);
 
     if (in_place && report_timestamps) writeTimestamp();
 
@@ -1193,13 +1195,14 @@ int main(int argc, char* argv[], char **envp) {
     {"memory", required_argument, 0, 'M'},
     {"unalign", required_argument, 0, 'u'},
     {"per_iter_timing", required_argument, 0, 'I'},
+    {"per_iter_skip", required_argument, 0, 'K'},
     {"help", no_argument, 0, 'h'},
     {}
   };
 
   while(1) {
     int c;
-    c = getopt_long(argc, argv, "t:g:b:e:i:f:n:m:w:N:p:I:c:o:d:r:z:y:T:hG:C:a:R:x:D:V:J:S:M:u:", longopts, &longindex);
+    c = getopt_long(argc, argv, "t:g:b:e:i:f:n:m:w:N:p:I:K:c:o:d:r:z:y:T:hG:C:a:R:x:D:V:J:S:M:u:", longopts, &longindex);
 
     if (c == -1)
       break;
@@ -1314,6 +1317,9 @@ int main(int argc, char* argv[], char **envp) {
       case 'I':
         per_iter_timing = (int)strtol(optarg, NULL, 0);
         break;
+      case 'K':
+        per_iter_skip = (int)strtol(optarg, NULL, 0);
+        break;
       case 'x':
 #if NCCL_VERSION_CODE >= NCCL_VERSION(2,27,0)
         ctaPolicy = (int)strtol(optarg, NULL, 0);
@@ -1392,6 +1398,7 @@ int main(int argc, char* argv[], char **envp) {
             "    (best with -z 0, -z 2, or -z 3; with -z 1 includes barrier wait;\n\t"
             "    i_p99 uses nearest-rank percentile and may equal i_max\n\t"
             "    with <100 samples) (default: 0)] \n\t"
+            "[-K,--per_iter_skip <count> exclude leading samples from -I summary stats (default: 0)] \n\t"
             "[-h,--help]\n",
           programName);
         return 0;
@@ -1418,6 +1425,14 @@ int main(int argc, char* argv[], char **envp) {
   if (blocking_coll == 3 && cudaGraphLaunches >= 1) {
     fprintf(stderr, "blocking mode (-z 3) is incompatible with CUDA graph mode (-G). Disabling.\n");
     blocking_coll = 0;
+  }
+  if (per_iter_skip < 0 || per_iter_skip >= iters) {
+    fprintf(stderr, "per-iteration skip (-K) must be between 0 and %d. Disabling.\n", iters - 1);
+    per_iter_skip = 0;
+  }
+  if (per_iter_skip && !per_iter_timing) {
+    fprintf(stderr, "per-iteration skip (-K) requires per-iteration timing (-I 1). Disabling.\n");
+    per_iter_skip = 0;
   }
 
 #ifdef MPI_SUPPORT

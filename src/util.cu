@@ -42,13 +42,14 @@ extern int agg_iters;
 extern int parallel_init;
 extern int blocking_coll;
 extern int per_iter_timing;
+extern int per_iter_skip;
 extern int cudaGraphLaunches;
 extern int unalign;
 
 static FILE *json_report_fp;
 static thread_local bool write_json;
 
-#define JSON_FILE_VERSION 2
+#define JSON_FILE_VERSION 3
 
 #define TIME_STRING_FORMAT "%Y-%m-%d %H:%M:%S"
 
@@ -560,7 +561,7 @@ void computeIterStats(const double* times, int n, struct IterStats* stats) {
   free(sorted);
 }
 
-void writePerIterReport(const struct IterStats* stats, const double* iterTimes, int nIters, bool out_of_place, const double* allProcessTimes, int nProcs) {
+void writePerIterReport(const struct IterStats* stats, const double* iterTimes, int nIters, int skippedIters, bool out_of_place, const double* allProcessTimes, int nProcs) {
   double cvPct = stats->avg > 0 ? (stats->stdev / stats->avg) * 100.0 : 0.0;
 
   char minStr[8], maxStr[8], p99Str[8], cvStr[8];
@@ -575,6 +576,7 @@ void writePerIterReport(const struct IterStats* stats, const double* iterTimes, 
     const char* key = out_of_place ? "out_of_place_per_iter" : "in_place_per_iter";
     jsonKey(key);
     jsonStartObject();
+    jsonKey("skipped_iterations"); jsonInt(skippedIters);
     jsonKey("min_us");   jsonDouble(stats->min * 1e6);
     jsonKey("max_us");   jsonDouble(stats->max * 1e6);
     jsonKey("avg_us");   jsonDouble(stats->avg * 1e6);
@@ -634,9 +636,11 @@ testResult_t writeDeviceReport(size_t *maxMem, int localRank, int proc, int tota
   if (blocking_coll == 3)
     PRINT("# Blocking Enabled: wait and barrier after each outer iteration (-n); "
           "time excludes barrier \n");
-  if (per_iter_timing)
-    PRINT("# Per-Iteration Report: CUDA event timing; "
-          "i_* uses max over process rows \n");
+  if (per_iter_timing) {
+    PRINT("# Per-Iteration Report: CUDA event timing; i_* uses max over process rows");
+    if (per_iter_skip) PRINT("; summary skips first %d iterations", per_iter_skip);
+    PRINT(" \n");
+  }
   if (parallel_init) PRINT("# Parallel Init Enabled: threads call into NcclInitRank concurrently \n");
   PRINT("#\n");
 
@@ -661,6 +665,7 @@ testResult_t writeDeviceReport(size_t *maxMem, int localRank, int proc, int tota
     jsonKey("graph");                 jsonInt(cudaGraphLaunches);
     jsonKey("blocking_collectives");  jsonBool(blocking_coll);
     jsonKey("per_iter_timing");     jsonBool(per_iter_timing);
+    jsonKey("per_iter_skip");       jsonInt(per_iter_skip);
     jsonKey("parallel_init");         jsonBool(parallel_init);
   }
 

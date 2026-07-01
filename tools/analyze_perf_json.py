@@ -65,6 +65,8 @@ def print_overview(data, placement_key, placement_name):
     print(f"  Results:    {len(data.get('results', []))}")
     cfg = data.get('config', {})
     print(f"  Iterations: {cfg.get('iterations')}  (agg: {cfg.get('aggregated_iterations', 1)})")
+    if cfg.get('per_iter_skip', 0):
+        print(f"  Summary skip: {cfg['per_iter_skip']} leading iterations")
     print(f"  Placement:  {placement_name}")
     r0 = data['results'][0] if data.get('results') else {}
     per_iter = r0.get(placement_key, {})
@@ -190,7 +192,7 @@ def print_spikes(data, placement_key, placement_label, threshold=1.5, sizes=None
 
 def print_iter0(data, placement_key, placement_label, sizes=None):
     print("=" * 80)
-    print(f"ITERATION 0 WARMUP IMPACT ({placement_label})")
+    print(f"ITERATION 0 WARMUP IMPACT (RAW, {placement_label})")
     print("=" * 80)
     print(f"{'Size':>14}  {'iter0 (us)':>10}  {'iter1+ avg':>10}  {'spike':>6}  {'CV w/ iter0':>11}  {'CV w/o':>8}")
     print("-" * 80)

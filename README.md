@@ -76,6 +76,8 @@ All tests support the same set of arguments :
   * `-I,--per_iter_timing <0/1>` collect per-iteration CUDA event timings and print summary columns.
     `i_p99` uses nearest-rank percentile and may equal `i_max` with fewer than 100 samples.
     Incompatible with CUDA graph capture (`-G`). Default : 0.
+  * `-K,--per_iter_skip <count>` exclude leading samples from `-I` summary statistics.
+    Raw per-iteration JSON data remains complete. Default : 0.
 * Test operation
   * `-p,--parallel_init <0/1>` use threads to initialize NCCL in parallel. Default : 0.
   * `-c,--check <check iteration count>` perform count iterations, checking correctness of results on each iteration. This can be quite slow on large numbers of GPUs. Default : 1.
