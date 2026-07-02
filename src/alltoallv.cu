@@ -305,7 +305,7 @@ static int AlltoAllvReadTrafficMatrix() {
     }
 
     // align per-peer traffic to 16-byte boundary for consistency with other perf tests
-    tmp_matrix_data[k++] = ((size_t)scaled) & -(size_t)16;
+    tmp_matrix_data[k++] = ((size_t)scaled) & ~(size_t)15;
     p = end;
   }
   if (k != n_elts) {
@@ -357,14 +357,14 @@ static inline size_t AlltoAllvGetPeerBytesFromMatrix(int i, int j) {
 
 // get peer-to-peer bytes using distance-weighted formula
 static inline size_t AlltoAllvGetPeerBytesDistanceWeighted(int i, int j, int nranks, size_t total_bytes) {
-  if (nranks == 1) return total_bytes & -(size_t)16;
+  if (nranks == 1) return total_bytes & ~(size_t)15;
   int distance = (j - i + nranks) % nranks;
   size_t sum_distances = (size_t)nranks * (nranks - 1) / 2;
   double uniform = (double)total_bytes / (double)nranks;
   double dist = (double)distance * (double)total_bytes / (double)sum_distances;
   double bytes = (1.0 - distance_weighted_spread) * uniform + distance_weighted_spread * dist;
   // align to per-peer chunk size to 16-byte boundary as in other tests
-  return (size_t)bytes & -(size_t)16;
+  return (size_t)bytes & ~(size_t)15;
 }
 
 static void AlltoAllvComputeMaxCounts(size_t *maxSendCount, size_t *maxRecvCount, size_t eltSize, int nranks, size_t total_bytes) {
@@ -393,7 +393,7 @@ static void AlltoAllvComputeMaxCounts(size_t *maxSendCount, size_t *maxRecvCount
 }
 
 void AlltoAllvGetCollByteCount(size_t *sendcount, size_t *recvcount, size_t *paramcount, size_t *sendInplaceOffset, size_t *recvInplaceOffset, size_t count, size_t eltSize, int nranks) {
-  *paramcount = alltoallv_use_generated_pattern ? (count / nranks) & -(16/eltSize) : 0;
+  *paramcount = alltoallv_use_generated_pattern ? (count / nranks) & ~(16/eltSize - 1) : 0;
   size_t total_bytes = (*paramcount) * nranks * eltSize;
   AlltoAllvComputeMaxCounts(sendcount, recvcount, eltSize, nranks, total_bytes);
   *sendInplaceOffset = 0;
@@ -492,10 +492,10 @@ static void AlltoAllvPrintRankBandwidths(int nranks, size_t total_bytes, double 
   }
 }
 
-void AlltoAllvGetBw(size_t count, int typesize, double sec, double* algBw, double* busBw, int nranks) {
+void AlltoAllvGetBw(size_t count, size_t typesize, double sec, double* algBw, double* busBw, int nranks) {
   size_t total_bytes = count * nranks * typesize;
   size_t max_sendcount, max_recvcount;
-  AlltoAllvComputeMaxCounts(&max_sendcount, &max_recvcount, (size_t)typesize, nranks, total_bytes);
+  AlltoAllvComputeMaxCounts(&max_sendcount, &max_recvcount, typesize, nranks, total_bytes);
   size_t max_bytes = MAX(max_sendcount, max_recvcount) * typesize;
   double baseBw = (double)max_bytes / 1.0E9 / sec;
 

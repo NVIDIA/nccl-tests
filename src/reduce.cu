@@ -33,7 +33,7 @@ testResult_t ReduceInitData(struct threadArgs* args, ncclDataType_t type, ncclRe
   return testSuccess;
 }
 
-void ReduceGetBw(size_t count, int typesize, double sec, double* algBw, double* busBw, int nranks) {
+void ReduceGetBw(size_t count, size_t typesize, double sec, double* algBw, double* busBw, int nranks) {
   double baseBw = (double)(count * typesize) / 1.0E9 / sec;
   *algBw = baseBw;
   *busBw = baseBw;
