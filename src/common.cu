@@ -772,6 +772,9 @@ testResult_t BenchTime(struct threadArgs* args, ncclDataType_t type, ncclRedOp_t
   if (cudaGraphLaunches >= 1) deltaSec = deltaSec/cudaGraphLaunches;
 
   if (record) {
+    // completeColl skips the stream sync in blocking mode with a single aggregated iteration.
+    if (blocking_coll && agg_iters <= 1)
+      TESTCHECK(testStreamSynchronize(args->nGpus, args->streams, args->comms));
     TESTCHECK(getElapsedTimes(args, iters, agg_iters));
     TESTCHECK(destroyEvents(args, iters));
   }
