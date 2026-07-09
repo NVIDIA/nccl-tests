@@ -485,15 +485,10 @@ void writeBenchMarkLineNullBody() {
 }
 
 void getFloatStr(double value, int width, char* str) {
-  int power = 0;
-  for (uint64_t val = 1; value >= val; val *= 10) power++;
-
-  if (power < width-2) sprintf(str, "%*.2f", width, value);
-  else if (power < width-1) sprintf(str, "%*.1f", width, value);
-  else if (power < width+1) sprintf(str, "%*.0f", width, value);
-  else if (width >= 7) sprintf(str, "%*.1e", width, value);
-  else if (width >= 8) sprintf(str, "%*.2e", width, value);
-  else sprintf(str, "%*.0e", width, value);
+  if (snprintf(str, width+1, "%*.2f", width, value) <= width) return;
+  if (snprintf(str, width+1, "%*.1f", width, value) <= width) return;
+  if (snprintf(str, width+1, "%*.0f", width, value) <= width) return;
+  snprintf(str, width+1, width >= 7 ? "%*.1e" : "%*.0e", width, value);
 }
 
 // Write the performance-related payload to stdout/json.
