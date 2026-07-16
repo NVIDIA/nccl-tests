@@ -127,6 +127,15 @@ struct testEngine {
 
 extern struct testEngine ncclTestEngine;
 
+struct bitwiseResult {
+  int64_t differentElts;
+  int64_t differentBits;
+  int64_t firstRepeat;
+  int64_t firstRank;
+  int64_t firstElt;
+  int64_t firstBit;
+};
+
 struct threadArgs {
   size_t nbytes;
   size_t minbytes;
@@ -157,12 +166,16 @@ struct threadArgs {
   float* ms;
 
   void** expected;
+  void** reference;
   size_t expectedBytes;
   int* errors;
+  int* bitwiseErrors;
   double* bw;
   int* bw_count;
 
   int reportErrors;
+
+  struct bitwiseResult bitwiseResults[2];
 
   struct testColl* collTest;
 
@@ -189,7 +202,7 @@ extern void Barrier(struct threadArgs* args);
 extern testResult_t TimeTest(struct threadArgs* args, ncclDataType_t type, const char* typeName, ncclRedOp_t op,  const char* opName, int root);
 extern testResult_t InitDataReduce(void* data, const size_t count, const size_t offset, ncclDataType_t type, ncclRedOp_t op, const uint64_t seed, const int nranks);
 extern testResult_t InitData(void* data, const size_t count, size_t offset, ncclDataType_t type, ncclRedOp_t op, const uint64_t seed, const int nranks, const int rank);
-extern testResult_t AllocateBuffs(void **sendbuff, size_t sendBytes, void **recvbuff, size_t recvBytes, void **expected, size_t nbytes);
+extern testResult_t AllocateBuffs(void **sendbuff, size_t sendBytes, void **recvbuff, size_t recvBytes, void **expected, void **reference, size_t nbytes);
 
 static void getHostName(char* hostname, int maxlen) {
   ncclTestGetHostname(hostname, maxlen);

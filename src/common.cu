@@ -94,6 +94,7 @@ size_t maxBytes = 32*1024*1024;
 size_t stepBytes = 1*1024*1024;
 size_t stepFactor = 1;
 int datacheck = 1;
+int bitwisecheck = 0;
 int warmup_iters = 1;
 int iters = 20;
 int agg_iters = 1;
@@ -276,6 +277,11 @@ testResult_t InitData(void* data, const size_t count, size_t offset, ncclDataTyp
   return testSuccess;
 }
 
+static void* GetOutputData(struct threadArgs* args, int gpu, int rank, int in_place) {
+  return in_place ? (void*)((uintptr_t)args->recvbuffs[gpu] + args->recvInplaceOffset*rank)
+                  : args->recvbuffs[gpu];
+}
+
 void Barrier(struct threadArgs *args) {
   thread_local int epoch = 0;
   static std::mutex lock[2];
@@ -442,7 +448,7 @@ testResult_t CheckData(struct threadArgs* args, ncclDataType_t type, ncclRedOp_t
   for (int i=0; i<args->nGpus; i++) {
     int rank = ((args->proc*args->nThreads + args->thread)*args->nGpus + i);
     CUDACHECK(cudaSetDevice(args->gpus[i]));
-    void *data = in_place ? ((void *)((uintptr_t)args->recvbuffs[i] + args->recvInplaceOffset*rank)) : args->recvbuffs[i];
+    void *data = GetOutputData(args, i, rank, in_place);
 
     TESTCHECK(CheckDelta(data, args->expected[i], count, 0, type, op, 0, nranks, wrongPerGpu+i));
 
@@ -476,6 +482,67 @@ testResult_t CheckData(struct threadArgs* args, ncclDataType_t type, ncclRedOp_t
   cudaFreeHost(wrongPerGpu);
 
   if (args->reportErrors && *wrongElts) args->errors[0]++;
+  return testSuccess;
+}
+
+testResult_t CaptureBitwiseReference(struct threadArgs* args, int in_place) {
+  for (int i=0; i<args->nGpus; i++) {
+    int rank = ((args->proc*args->nThreads + args->thread)*args->nGpus + i);
+    CUDACHECK(cudaSetDevice(args->gpus[i]));
+    void *data = GetOutputData(args, i, rank, in_place);
+    CUDACHECK(cudaMemcpyAsync(args->reference[i], data, args->expectedBytes,
+                              cudaMemcpyDeviceToDevice, args->streams[i]));
+  }
+  for (int i=0; i<args->nGpus; i++) {
+    CUDACHECK(cudaSetDevice(args->gpus[i]));
+    CUDACHECK(cudaStreamSynchronize(args->streams[i]));
+  }
+  return testSuccess;
+}
+
+testResult_t CheckBits(struct threadArgs* args, ncclDataType_t type, int in_place,
+                       struct bitwiseResult *result) {
+  size_t count = args->expectedBytes/wordSize(type);
+  ncclVerifiableBitwiseResult *perGpu = nullptr;
+  CUDACHECK(cudaHostAlloc((void**)&perGpu, args->nGpus*sizeof(*perGpu), cudaHostAllocMapped));
+
+  int64_t localDifferentElts = 0;
+  int64_t localDifferentBits = 0;
+  int64_t localFirstRank = INT64_MAX;
+  int64_t localFirstBit = INT64_MAX;
+  for (int i=0; i<args->nGpus; i++) {
+    int rank = ((args->proc*args->nThreads + args->thread)*args->nGpus + i);
+    CUDACHECK(cudaSetDevice(args->gpus[i]));
+    void *data = GetOutputData(args, i, rank, in_place);
+    CUDACHECK(ncclVerifiableCompareBits(data, args->reference[i], count, (int)type,
+                                        perGpu+i, cudaStreamDefault));
+    CUDACHECK(cudaDeviceSynchronize());
+    localDifferentElts += perGpu[i].different_elt_n;
+    localDifferentBits += perGpu[i].different_bit_n;
+    if(perGpu[i].different_bit_n != 0 &&
+       (rank < localFirstRank ||
+        (rank == localFirstRank && perGpu[i].first_different_bit < localFirstBit))) {
+      localFirstRank = rank;
+      localFirstBit = perGpu[i].first_different_bit;
+    }
+  }
+  CUDACHECK(cudaFreeHost(perGpu));
+
+  long long differentElts = localDifferentElts;
+  long long differentBits = localDifferentBits;
+  long long firstRank = localFirstRank;
+  Allreduce(args, &differentElts, /*sum*/4);
+  Allreduce(args, &differentBits, /*sum*/4);
+  Allreduce(args, &firstRank, /*min*/2);
+
+  long long firstBit = localFirstRank == firstRank ? localFirstBit : INT64_MAX;
+  Allreduce(args, &firstBit, /*min*/2);
+
+  result->differentElts = differentElts;
+  result->differentBits = differentBits;
+  result->firstRank = firstRank == INT64_MAX ? -1 : firstRank;
+  result->firstElt = firstBit == INT64_MAX ? -1 : firstBit/(8*wordSize(type));
+  result->firstBit = firstBit == INT64_MAX ? -1 : firstBit%(8*wordSize(type));
   return testSuccess;
 }
 
@@ -691,6 +758,49 @@ testResult_t destroyEvents(struct threadArgs* args, int eventIters) {
   return testSuccess;
 }
 
+testResult_t RunCheckCollective(struct threadArgs* args, ncclDataType_t type,
+                                ncclRedOp_t op, int root, int in_place) {
+#if CUDART_VERSION >= 11030
+  std::vector<cudaGraph_t> graphs(args->nGpus);
+  std::vector<cudaGraphExec_t> graphExec(args->nGpus);
+  if (cudaGraphLaunches >= 1) {
+    for (int i=0; i<args->nGpus; i++) {
+      CUDACHECK(cudaStreamBeginCapture(
+        args->streams[i], args->nThreads > 1 ? cudaStreamCaptureModeThreadLocal
+                                             : cudaStreamCaptureModeGlobal));
+    }
+  }
+#endif
+
+  TESTCHECK(startColl(args, type, op, root, in_place, 0));
+
+#if CUDART_VERSION >= 11030
+  if (cudaGraphLaunches >= 1) {
+    for (int i=0; i<args->nGpus; i++) {
+      CUDACHECK(cudaStreamEndCapture(args->streams[i], graphs.data()+i));
+    }
+    for (int i=0; i<args->nGpus; i++) {
+      CUDACHECK(cudaGraphInstantiate(graphExec.data()+i, graphs[i], NULL, NULL, 0));
+    }
+    for (int i=0; i<args->nGpus; i++) {
+      CUDACHECK(cudaGraphLaunch(graphExec[i], args->streams[i]));
+    }
+  }
+#endif
+
+  TESTCHECK(completeColl(args));
+
+#if CUDART_VERSION >= 11030
+  if (cudaGraphLaunches >= 1) {
+    for (int i=0; i<args->nGpus; i++) {
+      CUDACHECK(cudaGraphExecDestroy(graphExec[i]));
+      CUDACHECK(cudaGraphDestroy(graphs[i]));
+    }
+  }
+#endif
+  return testSuccess;
+}
+
 testResult_t BenchTime(struct threadArgs* args, ncclDataType_t type, ncclRedOp_t op, int root, int in_place) {
   size_t count = args->nbytes / wordSize(type);
   if (datacheck) {
@@ -803,48 +913,7 @@ testResult_t BenchTime(struct threadArgs* args, ncclDataType_t type, ncclRedOp_t
   for (int c = 0; c < datacheck; c++) {
       // Initialize sendbuffs, recvbuffs and expected
       TESTCHECK(args->collTest->initData(args, type, op, root, rep, in_place));
-
-#if CUDART_VERSION >= 11030
-      if (cudaGraphLaunches >= 1) {
-        // Begin cuda graph capture for data check
-        for (int i=0; i<args->nGpus; i++) {
-          CUDACHECK(cudaStreamBeginCapture(args->streams[i], args->nThreads > 1 ? cudaStreamCaptureModeThreadLocal : cudaStreamCaptureModeGlobal));
-        }
-      }
-#endif
-
-      //test validation in single itertion, should ideally be included into the multi-iteration run
-      TESTCHECK(startColl(args, type, op, root, in_place, 0));
-
-#if CUDART_VERSION >= 11030
-      if (cudaGraphLaunches >= 1) {
-        // End cuda graph capture
-        for (int i=0; i<args->nGpus; i++) {
-          CUDACHECK(cudaStreamEndCapture(args->streams[i], graphs.data()+i));
-        }
-        // Instantiate cuda graph
-        for (int i=0; i<args->nGpus; i++) {
-          CUDACHECK(cudaGraphInstantiate(graphExec.data()+i, graphs[i], NULL, NULL, 0));
-        }
-        // Launch cuda graph
-        for (int i=0; i<args->nGpus; i++) {
-          CUDACHECK(cudaGraphLaunch(graphExec[i], args->streams[i]));
-        }
-      }
-#endif
-
-      TESTCHECK(completeColl(args));
-
-#if CUDART_VERSION >= 11030
-      if (cudaGraphLaunches >= 1) {
-        //destroy cuda graph
-        for (int i=0; i<args->nGpus; i++) {
-          CUDACHECK(cudaGraphExecDestroy(graphExec[i]));
-          CUDACHECK(cudaGraphDestroy(graphs[i]));
-        }
-      }
-#endif
-
+      TESTCHECK(RunCheckCollective(args, type, op, root, in_place));
       TESTCHECK(CheckData(args, type, op, root, in_place, &wrongElts));
 
       //aggregate delta from all threads and procs
@@ -855,8 +924,42 @@ testResult_t BenchTime(struct threadArgs* args, ncclDataType_t type, ncclRedOp_t
       if (wrongElts) break;
   }
 
+  struct bitwiseResult bitwise = {};
+  bitwise.firstRepeat = -1;
+  bitwise.firstRank = -1;
+  bitwise.firstElt = -1;
+  bitwise.firstBit = -1;
+  if (bitwisecheck > 0) {
+    Barrier(args);
+    TESTCHECK(args->collTest->initData(args, type, op, root, rep, in_place));
+    TESTCHECK(RunCheckCollective(args, type, op, root, in_place));
+    TESTCHECK(CaptureBitwiseReference(args, in_place));
+
+    for (int b = 0; b < bitwisecheck; b++) {
+      TESTCHECK(args->collTest->initData(args, type, op, root, rep, in_place));
+      TESTCHECK(RunCheckCollective(args, type, op, root, in_place));
+
+      struct bitwiseResult current = {};
+      TESTCHECK(CheckBits(args, type, in_place, &current));
+      bitwise.differentElts += current.differentElts;
+      bitwise.differentBits += current.differentBits;
+      if (bitwise.firstRepeat == -1 && current.differentBits != 0) {
+        bitwise.firstRepeat = b;
+        bitwise.firstRank = current.firstRank;
+        bitwise.firstElt = current.firstElt;
+        bitwise.firstBit = current.firstBit;
+      }
+    }
+    Barrier(args);
+    if (bitwise.differentBits != 0 && args->proc == 0 && args->thread == 0) {
+      args->bitwiseErrors[0]++;
+    }
+  }
+  args->bitwiseResults[in_place] = bitwise;
+
   double timeUsec = (report_cputime ? cputimeSec : deltaSec)*1.0E6;
-  writeBenchmarkLineBody(timeUsec, algBw, busBw, args->reportErrors, wrongElts, report_cputime, report_timestamps, in_place==0);
+  writeBenchmarkLineBody(timeUsec, algBw, busBw, args->reportErrors, wrongElts,
+                         &bitwise, report_cputime, report_timestamps, in_place==0);
 
   if (record && args->ms) {
     // Extract max-across-GPUs per iteration (convert ms to seconds)
@@ -939,6 +1042,8 @@ testResult_t TimeTest(struct threadArgs* args, ncclDataType_t type, const char* 
       TESTCHECK(BenchTime(args, type, op, root, 0));
       TESTCHECK(BenchTime(args, type, op, root, 1));
       writeBenchmarkLineTerminator(iters, "");
+      writeBitwiseResultDetails(args->bitwiseResults + 0, "out-of-place");
+      writeBitwiseResultDetails(args->bitwiseResults + 1, "in-place");
     }
   } while (--repeat);
 
@@ -1005,7 +1110,9 @@ testResult_t threadInit(struct threadArgs* args) {
   NCCLCHECK(ncclGroupStart());
   for (int i = 0; i < args->nGpus; i++) {
     CUDACHECK(cudaSetDevice(args->gpus[i]));
-    TESTCHECK(AllocateBuffs(args->sendbuffs + i, sendBytes, args->recvbuffs + i, recvBytes, args->expected + i, (size_t)args->maxbytes));
+    TESTCHECK(AllocateBuffs(args->sendbuffs + i, sendBytes, args->recvbuffs + i,
+                            recvBytes, args->expected + i, args->reference + i,
+                            (size_t)args->maxbytes));
   }
   NCCLCHECK(ncclGroupEnd());
 
@@ -1101,16 +1208,18 @@ testResult_t threadLaunch(struct testThread* thread) {
   return testSuccess;
 }
 
-testResult_t AllocateBuffs(void **sendbuff, size_t sendBytes, void **recvbuff, size_t recvBytes, void **expected, size_t nbytes) {
+testResult_t AllocateBuffs(void **sendbuff, size_t sendBytes, void **recvbuff, size_t recvBytes, void **expected, void **reference, size_t nbytes) {
     nbytes += 8*unalign; // pad with size of max datatype in case all datatypes selected
 #if NCCL_VERSION_CODE >= NCCL_VERSION(2,19,0)
     NCCLCHECK(ncclMemAlloc(sendbuff, nbytes));
     NCCLCHECK(ncclMemAlloc(recvbuff, nbytes));
-    if (datacheck) NCCLCHECK(ncclMemAlloc(expected, recvBytes));
+    if (datacheck || bitwisecheck) NCCLCHECK(ncclMemAlloc(expected, recvBytes));
+    if (bitwisecheck) NCCLCHECK(ncclMemAlloc(reference, recvBytes));
 #else
     CUDACHECK(cudaMalloc(sendbuff, nbytes));
     CUDACHECK(cudaMalloc(recvbuff, nbytes));
-    if (datacheck) CUDACHECK(cudaMalloc(expected, recvBytes));
+    if (datacheck || bitwisecheck) CUDACHECK(cudaMalloc(expected, recvBytes));
+    if (bitwisecheck) CUDACHECK(cudaMalloc(reference, recvBytes));
 #endif
     return testSuccess;
 }
@@ -1177,6 +1286,7 @@ int main(int argc, char* argv[], char **envp) {
     {"run_cycles", required_argument, 0, 'N'},
     {"parallel_init", required_argument, 0, 'p'},
     {"check", required_argument, 0, 'c'},
+    {"bitwise", required_argument, 0, 'B'},
     {"op", required_argument, 0, 'o'},
     {"datatype", required_argument, 0, 'd'},
     {"root", required_argument, 0, 'r'},
@@ -1202,7 +1312,7 @@ int main(int argc, char* argv[], char **envp) {
 
   while(1) {
     int c;
-    c = getopt_long(argc, argv, "t:g:b:e:i:f:n:m:w:N:p:I:K:c:o:d:r:z:y:T:hG:C:a:R:x:D:V:J:S:M:u:", longopts, &longindex);
+    c = getopt_long(argc, argv, "t:g:b:e:i:f:n:m:w:N:p:I:K:c:B:o:d:r:z:y:T:hG:C:a:R:x:D:V:J:S:M:u:", longopts, &longindex);
 
     if (c == -1)
       break;
@@ -1259,6 +1369,13 @@ int main(int argc, char* argv[], char **envp) {
         break;
       case 'c':
         datacheck = (int)strtol(optarg, NULL, 0);
+        break;
+      case 'B':
+        bitwisecheck = (int)strtol(optarg, NULL, 0);
+        if (bitwisecheck < 0) {
+          fprintf(stderr, "bitwise repeat count (-B) must be non-negative\n");
+          return -1;
+        }
         break;
       case 'p':
         parallel_init = (int)strtol(optarg, NULL, 0);
@@ -1371,6 +1488,7 @@ int main(int argc, char* argv[], char **envp) {
             "[-N,--run_cycles <cycle count> run & print each cycle (default: 1; 0=infinite)] \n\t"
             "[-p,--parallel_init <0/1>] \n\t"
             "[-c,--check <check iteration count>] \n\t"
+            "[-B,--bitwise <repeat count after a reference run>] \n\t"
 #if NCCL_VERSION_CODE >= NCCL_VERSION(2,11,0)
             "[-o,--op <sum/prod/min/max/avg/mulsum/all>] \n\t"
 #elif NCCL_VERSION_CODE >= NCCL_VERSION(2,10,0)
@@ -1537,8 +1655,9 @@ testResult_t run() {
   // Reserve 1GiB of memory for each 16GiB installed, but limit to a max of 4GiB
   const size_t GB = (1ULL << 30);
   size_t reserveMem =  std::min(DIVUP(maxMem, 16*GB) * 1*GB, 4*GB);
-  // We need sendbuff, recvbuff, expected (when datacheck enabled), plus 1G for the rest.
-  size_t memMaxBytes = (maxMem - reserveMem - 1*GB) / (datacheck ? 3 : 2);
+  // Account for send, receive, expected, and bitwise reference buffers.
+  int bufferCount = 2 + ((datacheck || bitwisecheck) ? 1 : 0) + (bitwisecheck ? 1 : 0);
+  size_t memMaxBytes = (maxMem - reserveMem - 1*GB) / bufferCount;
   if (maxBytes > memMaxBytes) {
     maxBytes = memMaxBytes;
     if (minBytes > maxBytes) minBytes = maxBytes;
@@ -1558,6 +1677,7 @@ testResult_t run() {
   std::vector<void*> sendbuffs(nGpus*nThreads);
   std::vector<void*> recvbuffs(nGpus*nThreads);
   std::vector<void*> expected(nGpus*nThreads);
+  std::vector<void*> reference(nGpus*nThreads);
   size_t sendBytes, recvBytes;
 
   ncclTestEngine.getBuffSize(&sendBytes, &recvBytes, (size_t)maxBytes, (size_t)ncclProcs*nGpus*nThreads);
@@ -1633,7 +1753,9 @@ testResult_t run() {
      NCCLCHECK(ncclGroupStart());
      for (int i=0; i<nGpus*nThreads; i++) {
        CUDACHECK(cudaSetDevice(gpus[i]));
-       TESTCHECK(AllocateBuffs(sendbuffs.data()+i, sendBytes, recvbuffs.data()+i, recvBytes, expected.data()+i, (size_t)maxBytes));
+       TESTCHECK(AllocateBuffs(sendbuffs.data()+i, sendBytes, recvbuffs.data()+i,
+                               recvBytes, expected.data()+i, reference.data()+i,
+                               (size_t)maxBytes));
 #if NCCL_VERSION_CODE >= NCCL_VERSION(2,27,0)
        if (test_ncclVersion >= NCCL_VERSION(2,27,0) && (local_register == SYMMETRIC_REGISTER)) {
          NCCLCHECK(ncclCommWindowRegister(comms[i], sendbuffs[i], maxBytes, (ncclWindow_t*)&sendRegHandles[i], NCCL_WIN_COLL_SYMMETRIC));
@@ -1709,12 +1831,13 @@ testResult_t run() {
   }
 
   std::vector<int> errors(nThreads);
+  std::vector<int> bitwiseErrors(nThreads);
   std::vector<double> bw(nThreads);
   std::vector<int64_t> devMemUsed(nThreads);
   std::vector<int> bw_count(nThreads);
   for (int t=0; t<nThreads; t++) {
     bw[t] = 0.0;
-    errors[t] = bw_count[t] = 0;
+    errors[t] = bitwiseErrors[t] = bw_count[t] = 0;
     devMemUsed[t] = std::numeric_limits<int64_t>::min();
   }
 
@@ -1741,6 +1864,7 @@ testResult_t run() {
     threads[t].args.sendbuffs = sendbuffs.data()+t*nGpus;
     threads[t].args.recvbuffs = recvbuffs.data()+t*nGpus;
     threads[t].args.expected = expected.data()+t*nGpus;
+    threads[t].args.reference = reference.data()+t*nGpus;
 #if NCCL_VERSION_CODE >= NCCL_VERSION(2,28,0)
     threads[t].args.devComms = devComms.data()+t*nGpus;
 #endif
@@ -1753,6 +1877,7 @@ testResult_t run() {
     threads[t].args.streams=streams.data()+t*nGpus;
 
     threads[t].args.errors=errors.data()+t;
+    threads[t].args.bitwiseErrors=bitwiseErrors.data()+t;
     threads[t].args.bw=bw.data()+t;
     threads[t].args.bw_count=bw_count.data()+t;
     threads[t].args.initGpuMem = initGpuMem.data() + t;
@@ -1774,6 +1899,7 @@ testResult_t run() {
     TESTCHECK(threads[t].ret);
     if (t) {
       errors[0] += errors[t];
+      bitwiseErrors[0] += bitwiseErrors[t];
       bw[0] += bw[t];
       bw_count[0] += bw_count[t];
       devMemUsed[0] = std::max(devMemUsed[0], devMemUsed[t]);
@@ -1784,6 +1910,7 @@ testResult_t run() {
 
 #ifdef MPI_SUPPORT
   MPI_Allreduce(MPI_IN_PLACE, &errors[0], 1, MPI_INT, MPI_SUM, MPI_COMM_WORLD);
+  MPI_Allreduce(MPI_IN_PLACE, &bitwiseErrors[0], 1, MPI_INT, MPI_SUM, MPI_COMM_WORLD);
   MPI_Allreduce(MPI_IN_PLACE, &devMemUsed[0], 1, MPI_INT64_T, MPI_MAX, MPI_COMM_WORLD);
   MPI_Allreduce(MPI_IN_PLACE, &initGpuMem[0], 1, MPI_INT64_T, MPI_MAX, MPI_COMM_WORLD);
   MPI_Allreduce(MPI_IN_PLACE, &bufferMemory[0], 1, MPI_INT64_T, MPI_MAX, MPI_COMM_WORLD);
@@ -1818,11 +1945,13 @@ testResult_t run() {
 #if NCCL_VERSION_CODE >= NCCL_VERSION(2,19,0)
     if (sendbuffs[i]) NCCLCHECK(ncclMemFree((char*)sendbuffs[i]));
     if (recvbuffs[i]) NCCLCHECK(ncclMemFree((char*)recvbuffs[i]));
-    if (datacheck) NCCLCHECK(ncclMemFree(expected[i]));
+    if (datacheck || bitwisecheck) NCCLCHECK(ncclMemFree(expected[i]));
+    if (bitwisecheck) NCCLCHECK(ncclMemFree(reference[i]));
 #else
     if (sendbuffs[i]) CUDACHECK(cudaFree((char*)sendbuffs[i]));
     if (recvbuffs[i]) CUDACHECK(cudaFree((char*)recvbuffs[i]));
-    if (datacheck) CUDACHECK(cudaFree(expected[i]));
+    if (datacheck || bitwisecheck) CUDACHECK(cudaFree(expected[i]));
+    if (bitwisecheck) CUDACHECK(cudaFree(reference[i]));
 #endif
   }
 
@@ -1830,7 +1959,7 @@ testResult_t run() {
   const double check_avg_bw = envstr ? atof(envstr) : -1;
   bw[0] /= bw_count[0];
 
-  writeResultFooter(errors.data(), bw.data(), check_avg_bw, programName);
+  writeResultFooter(errors.data(), bitwiseErrors.data(), bw.data(), check_avg_bw, programName);
   if (memory_report) {
     memInfo_t memInfos[3];
     memInfos[0] = { initGpuMem[0], "Initialization" };
@@ -1850,7 +1979,7 @@ testResult_t run() {
   // 'cuda-memcheck --leak-check full' requires this
   cudaDeviceReset();
 
-  if (errors[0] || bw[0] < check_avg_bw*(0.9))
+  if (errors[0] || bitwiseErrors[0] || bw[0] < check_avg_bw*(0.9))
     return testNumResults;
   else
     return testSuccess;

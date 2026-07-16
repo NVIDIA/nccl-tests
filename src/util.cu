@@ -36,6 +36,7 @@ extern size_t maxBytes;
 extern size_t stepBytes;
 extern size_t stepFactor;
 extern int datacheck;
+extern int bitwisecheck;
 extern int warmup_iters;
 extern int iters;
 extern int agg_iters;
@@ -280,6 +281,11 @@ static void jsonInt(const int val) {
   fprintf(json_report_fp, "%d", val);
 }
 
+static void jsonInt64(const int64_t val) {
+  jsonValHelper();
+  fprintf(json_report_fp, "%lld", (long long)val);
+}
+
 // Write a size_t value
 static void jsonSize_t(const size_t val) {
   jsonValHelper();
@@ -494,7 +500,7 @@ void getFloatStr(double value, int width, char* str) {
 // Write the performance-related payload to stdout/json.
 // We call this function twice at the top level per test: once for out-of-place, and once for in-place.
 // The Json output assumes out-of-place happens first.
-void writeBenchmarkLineBody(double timeUsec, double algBw, double busBw, bool reportErrors, int64_t wrongElts, bool report_cputime, bool report_timestamps, bool out_of_place) {
+void writeBenchmarkLineBody(double timeUsec, double algBw, double busBw, bool reportErrors, int64_t wrongElts, const struct bitwiseResult* bitwise, bool report_cputime, bool report_timestamps, bool out_of_place) {
   char timeStr[8];
   getFloatStr(timeUsec, 7, timeStr);
 
@@ -509,6 +515,7 @@ void writeBenchmarkLineBody(double timeUsec, double algBw, double busBw, bool re
   } else {
     PRINT("  %7s  %6s  %6s    N/A", timeStr, algBwStr, busBwStr);
   }
+  if (bitwisecheck) PRINT("  %8g", (double)bitwise->differentBits);
 
   if (!out_of_place && report_timestamps && !per_iter_timing) writeTimestamp();
 
@@ -519,8 +526,28 @@ void writeBenchmarkLineBody(double timeUsec, double algBw, double busBw, bool re
     jsonKey("alg_bw");                             jsonDouble(algBw);
     jsonKey("bus_bw");                             jsonDouble(busBw);
     jsonKey("nwrong");                             (reportErrors ? jsonDouble((double)wrongElts) : jsonNull());
+    if(bitwisecheck) {
+      jsonKey("bitwise");
+      jsonStartObject();
+      jsonKey("repeats");             jsonInt(bitwisecheck);
+      jsonKey("different_elements");  jsonInt64(bitwise->differentElts);
+      jsonKey("different_bits");      jsonInt64(bitwise->differentBits);
+      jsonKey("first_repeat");         (bitwise->firstRepeat < 0 ? jsonNull() : jsonInt64(bitwise->firstRepeat));
+      jsonKey("first_rank");           (bitwise->firstRank < 0 ? jsonNull() : jsonInt64(bitwise->firstRank));
+      jsonKey("first_element");        (bitwise->firstElt < 0 ? jsonNull() : jsonInt64(bitwise->firstElt));
+      jsonKey("first_bit");            (bitwise->firstBit < 0 ? jsonNull() : jsonInt64(bitwise->firstBit));
+      jsonFinishObject();
+    }
     jsonFinishObject();
   }
+}
+
+void writeBitwiseResultDetails(const struct bitwiseResult* result, const char* mode) {
+  if(!bitwisecheck || result->differentBits == 0) return;
+  PRINT("# Bitwise mismatch (%s): first repeat %lld, rank %lld, element %lld, bit %lld; %lld elements and %lld bits differ\n",
+        mode, (long long)result->firstRepeat, (long long)result->firstRank,
+        (long long)result->firstElt, (long long)result->firstBit,
+        (long long)result->differentElts, (long long)result->differentBits);
 }
 
 static int cmpDouble(const void* a, const void* b) {
@@ -637,6 +664,7 @@ testResult_t writeDeviceReport(size_t *maxMem, int localRank, int proc, int tota
     PRINT(" \n");
   }
   if (parallel_init) PRINT("# Parallel Init Enabled: threads call into NcclInitRank concurrently \n");
+  if (bitwisecheck) PRINT("# Bitwise Repeatability: %d comparisons after one reference run \n", bitwisecheck);
   PRINT("#\n");
 
   if(write_json) {
@@ -657,6 +685,9 @@ testResult_t writeDeviceReport(size_t *maxMem, int localRank, int proc, int tota
     jsonKey("iterations");            jsonInt(iters);
     jsonKey("aggregated_iterations"); jsonInt(agg_iters);
     jsonKey("validation");            jsonInt(datacheck);
+    if(bitwisecheck) {
+      jsonKey("bitwise_repeats");     jsonInt(bitwisecheck);
+    }
     jsonKey("graph");                 jsonInt(cudaGraphLaunches);
     jsonKey("blocking_collectives");  jsonBool(blocking_coll);
     jsonKey("per_iter_timing");     jsonBool(per_iter_timing);
@@ -742,7 +773,17 @@ void writeResultHeader(bool report_cputime, bool report_timestamps) {
   const char* tsFmt = report_timestamps ? TIME_STRING_FORMAT : "";
   const char* timeStr = report_cputime ? "cputime" : "time";
   PRINT("#\n");
-  if (per_iter_timing) {
+  if (per_iter_timing && bitwisecheck) {
+    PRINT("# %10s  %12s  %8s  %6s  %6s                   out-of-place (+ bitwise + per-iteration)                                      in-place (+ bitwise + per-iteration)\n", "", "", "", "", "");
+    PRINT("# %10s  %12s  %8s  %6s  %6s  %7s  %6s  %6s  %6s  %8s  %7s  %7s  %7s  %7s  %7s  %6s  %6s  %6s  %8s  %7s  %7s  %7s  %7s %*s\n",
+          "size", "count", "type", "redop", "root",
+          timeStr, "algbw", "busbw", "#wrong", "#bitdiff", "i_min", "i_max", "i_p99", "i_cv%",
+          timeStr, "algbw", "busbw", "#wrong", "#bitdiff", "i_min", "i_max", "i_p99", "i_cv%", tsPad, tsLbl);
+    PRINT("# %10s  %12s  %8s  %6s  %6s  %7s  %6s  %6s  %6s  %8s  %7s  %7s  %7s  %7s  %7s  %6s  %6s  %6s  %8s  %7s  %7s  %7s  %7s %*s\n",
+          "(B)", "(elements)", "", "", "",
+          "(us)", "(GB/s)", "(GB/s)", "", "", "(us)", "(us)", "(us)", "(%)",
+          "(us)", "(GB/s)", "(GB/s)", "", "", "(us)", "(us)", "(us)", "(%)", tsPad, tsFmt);
+  } else if (per_iter_timing) {
     PRINT("# %10s  %12s  %8s  %6s  %6s              out-of-place (+ per-iteration)                                in-place (+ per-iteration)\n", "", "", "", "", "");
     PRINT("# %10s  %12s  %8s  %6s  %6s  %7s  %6s  %6s  %6s  %7s  %7s  %7s  %7s  %7s  %6s  %6s  %6s  %7s  %7s  %7s  %7s %*s\n",
           "size", "count", "type", "redop", "root",
@@ -752,6 +793,12 @@ void writeResultHeader(bool report_cputime, bool report_timestamps) {
           "(B)", "(elements)", "", "", "",
           "(us)", "(GB/s)", "(GB/s)", "", "(us)", "(us)", "(us)", "(%)",
           "(us)", "(GB/s)", "(GB/s)", "", "(us)", "(us)", "(us)", "(%)", tsPad, tsFmt);
+  } else if (bitwisecheck) {
+    PRINT("# %10s  %12s  %8s  %6s  %6s               out-of-place + bitwise                           in-place + bitwise          \n", "", "", "", "", "");
+    PRINT("# %10s  %12s  %8s  %6s  %6s  %7s  %6s  %6s  %6s  %8s  %7s  %6s  %6s  %6s  %8s %*s\n", "size", "count", "type", "redop", "root",
+          timeStr, "algbw", "busbw", "#wrong", "#bitdiff", timeStr, "algbw", "busbw", "#wrong", "#bitdiff", tsPad, tsLbl);
+    PRINT("# %10s  %12s  %8s  %6s  %6s  %7s  %6s  %6s  %6s  %8s  %7s  %6s  %6s  %6s  %8s %*s\n", "(B)", "(elements)", "", "", "",
+          "(us)", "(GB/s)", "(GB/s)", "", "", "(us)", "(GB/s)", "(GB/s)", "", "", tsPad, tsFmt);
   } else {
     PRINT("# %10s  %12s  %8s  %6s  %6s           out-of-place                       in-place          \n", "", "", "", "", "");
     PRINT("# %10s  %12s  %8s  %6s  %6s  %7s  %6s  %6s  %6s  %7s  %6s  %6s  %6s %*s\n", "size", "count", "type", "redop", "root",
@@ -768,13 +815,16 @@ void writeResultHeader(bool report_cputime, bool report_timestamps) {
 // Write the footer for results to stdout/json.
 // We close the table list and write out the summary items.
 // Results object is left open for errors.
-void writeResultFooter(const int errors[], const double bw[], double check_avg_bw, const char *program_name) {
+void writeResultFooter(const int errors[], const int bitwiseErrors[], const double bw[], double check_avg_bw, const char *program_name) {
 
   if(write_json) {
     jsonFinishList();
   }
 
   PRINT("# %-20s : %d %s\n", "Out of bounds values", errors[0], errors[0] ? "FAILED" : "OK");
+  if(bitwisecheck) {
+    PRINT("# %-20s : %d %s\n", "Bitwise mismatches", bitwiseErrors[0], bitwiseErrors[0] ? "FAILED" : "OK");
+  }
   PRINT("# %-20s : %g %s\n", "Avg bus bandwidth", bw[0], check_avg_bw == -1 ? "" : (bw[0] < check_avg_bw*(0.9) ? "FAILED" : "OK"));
   PRINT("#\n");
   PRINT("# Collective test concluded: %s\n", program_name);
@@ -785,6 +835,13 @@ void writeResultFooter(const int errors[], const double bw[], double check_avg_b
     jsonKey("count");      jsonInt(errors[0]);
     jsonKey("okay");       jsonBool(errors[0] == 0);
     jsonFinishObject();
+    if(bitwisecheck) {
+      jsonKey("bitwise_mismatches");
+      jsonStartObject();
+      jsonKey("count"); jsonInt(bitwiseErrors[0]);
+      jsonKey("okay"); jsonBool(bitwiseErrors[0] == 0);
+      jsonFinishObject();
+    }
     jsonKey("average_bus_bandwidth");
     jsonStartObject();
     jsonKey("bandwidth"); jsonDouble(bw[0]);

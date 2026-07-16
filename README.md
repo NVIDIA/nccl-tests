@@ -81,6 +81,7 @@ All tests support the same set of arguments :
 * Test operation
   * `-p,--parallel_init <0/1>` use threads to initialize NCCL in parallel. Default : 0.
   * `-c,--check <check iteration count>` perform count iterations, checking correctness of results on each iteration. This can be quite slow on large numbers of GPUs. Default : 1.
+  * `-B,--bitwise <repeat count>` capture one collective result as a reference, then reinitialize the same input and compare the raw output bits across count additional executions. Reports aggregate differences across ranks and repeats, plus the first zero-based repeat, rank, element, and bit that differs. This checks repeatability for the generated nccl-tests input; it does not guarantee repeatability for arbitrary application data. Default : 0.
   * `-z,--blocking <0/1/2/3>` collective blocking mode. Default: 0.
     * `0` : non-blocking (default)
     * `1` : wait and barrier after each inner iteration (`-m`)
