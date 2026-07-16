@@ -57,6 +57,20 @@ cudaError_t ncclVerifiableVerify(
   int64_t *bad_elt_n, cudaStream_t stream
 );
 
+struct ncclVerifiableBitwiseResult {
+  int64_t different_elt_n;
+  int64_t different_bit_n;
+  int64_t first_different_bit;
+};
+
+// Enqueue a strict comparison of the raw element bit patterns. `result` must
+// point to mapped cudaHost memory. first_different_bit is an offset from the
+// beginning of the compared buffer, or INT64_MAX when the buffers are equal.
+cudaError_t ncclVerifiableCompareBits(
+  void const *results, void const *reference, intptr_t elt_n, int elt_ty,
+  ncclVerifiableBitwiseResult *result, cudaStream_t stream
+);
+
 #ifdef NCCL_VERIFIABLE_SELF_TEST
 void ncclVerifiableLaunchSelfTest();
 #endif

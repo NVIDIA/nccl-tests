@@ -40,6 +40,7 @@
 #include <cassert>
 #include <cstdio>
 #include <cstdint>
+#include <cstring>
 #include <cmath>
 #if defined(NCCL_OS_LINUX)
 #include <unistd.h>
@@ -1364,6 +1365,94 @@ cudaError_t ncclVerifiableVerify(
 ////////////////////////////////////////////////////////////////////////////////
 
 namespace {
+template<typename T>
+__global__ void __launch_bounds__(512, 1) compareBits(
+    T const *results, T const *reference, intptr_t elt_n,
+    ncclVerifiableBitwiseResult *result
+  ) {
+  intptr_t i0 = blockIdx.x*(elt_n/gridDim.x);
+  i0 += blockIdx.x < elt_n%gridDim.x ? blockIdx.x : elt_n%gridDim.x;
+  intptr_t i1 = (blockIdx.x+1)*(elt_n/gridDim.x);
+  i1 += blockIdx.x+1 < elt_n%gridDim.x ? blockIdx.x+1 : elt_n%gridDim.x;
+  intptr_t i = i0 + threadIdx.x;
+  int64_t different_elt_n = 0;
+  int64_t different_bit_n = 0;
+  int64_t first_different_bit = INT64_MAX;
+
+  while(i < i1) {
+    unsigned long long delta = (unsigned long long)(results[i] ^ reference[i]);
+    if(delta != 0) {
+      different_elt_n += 1;
+      different_bit_n += __popcll(delta);
+      int64_t bit = int64_t(i)*8*sizeof(T) + __ffsll((long long)delta)-1;
+      first_different_bit = bit < first_different_bit ? bit : first_different_bit;
+    }
+    i += blockDim.x;
+  }
+
+  asm volatile("red.global.add.u64 [%0],%1;" ::
+    "l"(&result->different_elt_n), "l"(different_elt_n) : "memory");
+  asm volatile("red.global.add.u64 [%0],%1;" ::
+    "l"(&result->different_bit_n), "l"(different_bit_n) : "memory");
+  if(first_different_bit != INT64_MAX) {
+    atomicMin((unsigned long long*)&result->first_different_bit,
+              (unsigned long long)first_different_bit);
+  }
+}
+}
+
+cudaError_t ncclVerifiableCompareBits(
+    void const *results, void const *reference, intptr_t elt_n, int elt_ty,
+    ncclVerifiableBitwiseResult *result, cudaStream_t stream
+  ) {
+  void const *fn = nullptr;
+  switch(elt_ty) {
+  case ncclInt8:
+  case ncclUint8:
+    fn = (void const*)&compareBits<uint8_t>;
+    break;
+  case ncclFloat16:
+    fn = (void const*)&compareBits<uint16_t>;
+    break;
+  #if HAVE_ncclBfloat16
+  case ncclBfloat16:
+    fn = (void const*)&compareBits<uint16_t>;
+    break;
+  #endif
+  case ncclInt32:
+  case ncclUint32:
+  case ncclFloat32:
+    fn = (void const*)&compareBits<uint32_t>;
+    break;
+  case ncclInt64:
+  case ncclUint64:
+  case ncclFloat64:
+    fn = (void const*)&compareBits<uint64_t>;
+    break;
+  #if HAVE_ncclFloat8
+  case ncclFloat8e4m3:
+  case ncclFloat8e5m2:
+    fn = (void const*)&compareBits<uint8_t>;
+    break;
+  #endif
+  default:
+    return cudaErrorInvalidValue;
+  }
+
+  result->different_elt_n = 0;
+  result->different_bit_n = 0;
+  result->first_different_bit = INT64_MAX;
+  int block_n = std::min<intptr_t>(32, (elt_n + 4*512-1)/(4*512));
+  if(block_n == 0) return cudaSuccess;
+  dim3 grid = {(unsigned int)block_n, 1, 1};
+  dim3 block = {512, 1, 1};
+  void *args[4] = {&results, &reference, &elt_n, &result};
+  return cudaLaunchKernel(fn, grid, block, args, 0, stream);
+}
+
+////////////////////////////////////////////////////////////////////////////////
+
+namespace {
 template<typename T, typename Op>
 __device__ void sweep2(int ty, char const *tyname, Op op, char const *opname, int rank_n) {
   //if(!std::is_same<T,half>::value) return;
@@ -1427,6 +1516,58 @@ __global__ void __launch_bounds__(512, 1) sweep() {
 }
 }
 
+namespace {
+void bitwiseSelfTest() {
+  uint64_t reference[4] = {};
+  uint64_t results[4] = {};
+  void *reference_dev = nullptr;
+  void *results_dev = nullptr;
+  ncclVerifiableBitwiseResult *result = nullptr;
+  auto checkCuda = [](cudaError_t error) { assert(error == cudaSuccess); };
+  checkCuda(cudaMalloc(&reference_dev, sizeof(reference)));
+  checkCuda(cudaMalloc(&results_dev, sizeof(results)));
+  checkCuda(cudaHostAlloc((void**)&result, sizeof(*result), cudaHostAllocMapped));
+
+  auto compare = [&](int type, intptr_t count, int64_t different_elt_n,
+                     int64_t different_bit_n, int64_t first_different_bit) {
+    checkCuda(cudaMemcpy(reference_dev, reference, sizeof(reference), cudaMemcpyHostToDevice));
+    checkCuda(cudaMemcpy(results_dev, results, sizeof(results), cudaMemcpyHostToDevice));
+    checkCuda(ncclVerifiableCompareBits(
+      results_dev, reference_dev, count, type, result, cudaStreamDefault));
+    checkCuda(cudaDeviceSynchronize());
+    assert(result->different_elt_n == different_elt_n);
+    assert(result->different_bit_n == different_bit_n);
+    assert(result->first_different_bit == first_different_bit);
+  };
+
+  compare(ncclUint64, 4, 0, 0, INT64_MAX);
+
+  ((uint8_t*)results)[3] = 1u << 2;
+  compare(ncclUint8, sizeof(results), 1, 1, 3*8 + 2);
+  memset(results, 0, sizeof(results));
+
+  ((uint16_t*)results)[2] = (1u << 3) | (1u << 9);
+  compare(ncclFloat16, sizeof(results)/sizeof(uint16_t), 1, 2, 2*16 + 3);
+  memset(results, 0, sizeof(results));
+
+  ((uint32_t*)reference)[0] = 0x00000000u;
+  ((uint32_t*)reference)[1] = 0x7fc00000u;
+  ((uint32_t*)results)[0] = 0x80000000u;
+  ((uint32_t*)results)[1] = 0x7fc00001u;
+  compare(ncclFloat32, sizeof(results)/sizeof(uint32_t), 2, 2, 31);
+  memset(reference, 0, sizeof(reference));
+  memset(results, 0, sizeof(results));
+
+  results[3] = uint64_t(1) << 63;
+  compare(ncclFloat64, 4, 1, 1, 3*64 + 63);
+
+  checkCuda(cudaFreeHost(result));
+  checkCuda(cudaFree(results_dev));
+  checkCuda(cudaFree(reference_dev));
+}
+}
+
 void ncclVerifiableLaunchSelfTest() {
+  bitwiseSelfTest();
   sweep<<<1,512>>>();
 }
