@@ -88,6 +88,13 @@ testResult_t AlltoAllGetDevCommRequirements(int deviceImpl, ncclDevCommRequireme
 #else
       reqs->ginForceEnable = true;
 #endif
+      // NCCL 2.30.7 adds ginStrongSignalsRequired and ginVaSignalsRequired,
+      // neither of which are required for the alltoall GIN kernel. Explicitly
+      // remove both requirements.
+#if NCCL_VERSION_CODE >= NCCL_VERSION(2, 30, 7)
+      reqs->ginStrongSignalsRequired = false;
+      reqs->ginVaSignalsRequired = false;
+#endif
       return testSuccess;
     #endif
     default:
