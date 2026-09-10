@@ -22,7 +22,7 @@
 #include <assert.h>
 #include <stdio.h>
 #include <time.h>
-#include <curand.h>
+#include <math.h>
 #include <stdint.h>
 #include <getopt.h>
 #include <string.h>
