@@ -66,8 +66,10 @@ NVCC_GENCODE ?= -gencode=arch=compute_35,code=sm_35 \
                 -gencode=arch=compute_70,code=compute_70
 endif
 
-NVCUFLAGS  := -ccbin $(CXX) $(NVCC_GENCODE) $(CXXSTD) --extended-lambda
-CXXFLAGS   := $(CXXSTD)
+# The trailing self-references fold in any flags the caller exported, so extra
+# include or library paths can be added without replacing the flags below.
+NVCUFLAGS  := -ccbin $(CXX) $(NVCC_GENCODE) $(CXXSTD) --extended-lambda $(NVCUFLAGS)
+CXXFLAGS   := $(CXXSTD) $(CXXFLAGS)
 
 ifneq ($(OS),Windows_NT)
 NCCL_OS_LINUX := 1
@@ -79,8 +81,8 @@ CXXFLAGS += -DNCCL_OS_WINDOWS -DWIN32_LEAN_AND_MEAN -DNOMINMAX
 NVCUFLAGS += -DNCCL_OS_WINDOWS -DWIN32_LEAN_AND_MEAN -DNOMINMAX
 endif
 
-LDFLAGS    := -L${CUDA_LIB} -lcudart -lrt
-NVLDFLAGS  := -L${CUDA_LIB} -l${CUDARTLIB} -lrt
+LDFLAGS    := -L${CUDA_LIB} -lcudart -lrt $(LDFLAGS)
+NVLDFLAGS  := -L${CUDA_LIB} -l${CUDARTLIB} -lrt $(NVLDFLAGS)
 
 ifeq ($(DEBUG), 0)
 NVCUFLAGS += -O3 -g
