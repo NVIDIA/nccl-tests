@@ -121,6 +121,10 @@ support are rejected rather than ignored.
     Requires `-t` to be a multiple of 32.
   * `--gin_bd` bidirectional bandwidth: both ranks send; reported metric is the
     sum of each rank's average (throughput only). Default: off.
+  * `--remote_mem_type <device|host>` selects device memory (default) or CPU-backed host
+    memory for the remote rank (source memory in GET or destination memory in PUT).
+  * `--local_mem_type <device|host>` selects device memory (default) or CPU-backed host
+    memory for the local rank (destination memory in GET or source memory in PUT).
 
 ### Optional optimizations
 

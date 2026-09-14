@@ -7,7 +7,7 @@
 
 template <bool skipCreditCheck, bool aggregateRequests, bool strongSignal,
           ncclGinResourceSharingMode rsm>
-__global__ void ginSignalBwKernel(ncclDevComm comm, ncclDevResourceHandle hBuf, int iters, int queueDepth) {
+__global__ void ginSignalBwKernel(ncclDevComm comm, ncclDevResourceHandle devBufHandle, int iters, int queueDepth) {
 #if __CUDA_ARCH__ >= 700
   const int tag = blockIdx.x;
   ncclTeam team = ncclTeamWorld(comm);
@@ -66,11 +66,11 @@ __global__ void ginSignalBwKernel(ncclDevComm comm, ncclDevResourceHandle hBuf, 
 }
 
 template <ncclGinResourceSharingMode rsm>
-static void ginSignalBWLaunchRsm(ncclDevComm dcomm, ncclDevResourceHandle hBuf, cudaStream_t stream,
+static void ginSignalBWLaunchRsm(ncclDevComm dcomm, ncclDevResourceHandle devBufHandle, cudaStream_t stream,
                                    const ginArgs_t* args, int iters) {
   const int queueDepth = args->queueDepth;
 #define LAUNCH_BW_SIGNAL(SKIP, AG, STRONG) \
-  ginSignalBwKernel<SKIP, AG, STRONG, rsm><<<args->numCtas, args->numThreads, 0, stream>>>(dcomm, hBuf, iters, queueDepth)
+  ginSignalBwKernel<SKIP, AG, STRONG, rsm><<<args->numCtas, args->numThreads, 0, stream>>>(dcomm, devBufHandle, iters, queueDepth)
 
   if (args->ginSkipCreditCheck) {
     if (args->ginAggregateRequests) {
@@ -94,11 +94,11 @@ static void ginSignalBWLaunchRsm(ncclDevComm dcomm, ncclDevResourceHandle hBuf, 
   CUDACHECK_FATAL(cudaGetLastError());
 }
 
-void ncclTestGinSignalBWLaunch(ncclDevComm dcomm, ncclDevResourceHandle hBuf, cudaStream_t stream,
+void ncclTestGinSignalBWLaunch(ncclDevComm dcomm, ncclDevResourceHandle devBufHandle, cudaStream_t stream,
     const ginArgs_t* args, size_t numElems, int iters) {
   if (args->ginRsm == ncclGinRsmCta) {
-    ginSignalBWLaunchRsm<NCCL_GIN_RESOURCE_SHARING_CTA>(dcomm, hBuf, stream, args, iters);
+    ginSignalBWLaunchRsm<NCCL_GIN_RESOURCE_SHARING_CTA>(dcomm, devBufHandle, stream, args, iters);
   } else {
-    ginSignalBWLaunchRsm<NCCL_GIN_RESOURCE_SHARING_GPU>(dcomm, hBuf, stream, args, iters);
+    ginSignalBWLaunchRsm<NCCL_GIN_RESOURCE_SHARING_GPU>(dcomm, devBufHandle, stream, args, iters);
   }
 }

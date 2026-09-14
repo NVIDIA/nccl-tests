@@ -6,11 +6,11 @@
 #include "gin_context.h"
 
 template <bool skipCreditCheck, bool strongSignal, ncclGinResourceSharingMode rsm>
-__global__ void ginPutSignalPingKernel(ncclDevComm comm, ncclDevResourceHandle hBuf, int iters, size_t numElems) {
+__global__ void ginPutSignalPingKernel(ncclDevComm comm, ncclDevResourceHandle devBufHandle, int iters, size_t numElems) {
 #if __CUDA_ARCH__ >= 700
   ncclTeam team = ncclTeamWorld(comm);
   ncclGin gin(comm, 0, rsm);
-  ncclSymPtr<int> sbuf = (ncclSymPtr<int>)ncclGetResourceBuffer(comm, hBuf);
+  ncclSymPtr<int> sbuf = (ncclSymPtr<int>)ncclGetResourceBuffer(comm, devBufHandle);
   ncclSymPtr<int> dbuf = sbuf;
 
   constexpr uint32_t optFlags =
@@ -32,10 +32,10 @@ __global__ void ginPutSignalPingKernel(ncclDevComm comm, ncclDevResourceHandle h
 }
 
 template <ncclGinResourceSharingMode rsm>
-static void ginPutSignalLatencyPingLaunchRsm(ncclDevComm dcomm, ncclDevResourceHandle hBuf, cudaStream_t stream,
+static void ginPutSignalLatencyPingLaunchRsm(ncclDevComm dcomm, ncclDevResourceHandle devBufHandle, cudaStream_t stream,
                                                 const ginArgs_t* args, size_t numElems, int iters) {
 #define LAUNCH_PING_PUT_SIGNAL(SKIP, STRONG) \
-  ginPutSignalPingKernel<SKIP, STRONG, rsm><<<1, 1, 0, stream>>>(dcomm, hBuf, iters, numElems)
+  ginPutSignalPingKernel<SKIP, STRONG, rsm><<<1, 1, 0, stream>>>(dcomm, devBufHandle, iters, numElems)
 
   if (args->ginSkipCreditCheck) {
     if (args->ginStrongSignal) LAUNCH_PING_PUT_SIGNAL(true, true);
@@ -49,13 +49,13 @@ static void ginPutSignalLatencyPingLaunchRsm(ncclDevComm dcomm, ncclDevResourceH
   CUDACHECK_FATAL(cudaGetLastError());
 }
 
-void ncclTestGinPutSignalLatencyPingLaunch(ncclDevComm dcomm, ncclDevResourceHandle hBuf, cudaStream_t stream,
+void ncclTestGinPutSignalLatencyPingLaunch(ncclDevComm dcomm, ncclDevResourceHandle devBufHandle, cudaStream_t stream,
                                            const ginArgs_t* args, size_t numElems, int iters) {
   if (args->ginRsm == ncclGinRsmThread) {
-    ginPutSignalLatencyPingLaunchRsm<NCCL_GIN_RESOURCE_SHARING_THREAD>(dcomm, hBuf, stream, args, numElems, iters);
+    ginPutSignalLatencyPingLaunchRsm<NCCL_GIN_RESOURCE_SHARING_THREAD>(dcomm, devBufHandle, stream, args, numElems, iters);
   } else if (args->ginRsm == ncclGinRsmCta) {
-    ginPutSignalLatencyPingLaunchRsm<NCCL_GIN_RESOURCE_SHARING_CTA>(dcomm, hBuf, stream, args, numElems, iters);
+    ginPutSignalLatencyPingLaunchRsm<NCCL_GIN_RESOURCE_SHARING_CTA>(dcomm, devBufHandle, stream, args, numElems, iters);
   } else {
-    ginPutSignalLatencyPingLaunchRsm<NCCL_GIN_RESOURCE_SHARING_GPU>(dcomm, hBuf, stream, args, numElems, iters);
+    ginPutSignalLatencyPingLaunchRsm<NCCL_GIN_RESOURCE_SHARING_GPU>(dcomm, devBufHandle, stream, args, numElems, iters);
   }
 }

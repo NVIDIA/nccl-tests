@@ -6,12 +6,12 @@
 #include "gin_context.h"
 
 template <bool skipCreditCheck, bool strongSignal, ncclGinResourceSharingMode rsm>
-__global__ void ginPutSignalPingPongKernel(ncclDevComm comm, ncclDevResourceHandle hBuf, int iters, size_t numElems,
+__global__ void ginPutSignalPingPongKernel(ncclDevComm comm, ncclDevResourceHandle devBufHandle, int iters, size_t numElems,
                                      int queueDepth) {
 #if __CUDA_ARCH__ >= 700
   ncclTeam team = ncclTeamWorld(comm);
   ncclGin gin(comm, 0, rsm);
-  ncclSymPtr<int> sbuf = (ncclSymPtr<int>)ncclGetResourceBuffer(comm, hBuf);
+  ncclSymPtr<int> sbuf = (ncclSymPtr<int>)ncclGetResourceBuffer(comm, devBufHandle);
   ncclSymPtr<int> dbuf = sbuf;
 
   constexpr uint32_t optFlags =
@@ -52,11 +52,11 @@ __global__ void ginPutSignalPingPongKernel(ncclDevComm comm, ncclDevResourceHand
 }
 
 template <ncclGinResourceSharingMode rsm>
-static void ginPutSignalLatencyPingPongLaunchRsm(ncclDevComm dcomm, ncclDevResourceHandle hBuf, cudaStream_t stream,
+static void ginPutSignalLatencyPingPongLaunchRsm(ncclDevComm dcomm, ncclDevResourceHandle devBufHandle, cudaStream_t stream,
                                                     const ginArgs_t* args, size_t numElems, int iters) {
   const int queueDepth = args->queueDepth;
 #define LAUNCH_PING_PONG_PUT_SIGNAL(SKIP, STRONG) \
-  ginPutSignalPingPongKernel<SKIP, STRONG, rsm><<<1, 1, 0, stream>>>(dcomm, hBuf, iters, numElems, queueDepth)
+  ginPutSignalPingPongKernel<SKIP, STRONG, rsm><<<1, 1, 0, stream>>>(dcomm, devBufHandle, iters, numElems, queueDepth)
 
   if (args->ginSkipCreditCheck) {
     if (args->ginStrongSignal) LAUNCH_PING_PONG_PUT_SIGNAL(true, true);
@@ -70,13 +70,13 @@ static void ginPutSignalLatencyPingPongLaunchRsm(ncclDevComm dcomm, ncclDevResou
   CUDACHECK_FATAL(cudaGetLastError());
 }
 
-void ncclTestGinPutSignalLatencyPingPongLaunch(ncclDevComm dcomm, ncclDevResourceHandle hBuf, cudaStream_t stream,
+void ncclTestGinPutSignalLatencyPingPongLaunch(ncclDevComm dcomm, ncclDevResourceHandle devBufHandle, cudaStream_t stream,
                                                const ginArgs_t* args, size_t numElems, int iters) {
   if (args->ginRsm == ncclGinRsmThread) {
-    ginPutSignalLatencyPingPongLaunchRsm<NCCL_GIN_RESOURCE_SHARING_THREAD>(dcomm, hBuf, stream, args, numElems, iters);
+    ginPutSignalLatencyPingPongLaunchRsm<NCCL_GIN_RESOURCE_SHARING_THREAD>(dcomm, devBufHandle, stream, args, numElems, iters);
   } else if (args->ginRsm == ncclGinRsmCta) {
-    ginPutSignalLatencyPingPongLaunchRsm<NCCL_GIN_RESOURCE_SHARING_CTA>(dcomm, hBuf, stream, args, numElems, iters);
+    ginPutSignalLatencyPingPongLaunchRsm<NCCL_GIN_RESOURCE_SHARING_CTA>(dcomm, devBufHandle, stream, args, numElems, iters);
   } else {
-    ginPutSignalLatencyPingPongLaunchRsm<NCCL_GIN_RESOURCE_SHARING_GPU>(dcomm, hBuf, stream, args, numElems, iters);
+    ginPutSignalLatencyPingPongLaunchRsm<NCCL_GIN_RESOURCE_SHARING_GPU>(dcomm, devBufHandle, stream, args, numElems, iters);
   }
 }

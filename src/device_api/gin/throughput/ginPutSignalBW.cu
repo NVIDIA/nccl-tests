@@ -7,7 +7,7 @@
 
 template <bool skipCreditCheck, bool aggregateRequests, bool strongSignal,
           ncclGinResourceSharingMode rsm>
-__global__ void ginPutSignalBwKernel(ncclDevComm comm, ncclDevResourceHandle hBuf, int iters, size_t numElems,
+__global__ void ginPutSignalBwKernel(ncclDevComm comm, ncclDevResourceHandle devBufHandle, int iters, size_t numElems,
                                        int queueDepth, size_t maxElems) {
 #if __CUDA_ARCH__ >= 700
   const int tag = blockIdx.x;
@@ -16,7 +16,7 @@ __global__ void ginPutSignalBwKernel(ncclDevComm comm, ncclDevResourceHandle hBu
   ncclGin gin(comm, tag, rsm);
 
   const size_t slots = maxElems / numElems;
-  ncclSymPtr<int> buf = (ncclSymPtr<int>)ncclGetResourceBuffer(comm, hBuf);
+  ncclSymPtr<int> buf = (ncclSymPtr<int>)ncclGetResourceBuffer(comm, devBufHandle);
   buf += (size_t)(threadIdx.x % slots) * numElems;
   ncclSymPtr<int> sbuf = buf;
   ncclSymPtr<int> dbuf = buf;
@@ -75,12 +75,12 @@ __global__ void ginPutSignalBwKernel(ncclDevComm comm, ncclDevResourceHandle hBu
 }
 
 template <ncclGinResourceSharingMode rsm>
-static void ginPutSignalBWLaunchRsm(ncclDevComm dcomm, ncclDevResourceHandle hBuf, cudaStream_t stream,
+static void ginPutSignalBWLaunchRsm(ncclDevComm dcomm, ncclDevResourceHandle devBufHandle, cudaStream_t stream,
                                       const ginArgs_t* args, size_t numElems, int iters) {
   const int queueDepth = args->queueDepth;
   const size_t maxElems = args->maxBytes / sizeof(int);
 #define LAUNCH_BW_PUT_SIGNAL(SKIP, AG, STRONG) \
-  ginPutSignalBwKernel<SKIP, AG, STRONG, rsm><<<args->numCtas, args->numThreads, 0, stream>>>(dcomm, hBuf, iters, numElems, queueDepth, maxElems)
+  ginPutSignalBwKernel<SKIP, AG, STRONG, rsm><<<args->numCtas, args->numThreads, 0, stream>>>(dcomm, devBufHandle, iters, numElems, queueDepth, maxElems)
 
   if (args->ginSkipCreditCheck) {
     if (args->ginAggregateRequests) {
@@ -104,11 +104,11 @@ static void ginPutSignalBWLaunchRsm(ncclDevComm dcomm, ncclDevResourceHandle hBu
   CUDACHECK_FATAL(cudaGetLastError());
 }
 
-void ncclTestGinPutSignalBWLaunch(ncclDevComm dcomm, ncclDevResourceHandle hBuf, cudaStream_t stream,
+void ncclTestGinPutSignalBWLaunch(ncclDevComm dcomm, ncclDevResourceHandle devBufHandle, cudaStream_t stream,
                                   const ginArgs_t* args, size_t numElems, int iters) {
   if (args->ginRsm == ncclGinRsmCta) {
-    ginPutSignalBWLaunchRsm<NCCL_GIN_RESOURCE_SHARING_CTA>(dcomm, hBuf, stream, args, numElems, iters);
+    ginPutSignalBWLaunchRsm<NCCL_GIN_RESOURCE_SHARING_CTA>(dcomm, devBufHandle, stream, args, numElems, iters);
   } else {
-    ginPutSignalBWLaunchRsm<NCCL_GIN_RESOURCE_SHARING_GPU>(dcomm, hBuf, stream, args, numElems, iters);
+    ginPutSignalBWLaunchRsm<NCCL_GIN_RESOURCE_SHARING_GPU>(dcomm, devBufHandle, stream, args, numElems, iters);
   }
 }

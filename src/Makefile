@@ -155,7 +155,7 @@ DEVICE_API_GIN_UTILS_DST    := $(BUILDDIR)/device_api/gin/utils
 DEVICE_API_GIN_MPI_ENABLED  := $(filter 1,$(MPI))
 DEVICE_API_GIN_EXTRA_INC := -I$(DEVICE_API_GIN_UTILS_SRCDIR) -I$(NCCL_HOME)/include -I$(MPI_HOME)/include \
                             -I$(CUDA_INC) -I$(CUDA_INC)/cccl
-DEVICE_API_GIN_NVLDFLAGS := $(filter-out -lnccl_test_os -L$(TEST_OS_BUILDDIR),$(NVLDFLAGS))
+DEVICE_API_GIN_NVLDFLAGS := $(filter-out -lnccl_test_os -L$(TEST_OS_BUILDDIR),$(NVLDFLAGS)) -lcuda
 
 # GIN throughput tests support 1024-thread CTAs, which require at most 60
 # registers per thread. Change to use these guidelines -> threads:regs

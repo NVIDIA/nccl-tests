@@ -21,6 +21,11 @@ typedef enum {
   ncclGinOpPutCount,
 } ncclGinOp_t;
 
+typedef enum {
+  ncclGinMemoryDevice = 0,
+  ncclGinMemoryHost,
+} ncclGinMemoryType_t;
+
 #define GIN_OP_BIT(op) (1u << (unsigned)(op))
 
 typedef struct {
@@ -36,6 +41,8 @@ typedef struct {
   bool ginStrongSignal;
   bool ginAggregateRequests;
   bool ginBidirectional;
+  ncclGinMemoryType_t localMemoryType;
+  ncclGinMemoryType_t remoteMemoryType;
   int queueDepth;
   ncclGinRsm_t ginRsm;
   ncclGinOp_t ginOp;
@@ -59,6 +66,7 @@ typedef struct {
  *   allowBidirectional          – --gin_bd (throughput only).
  *   allowMultiCtaThreads        – -c/-t other than 1 (throughput only;
  *                                 latency requires a single CTA and thread).
+ *   canUseHostMemory            – --local_mem_type/--remote_mem_type options for CPU-backed memory support.
  */
 typedef struct {
   ncclGinRsm_t defaultRsm;
@@ -69,9 +77,11 @@ typedef struct {
   bool allowAggregateRequests;
   bool allowBidirectional;
   bool allowMultiCtaThreads;
+  bool canUseHostMemory;
 } ginTestCaps_t;
 
 void ncclTestGinParseArgs(int argc, char** argv, ginArgs_t* args);
 void ncclTestGinConfigureArgs(ginArgs_t* args, const ginTestCaps_t* caps);
 const char* ncclTestGinOpName(ncclGinOp_t op);
 const char* ncclTestGinRsmName(ncclGinRsm_t rsm);
+const char* ncclTestGinMemoryTypeName(ncclGinMemoryType_t memory);

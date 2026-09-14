@@ -32,6 +32,16 @@
   } \
 } while (0)
 
+#define CUCHECK(cmd) do { \
+  CUresult _e = (cmd); \
+  if (_e != CUDA_SUCCESS) { \
+    const char* _s = nullptr; \
+    cuGetErrorString(_e, &_s); \
+    fprintf(stderr, "Failed: CUDA driver error %s:%d '%s'\n", __FILE__, __LINE__, _s); \
+    return ncclUnhandledCudaError; \
+  } \
+} while (0)
+
 #define NCCLCHECK(cmd) do { \
   ncclResult_t _r = (cmd); \
   if (_r != ncclSuccess) { \
@@ -73,7 +83,7 @@
  * Benchmark callback invoked by ncclTestGinPerfRun for every (size, iters) point.
  *
  *   dcomm – device comm handle
- *   hBuf – registered buffer handle
+ *   devBufHandle – registered buffer handle
  *   stream – CUDA stream to launch into
  *   args – parsed CLI args
  *   numElems – elements (ints) to transfer this size point
@@ -81,7 +91,8 @@
  */
 typedef void (*ginRunFn_t)(
     ncclDevComm dcomm,
-    ncclDevResourceHandle hBuf,
+    ncclDevResourceHandle devBufHandle,
+    ncclWindow_t hostBufWindow,
     cudaStream_t stream,
     const ginArgs_t* args,
     size_t numElems,

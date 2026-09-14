@@ -25,6 +25,8 @@ static void printUsage(const char* argv0) {
     "  --gin_strong_signal              Use a Strong signal instead of Weak, for tests that support both (default: off, i.e. weak)\n"
     "  --gin_ag                         Enable ncclGinOptFlagsAggregateRequests on throughput tests (default: off)\n"
     "  --gin_bd                         Bidirectional bandwidth: both ranks send to each other; reported metric is the sum of each rank's average (throughput tests only, default: off)\n"
+    "  --local_mem_type <device|host>   Memory type of local rank (default: device)\n"
+    "  --remote_mem_type <device|host>  Memory type of remote rank (default: device)\n"
     "  --gin_rsm <thread|cta|gpu>       GIN resource sharing mode (default: gpu)\n"
     "  --gin_tx_depth <depth>           GIN Send (queue) depth (default: 1024)\n",
     argv0, sizeof(int));
@@ -87,6 +89,13 @@ static ncclGinOp_t parseOp(const char* str) {
   exit(EXIT_FAILURE);
 }
 
+static ncclGinMemoryType_t parseMemoryType(const char* str, bool isLocal) {
+  if (strcmp(str, "device") == 0) return ncclGinMemoryDevice;
+  if (strcmp(str, "host") == 0) return ncclGinMemoryHost;
+  fprintf(stderr, "Error: invalid value for --%s: '%s' (expected device or host)\n", isLocal ? "local_mem_type" : "remote_mem_type", str);
+  exit(EXIT_FAILURE);
+}
+
 const char* ncclTestGinOpName(ncclGinOp_t op) {
   switch (op) {
   case ncclGinOpPut: return "put";
@@ -105,6 +114,10 @@ const char* ncclTestGinRsmName(ncclGinRsm_t rsm) {
   }
 }
 
+const char* ncclTestGinMemoryTypeName(ncclGinMemoryType_t memory) {
+  return memory == ncclGinMemoryHost ? "host" : "device";
+}
+
 void ncclTestGinParseArgs(int argc, char** argv, ginArgs_t* args) {
   args->minBytes = sizeof(int);
   args->maxBytes = 4 * 1024 * 1024;
@@ -118,6 +131,8 @@ void ncclTestGinParseArgs(int argc, char** argv, ginArgs_t* args) {
   args->ginStrongSignal = false;
   args->ginAggregateRequests = false;
   args->ginBidirectional = false;
+  args->localMemoryType = ncclGinMemoryDevice;
+  args->remoteMemoryType = ncclGinMemoryDevice;
   args->queueDepth = 1024;
   args->ginRsm = ncclGinRsmUnset;
   args->ginOp = ncclGinOpUnset;
@@ -131,6 +146,8 @@ void ncclTestGinParseArgs(int argc, char** argv, ginArgs_t* args) {
     {"gin_strong_signal", no_argument, NULL, 0},
     {"gin_ag", no_argument, NULL, 0},
     {"gin_bd", no_argument, NULL, 0},
+    {"local_mem_type", required_argument, NULL, 0},
+    {"remote_mem_type", required_argument, NULL, 0},
     {"gin_rsm", required_argument, NULL, 0},
     {"gin_tx_depth", required_argument, NULL, 0},
     {"num_ctas", required_argument, NULL, 'c'},
@@ -160,6 +177,10 @@ void ncclTestGinParseArgs(int argc, char** argv, ginArgs_t* args) {
           args->ginAggregateRequests = true;
         } else if (strcmp(longOpts[idx].name, "gin_bd") == 0) {
           args->ginBidirectional = true;
+        } else if (strcmp(longOpts[idx].name, "local_mem_type") == 0) {
+          args->localMemoryType = parseMemoryType(optarg, true);
+        } else if (strcmp(longOpts[idx].name, "remote_mem_type") == 0) {
+          args->remoteMemoryType = parseMemoryType(optarg, false);
         } else if (strcmp(longOpts[idx].name, "gin_rsm") == 0) {
           args->ginRsm = parseRsm(optarg);
         } else if (strcmp(longOpts[idx].name, "gin_tx_depth") == 0) {
@@ -289,6 +310,10 @@ void ncclTestGinConfigureArgs(ginArgs_t* args, const ginTestCaps_t* caps) {
   }
   if (!caps->allowBidirectional && args->ginBidirectional) {
     fprintf(stderr, "Error: --gin_bd is only supported by throughput (bandwidth) tests\n");
+    exit(EXIT_FAILURE);
+  }
+  if (!caps->canUseHostMemory && (args->localMemoryType == ncclGinMemoryHost || args->remoteMemoryType == ncclGinMemoryHost)) {
+    fprintf(stderr, "Error: --remote_mem_type host/--local_mem_type host is only supported by ginGetBW_perf\n");
     exit(EXIT_FAILURE);
   }
   if (!caps->allowMultiCtaThreads && (args->numCtas != 1 || args->numThreads != 1)) {

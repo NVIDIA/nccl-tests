@@ -58,6 +58,7 @@ function(add_gin_perf_category CATEGORY_DIR)
         nccl
         MPI::MPI_CXX
         CUDA::cudart
+        CUDA::cuda_driver
     )
 
     foreach(RUNNER_FILE ${RUNNER_SOURCES})
@@ -87,6 +88,7 @@ function(add_gin_perf_category CATEGORY_DIR)
             nccl
             MPI::MPI_CXX
             CUDA::cudart
+            CUDA::cuda_driver
             m
             stdc++
         )

@@ -13,6 +13,7 @@ static void printConfiguration(const ginArgs_t* args, const ginBenchmark_t* benc
   if (args->ginSkipCreditCheck) printf(", skip_credit_check");
   if (args->ginAggregateRequests) printf(", aggregate_requests");
   if (args->ginBidirectional) printf(", bidirectional");
+  printf(", local mem type=%s, remote mem type=%s", ncclTestGinMemoryTypeName(args->localMemoryType), ncclTestGinMemoryTypeName(args->remoteMemoryType));
   if (bench->type == GIN_BENCHMARK_TYPE_THROUGHPUT) printf(", ctas=%d, threads=%d", args->numCtas, args->numThreads);
   printf("\n");
 }
@@ -112,7 +113,7 @@ void ncclTestGinPerfRun(int argc, char** argv, const ginArgs_t* args, const ginB
   ncclComm_t comm;
   NCCLCHECK_FATAL(ncclCommInitRankConfig(&comm, nRanks, id, rank, &config));
 
-  ginContext_t ctx;
+  ginContext_t ctx = {};
   ncclTestGinDevCommCreate(comm, args, &ctx);
 
   const bool bidir = args->ginBidirectional;
@@ -135,7 +136,7 @@ void ncclTestGinPerfRun(int argc, char** argv, const ginArgs_t* args, const ginB
 
     //-----Warmup-----
     if (args->warmupIters > 0 && participates) {
-      bench->run(ctx.dcomm, ctx.hBuf, stream, args, numElems, args->warmupIters);
+      bench->run(ctx.dcomm, ctx.devBufHandle, ctx.hostBufWindow, stream, args, numElems, args->warmupIters);
       CUDACHECK_FATAL(cudaStreamSynchronize(stream));
     }
 
@@ -143,7 +144,7 @@ void ncclTestGinPerfRun(int argc, char** argv, const ginArgs_t* args, const ginB
     MPICHECK_FATAL(MPI_Barrier(MPI_COMM_WORLD));
 
     if (measures) CUDACHECK_FATAL(cudaEventRecord(start, stream));
-    if (participates) bench->run(ctx.dcomm, ctx.hBuf, stream, args, numElems, args->iters);
+    if (participates) bench->run(ctx.dcomm, ctx.devBufHandle, ctx.hostBufWindow, stream, args, numElems, args->iters);
     if (measures) CUDACHECK_FATAL(cudaEventRecord(stop, stream));
     if (participates) CUDACHECK_FATAL(cudaStreamSynchronize(stream));
 

@@ -6,7 +6,7 @@
 #include "gin_context.h"
 
 template <bool skipCreditCheck, bool strongSignal, ncclGinResourceSharingMode rsm>
-__global__ void ginSignalPingKernel(ncclDevComm comm, ncclDevResourceHandle hBuf, int iters) {
+__global__ void ginSignalPingKernel(ncclDevComm comm, ncclDevResourceHandle devBufHandle, int iters) {
 #if __CUDA_ARCH__ >= 700
   ncclTeam team = ncclTeamWorld(comm);
   ncclGin gin(comm, 0, rsm);
@@ -30,10 +30,10 @@ __global__ void ginSignalPingKernel(ncclDevComm comm, ncclDevResourceHandle hBuf
 }
 
 template <ncclGinResourceSharingMode rsm>
-static void ginSignalLatencyPingLaunchRsm(ncclDevComm dcomm, ncclDevResourceHandle hBuf, cudaStream_t stream,
+static void ginSignalLatencyPingLaunchRsm(ncclDevComm dcomm, ncclDevResourceHandle devBufHandle, cudaStream_t stream,
                                              const ginArgs_t* args, int iters) {
 #define LAUNCH_PING_SIGNAL(SKIP, STRONG) \
-  ginSignalPingKernel<SKIP, STRONG, rsm><<<1, 1, 0, stream>>>(dcomm, hBuf, iters)
+  ginSignalPingKernel<SKIP, STRONG, rsm><<<1, 1, 0, stream>>>(dcomm, devBufHandle, iters)
 
   if (args->ginSkipCreditCheck) {
     if (args->ginStrongSignal) LAUNCH_PING_SIGNAL(true, true);
@@ -47,13 +47,13 @@ static void ginSignalLatencyPingLaunchRsm(ncclDevComm dcomm, ncclDevResourceHand
   CUDACHECK_FATAL(cudaGetLastError());
 }
 
-void ncclTestGinSignalLatencyPingLaunch(ncclDevComm dcomm, ncclDevResourceHandle hBuf, cudaStream_t stream,
+void ncclTestGinSignalLatencyPingLaunch(ncclDevComm dcomm, ncclDevResourceHandle devBufHandle, cudaStream_t stream,
                                         const ginArgs_t* args, size_t numElems, int iters) {
   if (args->ginRsm == ncclGinRsmThread) {
-    ginSignalLatencyPingLaunchRsm<NCCL_GIN_RESOURCE_SHARING_THREAD>(dcomm, hBuf, stream, args, iters);
+    ginSignalLatencyPingLaunchRsm<NCCL_GIN_RESOURCE_SHARING_THREAD>(dcomm, devBufHandle, stream, args, iters);
   } else if (args->ginRsm == ncclGinRsmCta) {
-    ginSignalLatencyPingLaunchRsm<NCCL_GIN_RESOURCE_SHARING_CTA>(dcomm, hBuf, stream, args, iters);
+    ginSignalLatencyPingLaunchRsm<NCCL_GIN_RESOURCE_SHARING_CTA>(dcomm, devBufHandle, stream, args, iters);
   } else {
-    ginSignalLatencyPingLaunchRsm<NCCL_GIN_RESOURCE_SHARING_GPU>(dcomm, hBuf, stream, args, iters);
+    ginSignalLatencyPingLaunchRsm<NCCL_GIN_RESOURCE_SHARING_GPU>(dcomm, devBufHandle, stream, args, iters);
   }
 }

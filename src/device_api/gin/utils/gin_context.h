@@ -6,7 +6,9 @@
 
 typedef struct {
   ncclDevComm dcomm;
-  ncclDevResourceHandle hBuf;
+  ncclDevResourceHandle devBufHandle;
+  void* hostBuf;
+  ncclWindow_t hostBufWindow;
 } ginContext_t;
 
 size_t ncclTestGinMaxBufferBytes(void);

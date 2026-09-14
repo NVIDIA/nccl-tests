@@ -16,6 +16,7 @@ int main(int argc, char** argv) {
   caps.allowAggregateRequests = true;
   caps.allowBidirectional = true;
   caps.allowMultiCtaThreads = true;
+  caps.canUseHostMemory = false;
   ncclTestGinConfigureArgs(&args, &caps);
 
   ginBenchmark_t bench = {};
