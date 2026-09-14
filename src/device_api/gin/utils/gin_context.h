@@ -6,7 +6,8 @@
 
 typedef struct {
   ncclDevComm dcomm;
-  ncclDevResourceHandle devBufHandle;
+  void* devBuf;
+  ncclWindow_t devBufWindow;
   void* hostBuf;
   ncclWindow_t hostBufWindow;
 } ginContext_t;

@@ -95,27 +95,16 @@ void ncclTestGinDevCommCreate(ncclComm_t comm, const ginArgs_t* args, ginContext
     NCCLCHECK_FATAL(ncclCommWindowRegister(comm, ctx->hostBuf, args->maxBytes, &ctx->hostBufWindow, NCCL_WIN_GIN_ONLY));
   }
 
-  ncclDevCommRequirements_t reqs = NCCL_DEV_COMM_REQUIREMENTS_INITIALIZER;
-  reqs.ginContextCount = args->numCtas;
-  reqs.ginQueueDepth = args->queueDepth;
-  reqs.ginConnectionType = NCCL_GIN_CONNECTION_FULL;
-  reqs.ginSignalCount = 1;
-  reqs.ginCounterCount = 1;
-
-  reqs.ginStrongSignalsRequired = args->ginStrongSignal;
-  reqs.ginVaSignalsRequired = false;
-
-  ncclDevResourceRequirements bufReq = {};
-  bufReq.bufferSize = args->maxBytes;
-  bufReq.outBufferHandle = &ctx->devBufHandle;
-  bufReq.next = reqs.resourceRequirementsList;
-  reqs.resourceRequirementsList = &bufReq;
-
-  NCCLCHECK_FATAL(ncclDevCommCreate(comm, &reqs, &ctx->dcomm));
+  if (args->localMemoryType == ncclGinMemoryDevice || args->remoteMemoryType == ncclGinMemoryDevice) {
+    NCCLCHECK_FATAL(ncclMemAlloc(&ctx->devBuf, args->maxBytes));
+    NCCLCHECK_FATAL(ncclCommWindowRegister(comm, ctx->devBuf, args->maxBytes, &ctx->devBufWindow, NCCL_WIN_GIN_ONLY));
+  }
 }
 
 void ncclTestGinDevCommDestroy(ncclComm_t comm, ginContext_t* ctx) {
-  NCCLCHECK_FATAL(ncclDevCommDestroy(comm, &ctx->dcomm));
+  if (ctx->devBufWindow != nullptr) NCCLCHECK_FATAL(ncclCommWindowDeregister(comm, ctx->devBufWindow));
+  if (ctx->devBuf != nullptr) NCCLCHECK_FATAL(ncclMemFree(ctx->devBuf));
+
   if (ctx->hostBufWindow != nullptr) NCCLCHECK_FATAL(ncclCommWindowDeregister(comm, ctx->hostBufWindow));
   if (ctx->hostBuf != nullptr) NCCLCHECK_FATAL(ncclTestGinHostFree(ctx->hostBuf));
 }

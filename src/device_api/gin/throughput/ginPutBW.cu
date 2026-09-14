@@ -6,8 +6,8 @@
 #include "gin_context.h"
 
 template <bool skipCreditCheck, bool aggregateRequests, ncclGinResourceSharingMode rsm>
-__global__ void ginPutBwKernel(ncclDevComm comm, ncclDevResourceHandle devBufHandle, int iters, size_t numElems,
-                                 int queueDepth, size_t maxElems) {
+__global__ void ginPutBwKernel(ncclDevComm comm, ncclWindow_t dWindow, ncclWindow_t sWindow, size_t numElems,
+                               int iters, int queueDepth, size_t maxElems, bool isDestBufDev, bool isSourceBufDev) {
 #if __CUDA_ARCH__ >= 700
   const int tag = blockIdx.x;
   ncclTeam team = ncclTeamWorld(comm);
@@ -15,10 +15,11 @@ __global__ void ginPutBwKernel(ncclDevComm comm, ncclDevResourceHandle devBufHan
   ncclGin gin(comm, tag, rsm);
 
   const size_t slots = maxElems / numElems;
-  ncclSymPtr<int> buf = (ncclSymPtr<int>)ncclGetResourceBuffer(comm, devBufHandle);
-  buf += (size_t)(threadIdx.x % slots) * numElems;
-  ncclSymPtr<int> sbuf = buf;
-  ncclSymPtr<int> dbuf = buf;
+  const size_t offset = (size_t)(threadIdx.x % slots) * numElems;
+
+  ncclSymPtr<int> dbuf = ncclSymPtr<int>(dWindow, offset * sizeof(int));
+  ncclSymPtr<int> sbuf = ncclSymPtr<int>(sWindow, offset * sizeof(int));
+  const GinPutFn ginPutFn = ginPutFns[isSourceBufDev][isDestBufDev];
 
   const int lastActive = (int)(blockDim.x - 1);
 
@@ -30,21 +31,23 @@ __global__ void ginPutBwKernel(ncclDevComm comm, ncclDevResourceHandle devBufHan
   const int flushEvery = (queueDepth / 2) / wqesPerIter < 1 ? 1 : (queueDepth / 2) / wqesPerIter;
 
   for (int i = 0; i < iters; i++) {
-    if(aggregateRequests) {
-      if(threadIdx.x != lastActive) {
-        gin.put(team, peer, dbuf, sbuf, numElems, ncclGin_None{}, ncclGin_None{}, ncclCoopThread{},
-                ncclGin_None{}, cuda::thread_scope_thread, cuda::thread_scope_thread, optFlags | ncclGinOptFlagsAggregateRequests);
+    if constexpr (aggregateRequests) {
+      if (threadIdx.x != lastActive) {
+        ginPutFn(gin, team, peer, dbuf, sbuf, numElems, ncclGin_None{}, ncclGin_None{}, ncclCoopThread{},
+                 ncclGin_None{}, cuda::thread_scope_thread, cuda::thread_scope_thread, optFlags | ncclGinOptFlagsAggregateRequests);
       }
       __syncthreads();
-      if(threadIdx.x == lastActive) {
-        gin.put(team, peer, dbuf, sbuf, numElems, ncclGin_None{}, ncclGin_None{}, ncclCoopThread{},
-                ncclGin_None{}, cuda::thread_scope_thread, cuda::thread_scope_thread, optFlags);
+      if (threadIdx.x == lastActive) {
+        ginPutFn(gin, team, peer, dbuf, sbuf, numElems, ncclGin_None{},
+                 ncclGin_None{}, ncclCoopThread{}, ncclGin_None{}, cuda::thread_scope_thread,
+                 cuda::thread_scope_thread, optFlags);
       }
     } else {
-      gin.put(team, peer, dbuf, sbuf, numElems, ncclGin_None{}, ncclGin_None{}, ncclCoopThread{},
-              ncclGin_None{}, cuda::thread_scope_thread, cuda::thread_scope_thread, optFlags);
+      ginPutFn(gin, team, peer, dbuf, sbuf, numElems, ncclGin_None{},
+               ncclGin_None{}, ncclCoopThread{}, ncclGin_None{}, cuda::thread_scope_thread, cuda::thread_scope_thread,
+               optFlags);
     }
-    if (skipCreditCheck) {
+    if constexpr (skipCreditCheck) {
       if (i % flushEvery == 0) gin.flush(ncclCoopCta{});
     } else {
       __syncthreads();
@@ -55,12 +58,17 @@ __global__ void ginPutBwKernel(ncclDevComm comm, ncclDevResourceHandle devBufHan
 }
 
 template <ncclGinResourceSharingMode rsm>
-static void ginPutBWLaunchRsm(ncclDevComm dcomm, ncclDevResourceHandle devBufHandle, cudaStream_t stream,
-                                const ginArgs_t* args, size_t numElems, int iters) {
+static void ginPutBWLaunchRsm(const ginContext_t* ctx, cudaStream_t stream,
+                               const ginArgs_t* args, size_t numElems, int iters) {
+  ncclWindow_t dWindow = args->remoteMemoryType == ncclGinMemoryDevice ? ctx->devBufWindow : ctx->hostBufWindow;
+  ncclWindow_t sWindow = args->localMemoryType == ncclGinMemoryDevice ? ctx->devBufWindow : ctx->hostBufWindow;
   const int queueDepth = args->queueDepth;
   const size_t maxElems = args->maxBytes / sizeof(int);
+  bool isDestBufDev = args->remoteMemoryType == ncclGinMemoryDevice;
+  bool isSourceBufDev = args->localMemoryType == ncclGinMemoryDevice;
 #define LAUNCH_BW_PUT(SKIP, AG) \
-  ginPutBwKernel<SKIP, AG, rsm><<<args->numCtas, args->numThreads, 0, stream>>>(dcomm, devBufHandle, iters, numElems, queueDepth, maxElems)
+  ginPutBwKernel<SKIP, AG, rsm><<<args->numCtas, args->numThreads, 0, stream>>>( \
+    ctx->dcomm, dWindow, sWindow, numElems, iters, queueDepth, maxElems, isDestBufDev, isSourceBufDev)
 
   if (args->ginSkipCreditCheck) {
     if (args->ginAggregateRequests) LAUNCH_BW_PUT(true, true);
@@ -74,11 +82,10 @@ static void ginPutBWLaunchRsm(ncclDevComm dcomm, ncclDevResourceHandle devBufHan
   CUDACHECK_FATAL(cudaGetLastError());
 }
 
-void ncclTestGinPutBWLaunch(ncclDevComm dcomm, ncclDevResourceHandle devBufHandle, cudaStream_t stream,
-                            const ginArgs_t* args, size_t numElems, int iters) {
+void ncclTestGinPutBWLaunch(const ginContext_t* ctx, cudaStream_t stream, const ginArgs_t* args, size_t numElems, int iters) {
   if (args->ginRsm == ncclGinRsmCta) {
-    ginPutBWLaunchRsm<NCCL_GIN_RESOURCE_SHARING_CTA>(dcomm, devBufHandle, stream, args, numElems, iters);
+    ginPutBWLaunchRsm<NCCL_GIN_RESOURCE_SHARING_CTA>(ctx, stream, args, numElems, iters);
   } else {
-    ginPutBWLaunchRsm<NCCL_GIN_RESOURCE_SHARING_GPU>(dcomm, devBufHandle, stream, args, numElems, iters);
+    ginPutBWLaunchRsm<NCCL_GIN_RESOURCE_SHARING_GPU>(ctx, stream, args, numElems, iters);
   }
 }

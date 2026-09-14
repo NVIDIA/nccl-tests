@@ -13,15 +13,10 @@
  * ginBenchmark_t::run directly.
  */
 
-void ncclTestGinPutBWLaunch(ncclDevComm dcomm, ncclDevResourceHandle devBufHandle, cudaStream_t stream,
-    const ginArgs_t* args, size_t numElems, int iters);
-void ncclTestGinPutSignalBWLaunch(ncclDevComm dcomm, ncclDevResourceHandle devBufHandle, cudaStream_t stream,
-    const ginArgs_t* args, size_t numElems, int iters);
-void ncclTestGinPutCounterBWLaunch(ncclDevComm dcomm, ncclDevResourceHandle devBufHandle, cudaStream_t stream,
-    const ginArgs_t* args, size_t numElems, int iters);
+void ncclTestGinPutBWLaunch(const ginContext_t* ctx, cudaStream_t stream, const ginArgs_t* args, size_t numElems, int iters);
+void ncclTestGinPutSignalBWLaunch(const ginContext_t* ctx, cudaStream_t stream, const ginArgs_t* args, size_t numElems, int iters);
+void ncclTestGinPutCounterBWLaunch(const ginContext_t* ctx, cudaStream_t stream, const ginArgs_t* args, size_t numElems, int iters);
 
-void ncclTestGinGetBWLaunch(ncclDevComm dcomm, ncclDevResourceHandle devBufHandle, cudaStream_t stream,
-    const ginArgs_t* args, size_t numElems, int iters);
+void ncclTestGinGetBWLaunch(const ginContext_t* ctx, cudaStream_t stream, const ginArgs_t* args, size_t numElems, int iters);
 
-void ncclTestGinSignalBWLaunch(ncclDevComm dcomm, ncclDevResourceHandle devBufHandle, cudaStream_t stream,
-    const ginArgs_t* args, size_t numElems, int iters);
+void ncclTestGinSignalBWLaunch(const ginContext_t* ctx, cudaStream_t stream, const ginArgs_t* args, size_t numElems, int iters);

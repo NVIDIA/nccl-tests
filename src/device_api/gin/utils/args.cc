@@ -313,7 +313,7 @@ void ncclTestGinConfigureArgs(ginArgs_t* args, const ginTestCaps_t* caps) {
     exit(EXIT_FAILURE);
   }
   if (!caps->canUseHostMemory && (args->localMemoryType == ncclGinMemoryHost || args->remoteMemoryType == ncclGinMemoryHost)) {
-    fprintf(stderr, "Error: --remote_mem_type host/--local_mem_type host is only supported by ginGetBW_perf\n");
+    fprintf(stderr, "Error: --remote_mem_type host/--local_mem_type host is only supported in a limited set of benchmarks\n");
     exit(EXIT_FAILURE);
   }
   if (!caps->allowMultiCtaThreads && (args->numCtas != 1 || args->numThreads != 1)) {

@@ -6,12 +6,13 @@
 #include "gin_context.h"
 
 template <bool skipCreditCheck, ncclGinResourceSharingMode rsm>
-__global__ void ginPutCounterPingKernel(ncclDevComm comm, ncclDevResourceHandle devBufHandle, int iters, size_t numElems,
+__global__ void ginPutCounterPingKernel(ncclDevComm comm, ncclWindow_t devWindow, size_t numElems, int iters,
                                   int queueDepth) {
 #if __CUDA_ARCH__ >= 700
   ncclTeam team = ncclTeamWorld(comm);
   ncclGin gin(comm, 0, rsm);
-  ncclSymPtr<int> sbuf = (ncclSymPtr<int>)ncclGetResourceBuffer(comm, devBufHandle);
+
+  ncclSymPtr<int> sbuf = ncclSymPtr<int>(devWindow, 0);
   ncclSymPtr<int> dbuf = sbuf;
 
   constexpr uint32_t optFlags =
@@ -25,7 +26,9 @@ __global__ void ginPutCounterPingKernel(ncclDevComm comm, ncclDevResourceHandle 
     gin.put(team, 1, dbuf, sbuf, numElems, ncclGin_None{}, ncclGin_WeakCounterInc{counterId}, ncclCoopThread{},
             ncclGin_None{}, cuda::thread_scope_thread, cuda::thread_scope_thread, optFlags);
     counterShadow++;
-    if (skipCreditCheck && (i % flushEvery == 0)) gin.flush(ncclCoopThread{});
+    if constexpr (skipCreditCheck) {
+      if (i % flushEvery == 0) gin.flush(ncclCoopThread{});
+    }
     gin.waitCounter(ncclCoopThread{}, counterId, counterShadow);
   }
 
@@ -35,11 +38,11 @@ __global__ void ginPutCounterPingKernel(ncclDevComm comm, ncclDevResourceHandle 
 }
 
 template <ncclGinResourceSharingMode rsm>
-static void ginPutCounterLatencyPingLaunchRsm(ncclDevComm dcomm, ncclDevResourceHandle devBufHandle, cudaStream_t stream,
-                                                 const ginArgs_t* args, size_t numElems, int iters) {
+static void ginPutCounterLatencyPingLaunchRsm(const ginContext_t* ctx, cudaStream_t stream,
+                                               const ginArgs_t* args, size_t numElems, int iters) {
   const int queueDepth = args->queueDepth;
 #define LAUNCH_PING_PUT_COUNTER(SKIP) \
-  ginPutCounterPingKernel<SKIP, rsm><<<1, 1, 0, stream>>>(dcomm, devBufHandle, iters, numElems, queueDepth)
+  ginPutCounterPingKernel<SKIP, rsm><<<1, 1, 0, stream>>>(ctx->dcomm, ctx->devBufWindow, numElems, iters, queueDepth)
 
   if (args->ginSkipCreditCheck) LAUNCH_PING_PUT_COUNTER(true);
   else LAUNCH_PING_PUT_COUNTER(false);
@@ -48,13 +51,12 @@ static void ginPutCounterLatencyPingLaunchRsm(ncclDevComm dcomm, ncclDevResource
   CUDACHECK_FATAL(cudaGetLastError());
 }
 
-void ncclTestGinPutCounterLatencyPingLaunch(ncclDevComm dcomm, ncclDevResourceHandle devBufHandle, cudaStream_t stream,
-                                            const ginArgs_t* args, size_t numElems, int iters) {
+void ncclTestGinPutCounterLatencyPingLaunch(const ginContext_t* ctx, cudaStream_t stream, const ginArgs_t* args, size_t numElems, int iters) {
   if (args->ginRsm == ncclGinRsmThread) {
-    ginPutCounterLatencyPingLaunchRsm<NCCL_GIN_RESOURCE_SHARING_THREAD>(dcomm, devBufHandle, stream, args, numElems, iters);
+    ginPutCounterLatencyPingLaunchRsm<NCCL_GIN_RESOURCE_SHARING_THREAD>(ctx, stream, args, numElems, iters);
   } else if (args->ginRsm == ncclGinRsmCta) {
-    ginPutCounterLatencyPingLaunchRsm<NCCL_GIN_RESOURCE_SHARING_CTA>(dcomm, devBufHandle, stream, args, numElems, iters);
+    ginPutCounterLatencyPingLaunchRsm<NCCL_GIN_RESOURCE_SHARING_CTA>(ctx, stream, args, numElems, iters);
   } else {
-    ginPutCounterLatencyPingLaunchRsm<NCCL_GIN_RESOURCE_SHARING_GPU>(dcomm, devBufHandle, stream, args, numElems, iters);
+    ginPutCounterLatencyPingLaunchRsm<NCCL_GIN_RESOURCE_SHARING_GPU>(ctx, stream, args, numElems, iters);
   }
 }

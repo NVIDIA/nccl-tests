@@ -6,7 +6,7 @@
 #include "gin_context.h"
 
 template <bool skipCreditCheck, bool aggregateRequests, ncclGinResourceSharingMode rsm>
-__global__ void ginPutCounterBwKernel(ncclDevComm comm, ncclDevResourceHandle devBufHandle, int iters, size_t numElems,
+__global__ void ginPutCounterBwKernel(ncclDevComm comm, ncclWindow_t devWindow, int iters, size_t numElems,
                                         int queueDepth, size_t maxElems) {
 #if __CUDA_ARCH__ >= 700
   const int tag = blockIdx.x;
@@ -15,10 +15,9 @@ __global__ void ginPutCounterBwKernel(ncclDevComm comm, ncclDevResourceHandle de
   ncclGin gin(comm, tag, rsm);
 
   const size_t slots = maxElems / numElems;
-  ncclSymPtr<int> buf = (ncclSymPtr<int>)ncclGetResourceBuffer(comm, devBufHandle);
-  buf += (size_t)(threadIdx.x % slots) * numElems;
-  ncclSymPtr<int> sbuf = buf;
-  ncclSymPtr<int> dbuf = buf;
+  const size_t offset = (size_t)(threadIdx.x % slots) * numElems;
+  ncclSymPtr<int> dbuf = ncclSymPtr<int>(devWindow, offset * sizeof(int));
+  ncclSymPtr<int> sbuf = ncclSymPtr<int>(devWindow, offset * sizeof(int));
 
   const int activeThreads = (int)blockDim.x;
   const int lastActive = activeThreads - 1;
@@ -33,7 +32,7 @@ __global__ void ginPutCounterBwKernel(ncclDevComm comm, ncclDevResourceHandle de
   constexpr ncclGinCounter_t counterId = 0;
 
   for (int i = 0; i < iters; i++) {
-    if (aggregateRequests) {
+    if constexpr (aggregateRequests) {
       if (threadIdx.x != lastActive) {
         gin.put(team, peer, dbuf, sbuf, numElems, ncclGin_None{}, ncclGin_WeakCounterInc{counterId}, ncclCoopThread{},
                 ncclGin_None{}, cuda::thread_scope_thread, cuda::thread_scope_thread,
@@ -48,7 +47,7 @@ __global__ void ginPutCounterBwKernel(ncclDevComm comm, ncclDevResourceHandle de
       gin.put(team, peer, dbuf, sbuf, numElems, ncclGin_None{}, ncclGin_WeakCounterInc{counterId}, ncclCoopThread{},
               ncclGin_None{}, cuda::thread_scope_thread, cuda::thread_scope_thread, optFlags);
     }
-    if (skipCreditCheck) {
+    if constexpr (skipCreditCheck) {
       if (i % flushEvery == 0) gin.flush(ncclCoopCta{});
     } else {
       __syncthreads();
@@ -60,12 +59,12 @@ __global__ void ginPutCounterBwKernel(ncclDevComm comm, ncclDevResourceHandle de
 }
 
 template <ncclGinResourceSharingMode rsm>
-static void ginPutCounterBWLaunchRsm(ncclDevComm dcomm, ncclDevResourceHandle devBufHandle, cudaStream_t stream,
+static void ginPutCounterBWLaunchRsm(const ginContext_t* ctx, cudaStream_t stream,
                                        const ginArgs_t* args, size_t numElems, int iters) {
   const int queueDepth = args->queueDepth;
   const size_t maxElems = args->maxBytes / sizeof(int);
 #define LAUNCH_BW_PUT_COUNTER(SKIP, AG) \
-  ginPutCounterBwKernel<SKIP, AG, rsm><<<args->numCtas, args->numThreads, 0, stream>>>(dcomm, devBufHandle, iters, numElems, queueDepth, maxElems)
+  ginPutCounterBwKernel<SKIP, AG, rsm><<<args->numCtas, args->numThreads, 0, stream>>>(ctx->dcomm, ctx->devBufWindow, iters, numElems, queueDepth, maxElems)
 
   if (args->ginSkipCreditCheck) {
     if (args->ginAggregateRequests) LAUNCH_BW_PUT_COUNTER(true, true);
@@ -79,11 +78,10 @@ static void ginPutCounterBWLaunchRsm(ncclDevComm dcomm, ncclDevResourceHandle de
   CUDACHECK_FATAL(cudaGetLastError());
 }
 
-void ncclTestGinPutCounterBWLaunch(ncclDevComm dcomm, ncclDevResourceHandle devBufHandle, cudaStream_t stream,
-                                   const ginArgs_t* args, size_t numElems, int iters) {
+void ncclTestGinPutCounterBWLaunch(const ginContext_t* ctx, cudaStream_t stream, const ginArgs_t* args, size_t numElems, int iters) {
   if (args->ginRsm == ncclGinRsmCta) {
-    ginPutCounterBWLaunchRsm<NCCL_GIN_RESOURCE_SHARING_CTA>(dcomm, devBufHandle, stream, args, numElems, iters);
+    ginPutCounterBWLaunchRsm<NCCL_GIN_RESOURCE_SHARING_CTA>(ctx, stream, args, numElems, iters);
   } else {
-    ginPutCounterBWLaunchRsm<NCCL_GIN_RESOURCE_SHARING_GPU>(dcomm, devBufHandle, stream, args, numElems, iters);
+    ginPutCounterBWLaunchRsm<NCCL_GIN_RESOURCE_SHARING_GPU>(ctx, stream, args, numElems, iters);
   }
 }

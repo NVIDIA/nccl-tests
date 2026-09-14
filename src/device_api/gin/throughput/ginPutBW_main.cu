@@ -16,17 +16,25 @@ int main(int argc, char** argv) {
   caps.allowAggregateRequests = true;
   caps.allowBidirectional = true;
   caps.allowMultiCtaThreads = true;
-  caps.canUseHostMemory = false;
+  caps.canUseHostMemory = true;
   ncclTestGinConfigureArgs(&args, &caps);
 
   ginBenchmark_t bench = {};
   bench.type = GIN_BENCHMARK_TYPE_THROUGHPUT;
   switch (args.ginOp) {
   case ncclGinOpPutSignal:
+    if (args.localMemoryType == ncclGinMemoryHost || args.remoteMemoryType == ncclGinMemoryHost) {
+      fprintf(stderr, "Error: host memory type is not supported in GIN PUT signal\n");
+      exit(EXIT_FAILURE);
+    }
     bench.run = ncclTestGinPutSignalBWLaunch;
     bench.name = "GIN PUT_SIGNAL BANDWIDTH/MESSAGE RATE";
     break;
   case ncclGinOpPutCount:
+    if (args.localMemoryType == ncclGinMemoryHost || args.remoteMemoryType == ncclGinMemoryHost) {
+      fprintf(stderr, "Error: host memory type is not supported in GIN PUT counter\n");
+      exit(EXIT_FAILURE);
+    }
     bench.run = ncclTestGinPutCounterBWLaunch;
     bench.name = "GIN PUT_COUNTER BANDWIDTH/MESSAGE RATE";
     break;

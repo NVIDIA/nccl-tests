@@ -5,6 +5,7 @@
 #include <stdint.h>
 #include <stddef.h>
 #include <string.h>
+#include <type_traits>
 #include <unistd.h>
 
 #include "cuda_runtime.h"
@@ -12,6 +13,88 @@
 #include "nccl_device.h"
 #include "mpi.h"
 #include "args.h"
+#include "gin_context.h"
+
+#ifdef __CUDACC__
+
+using GinGetFn = void (*)(ncclGin&, ncclTeam, int, ncclWindow_t, size_t, ncclWindow_t, size_t, size_t, ncclCoopThread,
+                          ncclGin_None, uint32_t);
+
+using GinPutFn = void (*)(ncclGin&, ncclTeam, int, ncclSymPtr<int>, ncclSymPtr<int>, size_t, ncclGin_None,
+                          ncclGin_None, ncclCoopThread, ncclGin_None, cuda::thread_scope, cuda::thread_scope, uint32_t);
+
+using GinPutCounterFn = void (*)(ncclGin&, ncclTeam, int, ncclSymPtr<int>, ncclSymPtr<int>, size_t, ncclGin_None,
+                                 ncclGin_WeakCounterInc, ncclCoopThread, ncclGin_None, cuda::thread_scope,
+                                 cuda::thread_scope, uint32_t);
+
+using GinPutStrongSignalFn = void (*)(ncclGin&, ncclTeam, int, ncclSymPtr<int>, ncclSymPtr<int>, size_t,
+                                      ncclGin_StrongSignalInc, ncclGin_None, ncclCoopThread, ncclGin_None,
+                                      cuda::thread_scope, cuda::thread_scope, uint32_t);
+
+using GinPutWeakSignalFn = void (*)(ncclGin&, ncclTeam, int, ncclSymPtr<int>, ncclSymPtr<int>, size_t,
+                                    ncclGin_WeakSignalInc, ncclGin_None, ncclCoopThread, ncclGin_None,
+                                    cuda::thread_scope, cuda::thread_scope, uint32_t);
+
+#if __CUDA_ARCH__ >= 700
+
+NCCL_DEVICE_INLINE void ginGetDevice(ncclGin& gin, ncclTeam team, int peer, ncclWindow_t srcWindow, size_t srcOffset,
+                                     ncclWindow_t dstWindow, size_t dstOffset, size_t bytes, ncclCoopThread coop,
+                                     ncclGin_None descriptor, uint32_t optFlags) {
+  gin.get(team, peer, srcWindow, srcOffset, dstWindow, dstOffset, bytes, coop, descriptor, optFlags,
+          ncclGin_SegmentDevice{});
+}
+NCCL_DEVICE_INLINE void ginGetHostNuma(ncclGin& gin, ncclTeam team, int peer, ncclWindow_t srcWindow,
+                                       size_t srcOffset, ncclWindow_t dstWindow, size_t dstOffset, size_t bytes,
+                                       ncclCoopThread coop, ncclGin_None descriptor, uint32_t optFlags) {
+  gin.get(team, peer, srcWindow, srcOffset, dstWindow, dstOffset, bytes, coop, descriptor, optFlags,
+          ncclGin_SegmentHostNuma{});
+}
+NCCL_DEVICE_INLINE void ginGetMixed(ncclGin& gin, ncclTeam team, int peer, ncclWindow_t srcWindow, size_t srcOffset,
+                                    ncclWindow_t dstWindow, size_t dstOffset, size_t bytes, ncclCoopThread coop,
+                                    ncclGin_None descriptor, uint32_t optFlags) {
+  gin.get(team, peer, srcWindow, srcOffset, dstWindow, dstOffset, bytes, coop, descriptor, optFlags,
+          ncclGin_SegmentMixed{});
+}
+
+__device__ static const GinGetFn ginGetFns[2][2] = {
+  {ginGetHostNuma, ginGetMixed},
+  {ginGetMixed, ginGetDevice},
+};
+
+NCCL_DEVICE_INLINE void ginPutDevice(ncclGin& gin, ncclTeam team, int peer, ncclSymPtr<int> dstElts,
+                                     ncclSymPtr<int> srcElts, size_t nElts, ncclGin_None remoteAction,
+                                     ncclGin_None localAction, ncclCoopThread coop, ncclGin_None descriptor,
+                                     cuda::thread_scope givenRelease, cuda::thread_scope requiredRelease, uint32_t optFlags) {
+  gin.put(team, peer, dstElts, srcElts, nElts, remoteAction, localAction, coop, descriptor,
+          givenRelease, requiredRelease, optFlags, ncclGin_SegmentDevice{});
+}
+NCCL_DEVICE_INLINE void ginPutHostNuma(ncclGin& gin, ncclTeam team, int peer, ncclSymPtr<int> dstElts,
+                                       ncclSymPtr<int> srcElts, size_t nElts, ncclGin_None remoteAction,
+                                       ncclGin_None localAction, ncclCoopThread coop, ncclGin_None descriptor,
+                                       cuda::thread_scope givenRelease, cuda::thread_scope requiredRelease, uint32_t optFlags) {
+  gin.put(team, peer, dstElts, srcElts, nElts, remoteAction, localAction, coop, descriptor,
+          givenRelease, requiredRelease, optFlags, ncclGin_SegmentHostNuma{});
+}
+NCCL_DEVICE_INLINE void ginPutMixed(ncclGin& gin, ncclTeam team, int peer, ncclSymPtr<int> dstElts,
+                                    ncclSymPtr<int> srcElts, size_t nElts, ncclGin_None remoteAction,
+                                    ncclGin_None localAction, ncclCoopThread coop, ncclGin_None descriptor,
+                                    cuda::thread_scope givenRelease, cuda::thread_scope requiredRelease, uint32_t optFlags) {
+  gin.put(team, peer, dstElts, srcElts, nElts, remoteAction, localAction, coop, descriptor,
+          givenRelease, requiredRelease, optFlags, ncclGin_SegmentMixed{});
+}
+
+__device__ static const GinPutFn ginPutFns[2][2] = {
+  {ginPutHostNuma, ginPutMixed},
+  {ginPutMixed, ginPutDevice},
+};
+
+#else // __CUDA_ARCH__ >= 700
+
+__device__ static const GinGetFn ginGetFns[2][2] = {};
+__device__ static const GinPutFn ginPutFns[2][2] = {};
+
+#endif // __CUDA_ARCH__ >= 700
+#endif // __CUDACC__
 
 /* Pre-MPI: use plain exit so the caller sees a clean error before MPI is up. */
 #define MPICHECK(cmd) do { \
@@ -82,17 +165,14 @@
 /*
  * Benchmark callback invoked by ncclTestGinPerfRun for every (size, iters) point.
  *
- *   dcomm – device comm handle
- *   devBufHandle – registered buffer handle
+ *   ctx – Device comm context
  *   stream – CUDA stream to launch into
  *   args – parsed CLI args
  *   numElems – elements (ints) to transfer this size point
  *   iters – number of iterations to perform this call
  */
 typedef void (*ginRunFn_t)(
-    ncclDevComm dcomm,
-    ncclDevResourceHandle devBufHandle,
-    ncclWindow_t hostBufWindow,
+    const ginContext_t* ctx,
     cudaStream_t stream,
     const ginArgs_t* args,
     size_t numElems,

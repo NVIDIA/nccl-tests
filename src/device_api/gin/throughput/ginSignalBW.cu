@@ -7,7 +7,7 @@
 
 template <bool skipCreditCheck, bool aggregateRequests, bool strongSignal,
           ncclGinResourceSharingMode rsm>
-__global__ void ginSignalBwKernel(ncclDevComm comm, ncclDevResourceHandle devBufHandle, int iters, int queueDepth) {
+__global__ void ginSignalBwKernel(ncclDevComm comm, ncclWindow_t devWindow, int iters, int queueDepth) {
 #if __CUDA_ARCH__ >= 700
   const int tag = blockIdx.x;
   ncclTeam team = ncclTeamWorld(comm);
@@ -24,9 +24,9 @@ __global__ void ginSignalBwKernel(ncclDevComm comm, ncclDevResourceHandle devBuf
   constexpr ncclGinSignal_t signalId = 0;
 
   for (int i = 0; i < iters; i++) {
-    if (aggregateRequests) {
+    if constexpr (aggregateRequests) {
       if (threadIdx.x < blockDim.x - 1) {
-        if (strongSignal) {
+        if constexpr (strongSignal) {
           gin.signal(team, peer, ncclGin_StrongSignalInc{signalId}, ncclCoopThread{}, ncclGin_None{},
                      cuda::thread_scope_thread, cuda::thread_scope_thread,
                      optFlags | ncclGinOptFlagsAggregateRequests);
@@ -38,7 +38,7 @@ __global__ void ginSignalBwKernel(ncclDevComm comm, ncclDevResourceHandle devBuf
       }
       __syncthreads();
       if (threadIdx.x == blockDim.x - 1) {
-        if (strongSignal) {
+        if constexpr (strongSignal) {
           gin.signal(team, peer, ncclGin_StrongSignalInc{signalId}, ncclCoopThread{}, ncclGin_None{},
                      cuda::thread_scope_thread, cuda::thread_scope_thread, optFlags);
         } else {
@@ -47,7 +47,7 @@ __global__ void ginSignalBwKernel(ncclDevComm comm, ncclDevResourceHandle devBuf
         }
       }
     } else {
-      if (strongSignal) {
+      if constexpr (strongSignal) {
         gin.signal(team, peer, ncclGin_StrongSignalInc{signalId}, ncclCoopThread{}, ncclGin_None{},
                    cuda::thread_scope_thread, cuda::thread_scope_thread, optFlags);
       } else {
@@ -55,7 +55,7 @@ __global__ void ginSignalBwKernel(ncclDevComm comm, ncclDevResourceHandle devBuf
                    cuda::thread_scope_thread, cuda::thread_scope_thread, optFlags);
       }
     }
-    if (skipCreditCheck) {
+    if constexpr (skipCreditCheck) {
       if (i % flushEvery == 0) gin.flush(ncclCoopCta{});
     } else {
       __syncthreads();
@@ -66,11 +66,11 @@ __global__ void ginSignalBwKernel(ncclDevComm comm, ncclDevResourceHandle devBuf
 }
 
 template <ncclGinResourceSharingMode rsm>
-static void ginSignalBWLaunchRsm(ncclDevComm dcomm, ncclDevResourceHandle devBufHandle, cudaStream_t stream,
-                                   const ginArgs_t* args, int iters) {
+static void ginSignalBWLaunchRsm(const ginContext_t* ctx, cudaStream_t stream,
+                                  const ginArgs_t* args, int iters) {
   const int queueDepth = args->queueDepth;
 #define LAUNCH_BW_SIGNAL(SKIP, AG, STRONG) \
-  ginSignalBwKernel<SKIP, AG, STRONG, rsm><<<args->numCtas, args->numThreads, 0, stream>>>(dcomm, devBufHandle, iters, queueDepth)
+  ginSignalBwKernel<SKIP, AG, STRONG, rsm><<<args->numCtas, args->numThreads, 0, stream>>>(ctx->dcomm, ctx->devBufWindow, iters, queueDepth)
 
   if (args->ginSkipCreditCheck) {
     if (args->ginAggregateRequests) {
@@ -94,11 +94,10 @@ static void ginSignalBWLaunchRsm(ncclDevComm dcomm, ncclDevResourceHandle devBuf
   CUDACHECK_FATAL(cudaGetLastError());
 }
 
-void ncclTestGinSignalBWLaunch(ncclDevComm dcomm, ncclDevResourceHandle devBufHandle, cudaStream_t stream,
-    const ginArgs_t* args, size_t numElems, int iters) {
+void ncclTestGinSignalBWLaunch(const ginContext_t* ctx, cudaStream_t stream, const ginArgs_t* args, size_t numElems, int iters) {
   if (args->ginRsm == ncclGinRsmCta) {
-    ginSignalBWLaunchRsm<NCCL_GIN_RESOURCE_SHARING_CTA>(dcomm, devBufHandle, stream, args, iters);
+    ginSignalBWLaunchRsm<NCCL_GIN_RESOURCE_SHARING_CTA>(ctx, stream, args, iters);
   } else {
-    ginSignalBWLaunchRsm<NCCL_GIN_RESOURCE_SHARING_GPU>(dcomm, devBufHandle, stream, args, iters);
+    ginSignalBWLaunchRsm<NCCL_GIN_RESOURCE_SHARING_GPU>(ctx, stream, args, iters);
   }
 }

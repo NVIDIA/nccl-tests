@@ -136,7 +136,7 @@ void ncclTestGinPerfRun(int argc, char** argv, const ginArgs_t* args, const ginB
 
     //-----Warmup-----
     if (args->warmupIters > 0 && participates) {
-      bench->run(ctx.dcomm, ctx.devBufHandle, ctx.hostBufWindow, stream, args, numElems, args->warmupIters);
+      bench->run(&ctx, stream, args, numElems, args->warmupIters);
       CUDACHECK_FATAL(cudaStreamSynchronize(stream));
     }
 
@@ -144,7 +144,7 @@ void ncclTestGinPerfRun(int argc, char** argv, const ginArgs_t* args, const ginB
     MPICHECK_FATAL(MPI_Barrier(MPI_COMM_WORLD));
 
     if (measures) CUDACHECK_FATAL(cudaEventRecord(start, stream));
-    if (participates) bench->run(ctx.dcomm, ctx.devBufHandle, ctx.hostBufWindow, stream, args, numElems, args->iters);
+    if (participates) bench->run(&ctx, stream, args, numElems, args->iters);
     if (measures) CUDACHECK_FATAL(cudaEventRecord(stop, stream));
     if (participates) CUDACHECK_FATAL(cudaStreamSynchronize(stream));
 
