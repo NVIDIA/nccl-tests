@@ -8,10 +8,10 @@ int main(int argc, char** argv) {
   ncclTestGinParseArgs(argc, argv, &args);
 
   ginTestCaps_t caps = {};
-  caps.defaultRsm = GIN_RSM_GPU;
+  caps.defaultRsm = ncclGinRsmGpu;
   caps.allowThreadRsm = true;
-  caps.opMask = GIN_OP_BIT(GIN_OP_PUT) | GIN_OP_BIT(GIN_OP_PUT_SIGNAL) | GIN_OP_BIT(GIN_OP_PUT_COUNTER);
-  caps.defaultOp = GIN_OP_PUT;
+  caps.opMask = GIN_OP_BIT(ncclGinOpPut) | GIN_OP_BIT(ncclGinOpPutSignal) | GIN_OP_BIT(ncclGinOpPutCount);
+  caps.defaultOp = ncclGinOpPut;
   caps.isSignalOp = false;
   caps.allowAggregateRequests = false;
   caps.allowBidirectional = false;
@@ -21,11 +21,11 @@ int main(int argc, char** argv) {
   ginBenchmark_t bench = {};
   bench.type = GIN_BENCHMARK_TYPE_PING;
   switch (args.ginOp) {
-  case GIN_OP_PUT_SIGNAL:
+  case ncclGinOpPutSignal:
     bench.run = ncclTestGinPutSignalLatencyPingLaunch;
     bench.name = "GIN PUT_SIGNAL PING LATENCY";
     break;
-  case GIN_OP_PUT_COUNTER:
+  case ncclGinOpPutCount:
     bench.run = ncclTestGinPutCounterLatencyPingLaunch;
     bench.name = "GIN PUT_COUNTER PING LATENCY";
     break;

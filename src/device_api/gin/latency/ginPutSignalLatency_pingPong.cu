@@ -72,9 +72,9 @@ static void ginPutSignalLatencyPingPongLaunchRsm(ncclDevComm dcomm, ncclDevResou
 
 void ncclTestGinPutSignalLatencyPingPongLaunch(ncclDevComm dcomm, ncclDevResourceHandle hBuf, cudaStream_t stream,
                                                const ginArgs_t* args, size_t numElems, int iters) {
-  if (args->ginRsm == GIN_RSM_THREAD) {
+  if (args->ginRsm == ncclGinRsmThread) {
     ginPutSignalLatencyPingPongLaunchRsm<NCCL_GIN_RESOURCE_SHARING_THREAD>(dcomm, hBuf, stream, args, numElems, iters);
-  } else if (args->ginRsm == GIN_RSM_CTA) {
+  } else if (args->ginRsm == ncclGinRsmCta) {
     ginPutSignalLatencyPingPongLaunchRsm<NCCL_GIN_RESOURCE_SHARING_CTA>(dcomm, hBuf, stream, args, numElems, iters);
   } else {
     ginPutSignalLatencyPingPongLaunchRsm<NCCL_GIN_RESOURCE_SHARING_GPU>(dcomm, hBuf, stream, args, numElems, iters);

@@ -70,9 +70,9 @@ static void ginSignalLatencyPingPongLaunchRsm(ncclDevComm dcomm, ncclDevResource
 
 void ncclTestGinSignalLatencyPingPongLaunch(ncclDevComm dcomm, ncclDevResourceHandle hBuf, cudaStream_t stream,
                                             const ginArgs_t* args, size_t numElems, int iters) {
-  if (args->ginRsm == GIN_RSM_THREAD) {
+  if (args->ginRsm == ncclGinRsmThread) {
     ginSignalLatencyPingPongLaunchRsm<NCCL_GIN_RESOURCE_SHARING_THREAD>(dcomm, hBuf, stream, args, iters);
-  } else if (args->ginRsm == GIN_RSM_CTA) {
+  } else if (args->ginRsm == ncclGinRsmCta) {
     ginSignalLatencyPingPongLaunchRsm<NCCL_GIN_RESOURCE_SHARING_CTA>(dcomm, hBuf, stream, args, iters);
   } else {
     ginSignalLatencyPingPongLaunchRsm<NCCL_GIN_RESOURCE_SHARING_GPU>(dcomm, hBuf, stream, args, iters);

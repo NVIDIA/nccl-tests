@@ -8,10 +8,10 @@ int main(int argc, char** argv) {
   ncclTestGinParseArgs(argc, argv, &args);
 
   ginTestCaps_t caps = {};
-  caps.defaultRsm = GIN_RSM_GPU;
+  caps.defaultRsm = ncclGinRsmGpu;
   caps.allowThreadRsm = true;
   caps.opMask = 0;
-  caps.defaultOp = GIN_OP_UNSET;
+  caps.defaultOp = ncclGinOpUnset;
   caps.isSignalOp = false;
   caps.allowAggregateRequests = false;
   caps.allowBidirectional = false;

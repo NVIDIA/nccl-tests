@@ -81,7 +81,7 @@ static void ginPutCounterBWLaunchRsm(ncclDevComm dcomm, ncclDevResourceHandle hB
 
 void ncclTestGinPutCounterBWLaunch(ncclDevComm dcomm, ncclDevResourceHandle hBuf, cudaStream_t stream,
                                    const ginArgs_t* args, size_t numElems, int iters) {
-  if (args->ginRsm == GIN_RSM_CTA) {
+  if (args->ginRsm == ncclGinRsmCta) {
     ginPutCounterBWLaunchRsm<NCCL_GIN_RESOURCE_SHARING_CTA>(dcomm, hBuf, stream, args, numElems, iters);
   } else {
     ginPutCounterBWLaunchRsm<NCCL_GIN_RESOURCE_SHARING_GPU>(dcomm, hBuf, stream, args, numElems, iters);

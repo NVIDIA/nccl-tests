@@ -39,9 +39,9 @@ static void ginGetLatencyPingLaunchRsm(ncclDevComm dcomm, ncclDevResourceHandle 
 
 void ncclTestGinGetLatencyPingLaunch(ncclDevComm dcomm, ncclDevResourceHandle hBuf, cudaStream_t stream,
                                      const ginArgs_t* args, size_t numElems, int iters) {
-  if (args->ginRsm == GIN_RSM_THREAD) {
-    ginGetLatencyPingLaunchRsm<NCCL_GIN_RESOURCE_SHARING_THREAD>(dcomm, hBuf, stream, args, numElems, iters);
-  } else if (args->ginRsm == GIN_RSM_CTA) {
+  if (args->ginRsm == ncclGinRsmThread) {
+    ginGetLatencyPingLaunchRsm<NCCL_GIN_RESOURCE_SHARING_THREAD>(dcomm, devBufHandle, hostBufWindow, stream, args, numElems, iters);
+  } else if (args->ginRsm == ncclGinRsmCta) {
     ginGetLatencyPingLaunchRsm<NCCL_GIN_RESOURCE_SHARING_CTA>(dcomm, hBuf, stream, args, numElems, iters);
   } else {
     ginGetLatencyPingLaunchRsm<NCCL_GIN_RESOURCE_SHARING_GPU>(dcomm, hBuf, stream, args, numElems, iters);

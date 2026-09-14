@@ -3,11 +3,11 @@
 #include <stddef.h>
 
 typedef enum {
-  GIN_RSM_UNSET = 0,
-  GIN_RSM_THREAD,
-  GIN_RSM_CTA,
-  GIN_RSM_GPU,
-} ginRsm_t;
+  ncclGinRsmUnset = 0,
+  ncclGinRsmThread,
+  ncclGinRsmCta,
+  ncclGinRsmGpu,
+} ncclGinRsm_t;
 
 /*
  * GIN operation under test, selected by --gin_op. A benchmark binary links one
@@ -15,11 +15,11 @@ typedef enum {
  * one, so e.g. the put binaries cover plain put, put+signal and put+counter.
  */
 typedef enum {
-  GIN_OP_UNSET = 0,
-  GIN_OP_PUT,
-  GIN_OP_PUT_SIGNAL,
-  GIN_OP_PUT_COUNTER,
-} ginOp_t;
+  ncclGinOpUnset = 0,
+  ncclGinOpPut,
+  ncclGinOpPutSignal,
+  ncclGinOpPutCount,
+} ncclGinOp_t;
 
 #define GIN_OP_BIT(op) (1u << (unsigned)(op))
 
@@ -37,8 +37,8 @@ typedef struct {
   bool ginAggregateRequests;
   bool ginBidirectional;
   int queueDepth;
-  ginRsm_t ginRsm;
-  ginOp_t ginOp;
+  ncclGinRsm_t ginRsm;
+  ncclGinOp_t ginOp;
 } ginArgs_t;
 
 /*
@@ -61,10 +61,10 @@ typedef struct {
  *                                 latency requires a single CTA and thread).
  */
 typedef struct {
-  ginRsm_t defaultRsm;
+  ncclGinRsm_t defaultRsm;
   bool allowThreadRsm;
   unsigned opMask;
-  ginOp_t defaultOp;
+  ncclGinOp_t defaultOp;
   bool isSignalOp;
   bool allowAggregateRequests;
   bool allowBidirectional;
@@ -73,5 +73,5 @@ typedef struct {
 
 void ncclTestGinParseArgs(int argc, char** argv, ginArgs_t* args);
 void ncclTestGinConfigureArgs(ginArgs_t* args, const ginTestCaps_t* caps);
-const char* ncclTestGinOpName(ginOp_t op);
-const char* ncclTestGinRsmName(ginRsm_t rsm);
+const char* ncclTestGinOpName(ncclGinOp_t op);
+const char* ncclTestGinRsmName(ncclGinRsm_t rsm);

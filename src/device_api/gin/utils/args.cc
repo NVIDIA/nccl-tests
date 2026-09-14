@@ -69,38 +69,38 @@ static int parseIntArg(const char* str, const char* opt) {
   }
   return (int)val;
 }
-static ginRsm_t parseRsm(const char* str) {
-  if (strcmp(str, "thread") == 0) return GIN_RSM_THREAD;
-  if (strcmp(str, "cta") == 0) return GIN_RSM_CTA;
-  if (strcmp(str, "gpu") == 0) return GIN_RSM_GPU;
+static ncclGinRsm_t parseRsm(const char* str) {
+  if (strcmp(str, "thread") == 0) return ncclGinRsmThread;
+  if (strcmp(str, "cta") == 0) return ncclGinRsmCta;
+  if (strcmp(str, "gpu") == 0) return ncclGinRsmGpu;
   fprintf(stderr,
     "Error: invalid value for --gin_rsm: '%s' (expected thread, cta, or gpu)\n", str);
   exit(EXIT_FAILURE);
 }
 
-static ginOp_t parseOp(const char* str) {
-  if (strcmp(str, "put") == 0) return GIN_OP_PUT;
-  if (strcmp(str, "put_signal") == 0) return GIN_OP_PUT_SIGNAL;
-  if (strcmp(str, "put_counter") == 0) return GIN_OP_PUT_COUNTER;
+static ncclGinOp_t parseOp(const char* str) {
+  if (strcmp(str, "put") == 0) return ncclGinOpPut;
+  if (strcmp(str, "put_signal") == 0) return ncclGinOpPutSignal;
+  if (strcmp(str, "put_counter") == 0) return ncclGinOpPutCount;
   fprintf(stderr,
     "Error: invalid value for --gin_op: '%s' (expected put, put_signal, or put_counter)\n", str);
   exit(EXIT_FAILURE);
 }
 
-const char* ncclTestGinOpName(ginOp_t op) {
+const char* ncclTestGinOpName(ncclGinOp_t op) {
   switch (op) {
-  case GIN_OP_PUT: return "put";
-  case GIN_OP_PUT_SIGNAL: return "put_signal";
-  case GIN_OP_PUT_COUNTER: return "put_counter";
+  case ncclGinOpPut: return "put";
+  case ncclGinOpPutSignal: return "put_signal";
+  case ncclGinOpPutCount: return "put_counter";
   default: return "unset";
   }
 }
 
-const char* ncclTestGinRsmName(ginRsm_t rsm) {
+const char* ncclTestGinRsmName(ncclGinRsm_t rsm) {
   switch (rsm) {
-  case GIN_RSM_THREAD: return "thread";
-  case GIN_RSM_CTA: return "cta";
-  case GIN_RSM_GPU: return "gpu";
+  case ncclGinRsmThread: return "thread";
+  case ncclGinRsmCta: return "cta";
+  case ncclGinRsmGpu: return "gpu";
   default: return "unset";
   }
 }
@@ -119,8 +119,8 @@ void ncclTestGinParseArgs(int argc, char** argv, ginArgs_t* args) {
   args->ginAggregateRequests = false;
   args->ginBidirectional = false;
   args->queueDepth = 1024;
-  args->ginRsm = GIN_RSM_UNSET;
-  args->ginOp = GIN_OP_UNSET;
+  args->ginRsm = ncclGinRsmUnset;
+  args->ginOp = ncclGinOpUnset;
 
   static const struct option longOpts[] = {
     {"minbytes", required_argument, NULL, 'b'},
@@ -249,18 +249,18 @@ void ncclTestGinParseArgs(int argc, char** argv, ginArgs_t* args) {
 
 static void configureOp(ginArgs_t* args, const ginTestCaps_t* caps) {
   if (caps->opMask == 0) {
-    if (args->ginOp != GIN_OP_UNSET) {
+    if (args->ginOp != ncclGinOpUnset) {
       fprintf(stderr, "Error: --gin_op is only supported by the put benchmarks\n");
       exit(EXIT_FAILURE);
     }
     return;
   }
-  if (args->ginOp == GIN_OP_UNSET) args->ginOp = caps->defaultOp;
+  if (args->ginOp == ncclGinOpUnset) args->ginOp = caps->defaultOp;
   if ((caps->opMask & GIN_OP_BIT(args->ginOp)) == 0) {
     fprintf(stderr, "Error: --gin_op %s is not supported by this benchmark (accepted:",
             ncclTestGinOpName(args->ginOp));
-    for (int op = GIN_OP_PUT; op <= GIN_OP_PUT_COUNTER; op++) {
-      if (caps->opMask & GIN_OP_BIT(op)) fprintf(stderr, " %s", ncclTestGinOpName((ginOp_t)op));
+    for (int op = ncclGinOpPut; op <= ncclGinOpPutCount; op++) {
+      if (caps->opMask & GIN_OP_BIT(op)) fprintf(stderr, " %s", ncclTestGinOpName((ncclGinOp_t)op));
     }
     fprintf(stderr, ")\n");
     exit(EXIT_FAILURE);
@@ -268,15 +268,15 @@ static void configureOp(ginArgs_t* args, const ginTestCaps_t* caps) {
 }
 
 void ncclTestGinConfigureArgs(ginArgs_t* args, const ginTestCaps_t* caps) {
-  if (args->ginRsm == GIN_RSM_UNSET) args->ginRsm = caps->defaultRsm;
-  if (!caps->allowThreadRsm && args->ginRsm == GIN_RSM_THREAD) {
+  if (args->ginRsm == ncclGinRsmUnset) args->ginRsm = caps->defaultRsm;
+  if (!caps->allowThreadRsm && args->ginRsm == ncclGinRsmThread) {
     fprintf(stderr, "Error: --gin_rsm thread is not supported by throughput tests (expected cta or gpu)\n");
     exit(EXIT_FAILURE);
   }
 
   configureOp(args, caps);
 
-  const bool signalsInUse = caps->isSignalOp || args->ginOp == GIN_OP_PUT_SIGNAL;
+  const bool signalsInUse = caps->isSignalOp || args->ginOp == ncclGinOpPutSignal;
   if (!signalsInUse && args->ginStrongSignal) {
     fprintf(stderr,
       "Error: --gin_strong_signal is only supported by the signal tests and by put tests run with "
