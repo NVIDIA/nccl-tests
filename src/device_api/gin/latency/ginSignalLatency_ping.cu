@@ -6,7 +6,7 @@
 #include "gin_context.h"
 
 template <bool skipCreditCheck, bool strongSignal, ncclGinResourceSharingMode rsm>
-__global__ void ginSignal_ping_kernel(ncclDevComm comm, ncclDevResourceHandle hBuf, int iters) {
+__global__ void ginSignalPingKernel(ncclDevComm comm, ncclDevResourceHandle hBuf, int iters) {
 #if __CUDA_ARCH__ >= 700
   ncclTeam team = ncclTeamWorld(comm);
   ncclGin gin(comm, 0, rsm);
@@ -30,16 +30,16 @@ __global__ void ginSignal_ping_kernel(ncclDevComm comm, ncclDevResourceHandle hB
 }
 
 template <ncclGinResourceSharingMode rsm>
-static void ginSignalLatency_ping_launch_rsm(ncclDevComm dcomm, ncclDevResourceHandle hBuf, cudaStream_t stream,
-                                             const args_t* args, int iters) {
+static void ginSignalLatencyPingLaunchRsm(ncclDevComm dcomm, ncclDevResourceHandle hBuf, cudaStream_t stream,
+                                             const ginArgs_t* args, int iters) {
 #define LAUNCH_PING_SIGNAL(SKIP, STRONG) \
-  ginSignal_ping_kernel<SKIP, STRONG, rsm><<<1, 1, 0, stream>>>(dcomm, hBuf, iters)
+  ginSignalPingKernel<SKIP, STRONG, rsm><<<1, 1, 0, stream>>>(dcomm, hBuf, iters)
 
-  if (args->gin_skip_credit_check) {
-    if (args->gin_strong_signal) LAUNCH_PING_SIGNAL(true, true);
+  if (args->ginSkipCreditCheck) {
+    if (args->ginStrongSignal) LAUNCH_PING_SIGNAL(true, true);
     else                         LAUNCH_PING_SIGNAL(true, false);
   } else {
-    if (args->gin_strong_signal) LAUNCH_PING_SIGNAL(false, true);
+    if (args->ginStrongSignal) LAUNCH_PING_SIGNAL(false, true);
     else                         LAUNCH_PING_SIGNAL(false, false);
   }
 
@@ -47,12 +47,13 @@ static void ginSignalLatency_ping_launch_rsm(ncclDevComm dcomm, ncclDevResourceH
   CUDACHECK_FATAL(cudaGetLastError());
 }
 
-void ginSignalLatency_ping_launch(ncclDevComm dcomm, ncclDevResourceHandle hBuf, cudaStream_t stream,
-                                  const args_t* args, size_t numElems, int iters) {
-  if (args->gin_rsm == GIN_RSM_THREAD)
-    ginSignalLatency_ping_launch_rsm<NCCL_GIN_RESOURCE_SHARING_THREAD>(dcomm, hBuf, stream, args, iters);
-  else if (args->gin_rsm == GIN_RSM_CTA)
-    ginSignalLatency_ping_launch_rsm<NCCL_GIN_RESOURCE_SHARING_CTA>(dcomm, hBuf, stream, args, iters);
-  else
-    ginSignalLatency_ping_launch_rsm<NCCL_GIN_RESOURCE_SHARING_GPU>(dcomm, hBuf, stream, args, iters);
+void ncclTestGinSignalLatencyPingLaunch(ncclDevComm dcomm, ncclDevResourceHandle hBuf, cudaStream_t stream,
+                                        const ginArgs_t* args, size_t numElems, int iters) {
+  if (args->ginRsm == GIN_RSM_THREAD) {
+    ginSignalLatencyPingLaunchRsm<NCCL_GIN_RESOURCE_SHARING_THREAD>(dcomm, hBuf, stream, args, iters);
+  } else if (args->ginRsm == GIN_RSM_CTA) {
+    ginSignalLatencyPingLaunchRsm<NCCL_GIN_RESOURCE_SHARING_CTA>(dcomm, hBuf, stream, args, iters);
+  } else {
+    ginSignalLatencyPingLaunchRsm<NCCL_GIN_RESOURCE_SHARING_GPU>(dcomm, hBuf, stream, args, iters);
+  }
 }

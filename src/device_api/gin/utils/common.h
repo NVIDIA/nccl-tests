@@ -70,7 +70,7 @@
 } while (0)
 
 /*
- * Benchmark callback invoked by gin_perf_run for every (size, iters) point.
+ * Benchmark callback invoked by ncclTestGinPerfRun for every (size, iters) point.
  *
  *   dcomm – device comm handle
  *   hBuf – registered buffer handle
@@ -79,11 +79,11 @@
  *   numElems – elements (ints) to transfer this size point
  *   iters – number of iterations to perform this call
  */
-typedef void (*gin_run_fn_t)(
+typedef void (*ginRunFn_t)(
     ncclDevComm dcomm,
     ncclDevResourceHandle hBuf,
     cudaStream_t stream,
-    const args_t* args,
+    const ginArgs_t* args,
     size_t numElems,
     int iters
 );
@@ -93,16 +93,16 @@ typedef void (*gin_run_fn_t)(
  * measured (non-warmup) phase. Print whatever metric this category cares
  * about (bandwidth divides bytes by time, latency divides time by iters, ...).
  */
-typedef void (*gin_report_fn_t)(size_t size, int iters, double milliseconds);
+typedef void (*ginReportFn_t)(size_t size, int iters, double milliseconds);
 
-enum gin_benchmark_type_t {
+enum ginBenchmarkType_t {
   GIN_BENCHMARK_TYPE_PING,
   GIN_BENCHMARK_TYPE_PING_PONG,
   GIN_BENCHMARK_TYPE_THROUGHPUT,
 };
 
 
-enum gin_throughput_payload_t {
+enum ginThroughputPayload_t {
   GIN_THROUGHPUT_PAYLOAD_SIZE,
   GIN_THROUGHPUT_PAYLOAD_NONE,
   GIN_THROUGHPUT_PAYLOAD_FIXED,
@@ -110,9 +110,9 @@ enum gin_throughput_payload_t {
 
 /*
  * Bundles everything that differs between benchmark categories/APIs so a
- * single gin_perf_run() can serve all of them:
+ * single ncclTestGinPerfRun() can serve all of them:
  *
- *   run     – the kernel-launch callback (see gin_run_fn_t above).
+ *   run     – the kernel-launch callback (see ginRunFn_t above).
  *   name    – human-readable test name, reported above the results table.
  *   type    – benchmark category; ping-pong launches on both ranks, ping and
  *             throughput launch on rank 0 only.
@@ -120,18 +120,18 @@ enum gin_throughput_payload_t {
  *   payloadFixedBytes – when payloadMode is FIXED, bytes per message (e.g. sizeof(T)).
  */
 typedef struct {
-  gin_run_fn_t run;
+  ginRunFn_t run;
   const char* name;
-  gin_benchmark_type_t type;
-  gin_throughput_payload_t payloadMode;
+  ginBenchmarkType_t type;
+  ginThroughputPayload_t payloadMode;
   size_t payloadFixedBytes;
-} gin_benchmark_t;
+} ginBenchmark_t;
 
 /*
  * Full perf harness: setup, warmup+measured size sweep, teardown. Shared by
  * every benchmark category (bandwidth, message rate, ping latency, ping-pong
  * latency) and every GIN API (Put, Get, Signal, PutSignal, ...) via the
- * gin_benchmark_t callbacks/flags above. parse_args must have been called
- * before this function.
+ * ginBenchmark_t callbacks/flags above. ncclTestGinParseArgs must have been
+ * called before this function.
  */
-void gin_perf_run(int argc, char** argv, const args_t* args, const gin_benchmark_t* bench);
+void ncclTestGinPerfRun(int argc, char** argv, const ginArgs_t* args, const ginBenchmark_t* bench);

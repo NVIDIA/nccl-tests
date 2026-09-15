@@ -7,19 +7,17 @@
  * put+signal and put+counter via --gin_op), so name the resolved configuration
  * before the table.
  */
-static void print_configuration(const args_t* args, const gin_benchmark_t* bench) {
-  printf("# %s: rsm=%s", bench->name ? bench->name : "gin benchmark", gin_rsm_name(args->gin_rsm));
-  if (args->gin_strong_signal) printf(", strong_signal");
-  if (args->gin_skip_credit_check) printf(", skip_credit_check");
-  if (args->gin_aggregate_requests) printf(", aggregate_requests");
-  if (args->gin_bidirectional) printf(", bidirectional");
-  if (bench->type == GIN_BENCHMARK_TYPE_THROUGHPUT) {
-    printf(", ctas=%d, threads=%d", args->num_ctas, args->num_threads);
-  }
+static void printConfiguration(const ginArgs_t* args, const ginBenchmark_t* bench) {
+  printf("# %s: rsm=%s", bench->name ? bench->name : "gin benchmark", ncclTestGinRsmName(args->ginRsm));
+  if (args->ginStrongSignal) printf(", strong_signal");
+  if (args->ginSkipCreditCheck) printf(", skip_credit_check");
+  if (args->ginAggregateRequests) printf(", aggregate_requests");
+  if (args->ginBidirectional) printf(", bidirectional");
+  if (bench->type == GIN_BENCHMARK_TYPE_THROUGHPUT) printf(", ctas=%d, threads=%d", args->numCtas, args->numThreads);
   printf("\n");
 }
 
-void print_header(const gin_benchmark_t* bench) {
+static void printHeader(const ginBenchmark_t* bench) {
   if (bench->type == GIN_BENCHMARK_TYPE_THROUGHPUT) {
     printf("%12s  %14s  %18s  %20s\n", "Size(B)", "Num_Messages", "Bandwidth(MiB/s)",
            "Message_Rate(MPPS)");
@@ -28,13 +26,13 @@ void print_header(const gin_benchmark_t* bench) {
   }
 }
 
-static void print_throughput_information(size_t size, double num_messages, double bandwidth_MiBps,
-                                         double message_rate_MPPS) {
-  printf("%12zu  %14.0f  %18.3f  %20.3f\n", size, num_messages, bandwidth_MiBps, message_rate_MPPS);
+static void printThroughputInformation(size_t size, double numMessages, double bandwidthMiBps,
+                                       double messageRateMpps) {
+  printf("%12zu  %14.0f  %18.3f  %20.3f\n", size, numMessages, bandwidthMiBps, messageRateMpps);
 }
 
-static void print_latency_information(size_t size, int iters, double latency_us){
-  printf("%12zu  %8d  %14.3f\n", size, iters, latency_us);
+static void printLatencyInformation(size_t size, int iters, double latencyUs) {
+  printf("%12zu  %8d  %14.3f\n", size, iters, latencyUs);
 }
 
 static uint64_t getHostHash(const char* string) {
@@ -56,14 +54,14 @@ static void getHostName(char* hostname, int maxlen) {
   }
 }
 
-static size_t next_size(const args_t* args, size_t size) {
-  if (args->stepbytes != 0) return size + args->stepbytes;
-  size_t factor = args->stepfactor;
+static size_t nextSize(const ginArgs_t* args, size_t size) {
+  if (args->stepBytes != 0) return size + args->stepBytes;
+  size_t factor = args->stepFactor;
   if (factor <= 1) factor = 2;
   return size * factor;
 }
 
-static double throughput_bytes_per_message(const gin_benchmark_t* bench, size_t size) {
+static double throughputBytesPerMessage(const ginBenchmark_t* bench, size_t size) {
   switch (bench->payloadMode) {
   case GIN_THROUGHPUT_PAYLOAD_NONE:
     return 0.0;
@@ -75,17 +73,16 @@ static double throughput_bytes_per_message(const gin_benchmark_t* bench, size_t 
   }
 }
 
-void gin_perf_run(int argc, char** argv, const args_t* args, const gin_benchmark_t* bench) {
+void ncclTestGinPerfRun(int argc, char** argv, const ginArgs_t* args, const ginBenchmark_t* bench) {
 
+  setlinebuf(stdout);
   int rank = 0, nRanks = 0;
   MPICHECK(MPI_Init(&argc, &argv));
   MPICHECK_FATAL(MPI_Comm_rank(MPI_COMM_WORLD, &rank));
   MPICHECK_FATAL(MPI_Comm_size(MPI_COMM_WORLD, &nRanks));
 
   if (nRanks != 2) {
-    if (rank == 0) {
-      fprintf(stderr, "Error: GIN perf benchmarks require exactly 2 MPI ranks (got %d)\n", nRanks);
-    }
+    if (rank == 0) fprintf(stderr, "Error: GIN perf benchmarks require exactly 2 MPI ranks (got %d)\n", nRanks);
     MPI_Abort(MPI_COMM_WORLD, 1);
   }
 
@@ -115,10 +112,10 @@ void gin_perf_run(int argc, char** argv, const args_t* args, const gin_benchmark
   ncclComm_t comm;
   NCCLCHECK_FATAL(ncclCommInitRankConfig(&comm, nRanks, id, rank, &config));
 
-  gin_context_t ctx;
-  gin_devComm_create(comm, args, &ctx);
+  ginContext_t ctx;
+  ncclTestGinDevCommCreate(comm, args, &ctx);
 
-  const bool bidir = args->gin_bidirectional;
+  const bool bidir = args->ginBidirectional;
   const bool participates = (bench->type == GIN_BENCHMARK_TYPE_PING_PONG || bidir) || rank == 0;
   const bool measures = (rank == 0) || bidir;
 
@@ -129,16 +126,16 @@ void gin_perf_run(int argc, char** argv, const args_t* args, const gin_benchmark
   }
 
   if (rank == 0) {
-    print_configuration(args, bench);
-    print_header(bench);
+    printConfiguration(args, bench);
+    printHeader(bench);
   }
 
-  for (size_t size = args->minbytes; size <= args->maxbytes;) {
+  for (size_t size = args->minBytes; size <= args->maxBytes;) {
     size_t numElems = size / sizeof(int);
 
     //-----Warmup-----
-    if (args->warmup_iters > 0 && participates) {
-      bench->run(ctx.dcomm, ctx.hBuf, stream, args, numElems, args->warmup_iters);
+    if (args->warmupIters > 0 && participates) {
+      bench->run(ctx.dcomm, ctx.hBuf, stream, args, numElems, args->warmupIters);
       CUDACHECK_FATAL(cudaStreamSynchronize(stream));
     }
 
@@ -146,59 +143,53 @@ void gin_perf_run(int argc, char** argv, const args_t* args, const gin_benchmark
     MPICHECK_FATAL(MPI_Barrier(MPI_COMM_WORLD));
 
     if (measures) CUDACHECK_FATAL(cudaEventRecord(start, stream));
-    if (participates) {
-      bench->run(ctx.dcomm, ctx.hBuf, stream, args, numElems, args->iters);
-    }
+    if (participates) bench->run(ctx.dcomm, ctx.hBuf, stream, args, numElems, args->iters);
     if (measures) CUDACHECK_FATAL(cudaEventRecord(stop, stream));
-    if (participates) {
-      CUDACHECK_FATAL(cudaStreamSynchronize(stream));
-    }
+    if (participates) CUDACHECK_FATAL(cudaStreamSynchronize(stream));
 
     if (bench->type == GIN_BENCHMARK_TYPE_PING || bench->type == GIN_BENCHMARK_TYPE_PING_PONG) {
       // Latency: rank 0 reports (bidirectional is not supported for latency).
       if (rank == 0) {
         float milliseconds = 0.0f;
         CUDACHECK_FATAL(cudaEventElapsedTime(&milliseconds, start, stop));
-        double RTT_us = (double)milliseconds * 1000.0 / (double)args->iters;
-        double latency_us = RTT_us / 2.0;
-        print_latency_information(size, args->iters, latency_us);
+        double rttUs = (double)milliseconds * 1000.0 / (double)args->iters;
+        double latencyUs = rttUs / 2.0;
+        printLatencyInformation(size, args->iters, latencyUs);
       }
     } else {
-      double num_messages = 0.0, bandwidth_MiBps = 0.0, message_rate_MPPS = 0.0;
+      double numMessages = 0.0, bandwidthMiBps = 0.0, messageRateMpps = 0.0;
       if (measures) {
         float milliseconds = 0.0f;
         CUDACHECK_FATAL(cudaEventElapsedTime(&milliseconds, start, stop));
         double seconds = (double)milliseconds / 1e3;
-        num_messages = (double)args->iters * (double)args->num_ctas * (double)args->num_threads;
-        double bytes = num_messages * throughput_bytes_per_message(bench, size);
-        bandwidth_MiBps = bytes / (double)(1ULL << 20) / seconds;
-        message_rate_MPPS = num_messages / 1e6 / seconds;
+        numMessages = (double)args->iters * (double)args->numCtas * (double)args->numThreads;
+        double bytes = numMessages * throughputBytesPerMessage(bench, size);
+        bandwidthMiBps = bytes / (double)(1ULL << 20) / seconds;
+        messageRateMpps = numMessages / 1e6 / seconds;
       }
 
       if (bidir) {
-        double local_metrics[3] = {num_messages, bandwidth_MiBps, message_rate_MPPS};
-        double summed_metrics[3] = {0.0, 0.0, 0.0};
-        MPICHECK_FATAL(MPI_Reduce(local_metrics, summed_metrics, 3, MPI_DOUBLE, MPI_SUM, 0,
+        double localMetrics[3] = {numMessages, bandwidthMiBps, messageRateMpps};
+        double summedMetrics[3] = {0.0, 0.0, 0.0};
+        MPICHECK_FATAL(MPI_Reduce(localMetrics, summedMetrics, 3, MPI_DOUBLE, MPI_SUM, 0,
                                   MPI_COMM_WORLD));
-        num_messages = summed_metrics[0];
-        bandwidth_MiBps = summed_metrics[1];
-        message_rate_MPPS = summed_metrics[2];
+        numMessages = summedMetrics[0];
+        bandwidthMiBps = summedMetrics[1];
+        messageRateMpps = summedMetrics[2];
       }
 
-      if (rank == 0) {
-        print_throughput_information(size, num_messages, bandwidth_MiBps, message_rate_MPPS);
-      }
+      if (rank == 0) printThroughputInformation(size, numMessages, bandwidthMiBps, messageRateMpps);
     }
 
     MPICHECK_FATAL(MPI_Barrier(MPI_COMM_WORLD));
 
-    size_t next = next_size(args, size);
+    size_t next = nextSize(args, size);
     if (next <= size) break;
     size = next;
   }
 
   MPICHECK_FATAL(MPI_Barrier(MPI_COMM_WORLD));
-  gin_devComm_destroy(comm, &ctx);
+  ncclTestGinDevCommDestroy(comm, &ctx);
   NCCLCHECK_FATAL(ncclCommDestroy(comm));
   if (measures) {
     CUDACHECK_FATAL(cudaEventDestroy(start));

@@ -7,26 +7,26 @@
  * zero and only the message rate column is meaningful.
  */
 int main(int argc, char** argv) {
-  args_t args;
-  parse_args(argc, argv, &args);
+  ginArgs_t args;
+  ncclTestGinParseArgs(argc, argv, &args);
 
-  gin_test_caps_t caps = {};
-  caps.default_rsm = GIN_RSM_GPU;
-  caps.allow_thread_rsm = false;
-  caps.op_mask = 0;
-  caps.default_op = GIN_OP_UNSET;
-  caps.is_signal_op = true;
-  caps.allow_aggregate_requests = true;
-  caps.allow_bidirectional = true;
-  caps.allow_multi_cta_threads = true;
-  configure_test_args(&args, &caps);
+  ginTestCaps_t caps = {};
+  caps.defaultRsm = GIN_RSM_GPU;
+  caps.allowThreadRsm = false;
+  caps.opMask = 0;
+  caps.defaultOp = GIN_OP_UNSET;
+  caps.isSignalOp = true;
+  caps.allowAggregateRequests = true;
+  caps.allowBidirectional = true;
+  caps.allowMultiCtaThreads = true;
+  ncclTestGinConfigureArgs(&args, &caps);
 
-  gin_benchmark_t bench = {};
-  bench.run = ginSignalBW_launch;
+  ginBenchmark_t bench = {};
+  bench.run = ncclTestGinSignalBWLaunch;
   bench.name = "GIN SIGNAL MESSAGE RATE";
   bench.type = GIN_BENCHMARK_TYPE_THROUGHPUT;
   bench.payloadMode = GIN_THROUGHPUT_PAYLOAD_NONE;
 
-  gin_perf_run(argc, argv, &args, &bench);
+  ncclTestGinPerfRun(argc, argv, &args, &bench);
   return 0;
 }

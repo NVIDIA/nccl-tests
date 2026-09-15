@@ -9,19 +9,19 @@
  * the linker then pulls only the referenced implementations out of the category
  * archive.
  *
- * Every entry point matches gin_run_fn_t so it can be assigned to
- * gin_benchmark_t::run directly.
+ * Every entry point matches ginRunFn_t so it can be assigned to
+ * ginBenchmark_t::run directly.
  */
 
-void ginPutBW_launch(ncclDevComm dcomm, ncclDevResourceHandle hBuf, cudaStream_t stream,
-                     const args_t* args, size_t numElems, int iters);
-void ginPutSignalBW_launch(ncclDevComm dcomm, ncclDevResourceHandle hBuf, cudaStream_t stream,
-                           const args_t* args, size_t numElems, int iters);
-void ginPutCounterBW_launch(ncclDevComm dcomm, ncclDevResourceHandle hBuf, cudaStream_t stream,
-                            const args_t* args, size_t numElems, int iters);
+void ncclTestGinPutBWLaunch(ncclDevComm dcomm, ncclDevResourceHandle hBuf, cudaStream_t stream,
+    const ginArgs_t* args, size_t numElems, int iters);
+void ncclTestGinPutSignalBWLaunch(ncclDevComm dcomm, ncclDevResourceHandle hBuf, cudaStream_t stream,
+    const ginArgs_t* args, size_t numElems, int iters);
+void ncclTestGinPutCounterBWLaunch(ncclDevComm dcomm, ncclDevResourceHandle hBuf, cudaStream_t stream,
+    const ginArgs_t* args, size_t numElems, int iters);
 
-void ginGetBW_launch(ncclDevComm dcomm, ncclDevResourceHandle hBuf, cudaStream_t stream,
-                     const args_t* args, size_t numElems, int iters);
+void ncclTestGinGetBWLaunch(ncclDevComm dcomm, ncclDevResourceHandle hBuf, cudaStream_t stream,
+    const ginArgs_t* args, size_t numElems, int iters);
 
-void ginSignalBW_launch(ncclDevComm dcomm, ncclDevResourceHandle hBuf, cudaStream_t stream,
-                        const args_t* args, size_t numElems, int iters);
+void ncclTestGinSignalBWLaunch(ncclDevComm dcomm, ncclDevResourceHandle hBuf, cudaStream_t stream,
+    const ginArgs_t* args, size_t numElems, int iters);

@@ -6,7 +6,7 @@
 #include "gin_context.h"
 
 template <bool skipCreditCheck, bool aggregateRequests, ncclGinResourceSharingMode rsm>
-__global__ void ginGet_bw_kernel(ncclDevComm comm, ncclDevResourceHandle hBuf, int iters, size_t numElems,
+__global__ void ginGetBwKernel(ncclDevComm comm, ncclDevResourceHandle hBuf, int iters, size_t numElems,
                                  int queueDepth, size_t maxElems) {
 #if __CUDA_ARCH__ >= 700
   const int tag = blockIdx.x;
@@ -56,18 +56,18 @@ __global__ void ginGet_bw_kernel(ncclDevComm comm, ncclDevResourceHandle hBuf, i
 }
 
 template <ncclGinResourceSharingMode rsm>
-static void ginGetBW_launch_rsm(ncclDevComm dcomm, ncclDevResourceHandle hBuf, cudaStream_t stream,
-                                const args_t* args, size_t numElems, int iters) {
-  const int queueDepth = args->queue_depth;
-  const size_t maxElems = args->maxbytes / sizeof(int);
+static void ginGetBWLaunchRsm(ncclDevComm dcomm, ncclDevResourceHandle hBuf, cudaStream_t stream,
+                                const ginArgs_t* args, size_t numElems, int iters) {
+  const int queueDepth = args->queueDepth;
+  const size_t maxElems = args->maxBytes / sizeof(int);
 #define LAUNCH_BW_GET(SKIP, AG) \
-  ginGet_bw_kernel<SKIP, AG, rsm><<<args->num_ctas, args->num_threads, 0, stream>>>(dcomm, hBuf, iters, numElems, queueDepth, maxElems)
+  ginGetBwKernel<SKIP, AG, rsm><<<args->numCtas, args->numThreads, 0, stream>>>(dcomm, hBuf, iters, numElems, queueDepth, maxElems)
 
-  if (args->gin_skip_credit_check) {
-    if (args->gin_aggregate_requests) LAUNCH_BW_GET(true, true);
+  if (args->ginSkipCreditCheck) {
+    if (args->ginAggregateRequests) LAUNCH_BW_GET(true, true);
     else                              LAUNCH_BW_GET(true, false);
   } else {
-    if (args->gin_aggregate_requests) LAUNCH_BW_GET(false, true);
+    if (args->ginAggregateRequests) LAUNCH_BW_GET(false, true);
     else                              LAUNCH_BW_GET(false, false);
   }
 
@@ -75,10 +75,11 @@ static void ginGetBW_launch_rsm(ncclDevComm dcomm, ncclDevResourceHandle hBuf, c
   CUDACHECK_FATAL(cudaGetLastError());
 }
 
-void ginGetBW_launch(ncclDevComm dcomm, ncclDevResourceHandle hBuf, cudaStream_t stream,
-                     const args_t* args, size_t numElems, int iters) {
-  if (args->gin_rsm == GIN_RSM_CTA)
-    ginGetBW_launch_rsm<NCCL_GIN_RESOURCE_SHARING_CTA>(dcomm, hBuf, stream, args, numElems, iters);
-  else
-    ginGetBW_launch_rsm<NCCL_GIN_RESOURCE_SHARING_GPU>(dcomm, hBuf, stream, args, numElems, iters);
+void ncclTestGinGetBWLaunch(ncclDevComm dcomm, ncclDevResourceHandle hBuf, cudaStream_t stream,
+                            const ginArgs_t* args, size_t numElems, int iters) {
+  if (args->ginRsm == GIN_RSM_CTA) {
+    ginGetBWLaunchRsm<NCCL_GIN_RESOURCE_SHARING_CTA>(dcomm, hBuf, stream, args, numElems, iters);
+  } else {
+    ginGetBWLaunchRsm<NCCL_GIN_RESOURCE_SHARING_GPU>(dcomm, hBuf, stream, args, numElems, iters);
+  }
 }

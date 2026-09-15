@@ -7,9 +7,9 @@
 typedef struct {
   ncclDevComm dcomm;
   ncclDevResourceHandle hBuf;
-} gin_context_t;
+} ginContext_t;
 
-size_t gin_max_buffer_bytes(void);
+size_t ncclTestGinMaxBufferBytes(void);
 
-void gin_devComm_create(ncclComm_t comm, const args_t* args, gin_context_t* ctx);
-void gin_devComm_destroy(ncclComm_t comm, gin_context_t* ctx);
+void ncclTestGinDevCommCreate(ncclComm_t comm, const ginArgs_t* args, ginContext_t* ctx);
+void ncclTestGinDevCommDestroy(ncclComm_t comm, ginContext_t* ctx);

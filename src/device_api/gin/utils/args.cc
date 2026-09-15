@@ -8,7 +8,7 @@
 #include <getopt.h>
 #include <stdint.h>
 
-static void print_usage(const char* argv0) {
+static void printUsage(const char* argv0) {
   fprintf(stderr,
     "Usage: %s [OPTIONS]\n"
     "  -b, --minbytes <size>            Minimum message size in bytes (default: %zu; K/M/G suffix OK)\n"
@@ -30,7 +30,7 @@ static void print_usage(const char* argv0) {
     argv0, sizeof(int));
 }
 
-static size_t parse_size(const char* str, const char* opt) {
+static size_t parseSize(const char* str, const char* opt) {
   char* end;
   errno = 0;
   long long val = strtoll(str, &end, 10);
@@ -59,7 +59,7 @@ static size_t parse_size(const char* str, const char* opt) {
 }
 
 // Helper function to parse an integer argument
-static int parse_int_arg(const char* str, const char* opt) {
+static int parseIntArg(const char* str, const char* opt) {
   char* end;
   errno = 0;
   long val = strtol(str, &end, 10);
@@ -69,7 +69,7 @@ static int parse_int_arg(const char* str, const char* opt) {
   }
   return (int)val;
 }
-static gin_rsm_t parse_rsm(const char* str) {
+static ginRsm_t parseRsm(const char* str) {
   if (strcmp(str, "thread") == 0) return GIN_RSM_THREAD;
   if (strcmp(str, "cta") == 0) return GIN_RSM_CTA;
   if (strcmp(str, "gpu") == 0) return GIN_RSM_GPU;
@@ -78,7 +78,7 @@ static gin_rsm_t parse_rsm(const char* str) {
   exit(EXIT_FAILURE);
 }
 
-static gin_op_t parse_op(const char* str) {
+static ginOp_t parseOp(const char* str) {
   if (strcmp(str, "put") == 0) return GIN_OP_PUT;
   if (strcmp(str, "put_signal") == 0) return GIN_OP_PUT_SIGNAL;
   if (strcmp(str, "put_counter") == 0) return GIN_OP_PUT_COUNTER;
@@ -87,7 +87,7 @@ static gin_op_t parse_op(const char* str) {
   exit(EXIT_FAILURE);
 }
 
-const char* gin_op_name(gin_op_t op) {
+const char* ncclTestGinOpName(ginOp_t op) {
   switch (op) {
   case GIN_OP_PUT: return "put";
   case GIN_OP_PUT_SIGNAL: return "put_signal";
@@ -96,7 +96,7 @@ const char* gin_op_name(gin_op_t op) {
   }
 }
 
-const char* gin_rsm_name(gin_rsm_t rsm) {
+const char* ncclTestGinRsmName(ginRsm_t rsm) {
   switch (rsm) {
   case GIN_RSM_THREAD: return "thread";
   case GIN_RSM_CTA: return "cta";
@@ -105,24 +105,24 @@ const char* gin_rsm_name(gin_rsm_t rsm) {
   }
 }
 
-void parse_args(int argc, char** argv, args_t* args) {
-  args->minbytes = sizeof(int);
-  args->maxbytes = 4 * 1024 * 1024;
-  args->stepfactor = 2;
-  args->stepbytes = 0;
-  args->warmup_iters = 50;
+void ncclTestGinParseArgs(int argc, char** argv, ginArgs_t* args) {
+  args->minBytes = sizeof(int);
+  args->maxBytes = 4 * 1024 * 1024;
+  args->stepFactor = 2;
+  args->stepBytes = 0;
+  args->warmupIters = 50;
   args->iters = 500;
-  args->num_ctas = 1;
-  args->num_threads = 1;
-  args->gin_skip_credit_check = 0;
-  args->gin_strong_signal = false;
-  args->gin_aggregate_requests = false;
-  args->gin_bidirectional = false;
-  args->queue_depth = 1024;
-  args->gin_rsm = GIN_RSM_UNSET;
-  args->gin_op = GIN_OP_UNSET;
+  args->numCtas = 1;
+  args->numThreads = 1;
+  args->ginSkipCreditCheck = 0;
+  args->ginStrongSignal = false;
+  args->ginAggregateRequests = false;
+  args->ginBidirectional = false;
+  args->queueDepth = 1024;
+  args->ginRsm = GIN_RSM_UNSET;
+  args->ginOp = GIN_OP_UNSET;
 
-  static const struct option long_opts[] = {
+  static const struct option longOpts[] = {
     {"minbytes", required_argument, NULL, 'b'},
     {"maxbytes", required_argument, NULL, 'e'},
     {"iters", required_argument, NULL, 'n'},
@@ -139,83 +139,83 @@ void parse_args(int argc, char** argv, args_t* args) {
   };
 
   int opt, idx = 0;
-  while ((opt = getopt_long(argc, argv, "b:e:f:i:w:n:c:t:", long_opts, &idx)) != -1) {
+  while ((opt = getopt_long(argc, argv, "b:e:f:i:w:n:c:t:", longOpts, &idx)) != -1) {
     switch (opt) {
-      case 'b': args->minbytes = parse_size(optarg, "-b/--minbytes"); break;
-      case 'e': args->maxbytes = parse_size(optarg, "-e/--maxbytes"); break;
-      case 'f': args->stepfactor = parse_int_arg(optarg, "-f"); break;
-      case 'i': args->stepbytes = parse_size(optarg, "-i"); break;
-      case 'w': args->warmup_iters = parse_int_arg(optarg, "-w"); break;
-      case 'n': args->iters = parse_int_arg(optarg, "-n/--iters"); break;
-      case 'c': args->num_ctas = parse_int_arg(optarg, "-c/--num_ctas"); break;
-      case 't': args->num_threads = parse_int_arg(optarg, "-t/--num_threads"); break;
+      case 'b': args->minBytes = parseSize(optarg, "-b/--minbytes"); break;
+      case 'e': args->maxBytes = parseSize(optarg, "-e/--maxbytes"); break;
+      case 'f': args->stepFactor = parseIntArg(optarg, "-f"); break;
+      case 'i': args->stepBytes = parseSize(optarg, "-i"); break;
+      case 'w': args->warmupIters = parseIntArg(optarg, "-w"); break;
+      case 'n': args->iters = parseIntArg(optarg, "-n/--iters"); break;
+      case 'c': args->numCtas = parseIntArg(optarg, "-c/--num_ctas"); break;
+      case 't': args->numThreads = parseIntArg(optarg, "-t/--num_threads"); break;
       case 0:
-        if (strcmp(long_opts[idx].name, "gin_skip_credit_check") == 0) {
-          args->gin_skip_credit_check = 1;
-        } else if (strcmp(long_opts[idx].name, "gin_op") == 0) {
-          args->gin_op = parse_op(optarg);
-        } else if (strcmp(long_opts[idx].name, "gin_strong_signal") == 0) {
-          args->gin_strong_signal = true;
-        } else if (strcmp(long_opts[idx].name, "gin_ag") == 0) {
-          args->gin_aggregate_requests = true;
-        } else if (strcmp(long_opts[idx].name, "gin_bd") == 0) {
-          args->gin_bidirectional = true;
-        } else if (strcmp(long_opts[idx].name, "gin_rsm") == 0) {
-          args->gin_rsm = parse_rsm(optarg);
-        } else if (strcmp(long_opts[idx].name, "gin_tx_depth") == 0) {
-          args->queue_depth = parse_int_arg(optarg, "--gin_tx_depth");
+        if (strcmp(longOpts[idx].name, "gin_skip_credit_check") == 0) {
+          args->ginSkipCreditCheck = 1;
+        } else if (strcmp(longOpts[idx].name, "gin_op") == 0) {
+          args->ginOp = parseOp(optarg);
+        } else if (strcmp(longOpts[idx].name, "gin_strong_signal") == 0) {
+          args->ginStrongSignal = true;
+        } else if (strcmp(longOpts[idx].name, "gin_ag") == 0) {
+          args->ginAggregateRequests = true;
+        } else if (strcmp(longOpts[idx].name, "gin_bd") == 0) {
+          args->ginBidirectional = true;
+        } else if (strcmp(longOpts[idx].name, "gin_rsm") == 0) {
+          args->ginRsm = parseRsm(optarg);
+        } else if (strcmp(longOpts[idx].name, "gin_tx_depth") == 0) {
+          args->queueDepth = parseIntArg(optarg, "--gin_tx_depth");
         }
         break;
       default:
-        print_usage(argv[0]);
+        printUsage(argv[0]);
         exit(EXIT_FAILURE);
     }
   }
 
   if (optind < argc) {
     fprintf(stderr, "Error: unexpected positional argument: '%s'\n", argv[optind]);
-    print_usage(argv[0]);
+    printUsage(argv[0]);
     exit(EXIT_FAILURE);
   }
 
   /* --- validation (all before MPI_Init) --- */
-  if (args->minbytes <= 0) {
+  if (args->minBytes <= 0) {
     fprintf(stderr, "Error: --minbytes must be positive\n");
     exit(EXIT_FAILURE);
   }
-  if (args->maxbytes <= 0) {
+  if (args->maxBytes <= 0) {
     fprintf(stderr, "Error: --maxbytes must be positive\n");
     exit(EXIT_FAILURE);
   }
-  if (args->minbytes > args->maxbytes) {
+  if (args->minBytes > args->maxBytes) {
     fprintf(stderr,
       "Error: --minbytes (%zu) must be <= --maxbytes (%zu)\n",
-      args->minbytes, args->maxbytes);
+      args->minBytes, args->maxBytes);
     exit(EXIT_FAILURE);
   }
-  if (args->minbytes % sizeof(int) != 0) {
+  if (args->minBytes % sizeof(int) != 0) {
     fprintf(stderr,
       "Error: --minbytes (%zu) must be a multiple of sizeof(int) (%zu)\n",
-      args->minbytes, sizeof(int));
+      args->minBytes, sizeof(int));
     exit(EXIT_FAILURE);
   }
-  if (args->maxbytes % sizeof(int) != 0) {
+  if (args->maxBytes % sizeof(int) != 0) {
     fprintf(stderr,
       "Error: --maxbytes (%zu) must be a multiple of sizeof(int) (%zu)\n",
-      args->maxbytes, sizeof(int));
+      args->maxBytes, sizeof(int));
     exit(EXIT_FAILURE);
   }
-  if (args->stepfactor <= 1 && args->stepbytes == 0) {
+  if (args->stepFactor <= 1 && args->stepBytes == 0) {
     fprintf(stderr, "Error: -f size factor must be > 1 when -i is not specified\n");
     exit(EXIT_FAILURE);
   }
-  if (args->stepbytes != 0 && args->stepbytes % sizeof(int) != 0) {
+  if (args->stepBytes != 0 && args->stepBytes % sizeof(int) != 0) {
     fprintf(stderr,
       "Error: -i stepbytes (%zu) must be a multiple of sizeof(int) (%zu)\n",
-      args->stepbytes, sizeof(int));
+      args->stepBytes, sizeof(int));
     exit(EXIT_FAILURE);
   }
-  if (args->warmup_iters < 0) {
+  if (args->warmupIters < 0) {
     fprintf(stderr, "Error: -w warmup_iters must be >= 0\n");
     exit(EXIT_FAILURE);
   }
@@ -223,82 +223,82 @@ void parse_args(int argc, char** argv, args_t* args) {
     fprintf(stderr, "Error: -n/--iters must be > 0\n");
     exit(EXIT_FAILURE);
   }
-  if (args->num_ctas <= 0) {
+  if (args->numCtas <= 0) {
     fprintf(stderr, "Error: -c/--num_ctas must be > 0\n");
     exit(EXIT_FAILURE);
   }
-  if (args->num_threads <= 0) {
+  if (args->numThreads <= 0) {
     fprintf(stderr, "Error: -t/--num_threads must be > 0\n");
     exit(EXIT_FAILURE);
   }
-  if (args->queue_depth <= 0) {
+  if (args->queueDepth <= 0) {
     fprintf(stderr, "Error: --gin_tx_depth must be > 0\n");
     exit(EXIT_FAILURE);
   }
   {
-    const size_t maxBuf = gin_max_buffer_bytes();
-    if (args->maxbytes > maxBuf) {
+    const size_t maxBuf = ncclTestGinMaxBufferBytes();
+    if (args->maxBytes > maxBuf) {
       fprintf(stderr,
         "Error: -e/--maxbytes (%zu) exceeds the %zu-byte per-buffer limit "
         "(20 * 2^31, 40 GiB). Reduce -e.\n",
-        args->maxbytes, maxBuf);
+        args->maxBytes, maxBuf);
       exit(EXIT_FAILURE);
     }
   }
 }
 
-static void configure_op(args_t* args, const gin_test_caps_t* caps) {
-  if (caps->op_mask == 0) {
-    if (args->gin_op != GIN_OP_UNSET) {
+static void configureOp(ginArgs_t* args, const ginTestCaps_t* caps) {
+  if (caps->opMask == 0) {
+    if (args->ginOp != GIN_OP_UNSET) {
       fprintf(stderr, "Error: --gin_op is only supported by the put benchmarks\n");
       exit(EXIT_FAILURE);
     }
     return;
   }
-  if (args->gin_op == GIN_OP_UNSET) args->gin_op = caps->default_op;
-  if ((caps->op_mask & GIN_OP_BIT(args->gin_op)) == 0) {
+  if (args->ginOp == GIN_OP_UNSET) args->ginOp = caps->defaultOp;
+  if ((caps->opMask & GIN_OP_BIT(args->ginOp)) == 0) {
     fprintf(stderr, "Error: --gin_op %s is not supported by this benchmark (accepted:",
-            gin_op_name(args->gin_op));
+            ncclTestGinOpName(args->ginOp));
     for (int op = GIN_OP_PUT; op <= GIN_OP_PUT_COUNTER; op++) {
-      if (caps->op_mask & GIN_OP_BIT(op)) fprintf(stderr, " %s", gin_op_name((gin_op_t)op));
+      if (caps->opMask & GIN_OP_BIT(op)) fprintf(stderr, " %s", ncclTestGinOpName((ginOp_t)op));
     }
     fprintf(stderr, ")\n");
     exit(EXIT_FAILURE);
   }
 }
 
-void configure_test_args(args_t* args, const gin_test_caps_t* caps) {
-  if (args->gin_rsm == GIN_RSM_UNSET) args->gin_rsm = caps->default_rsm;
-  if (!caps->allow_thread_rsm && args->gin_rsm == GIN_RSM_THREAD) {
+void ncclTestGinConfigureArgs(ginArgs_t* args, const ginTestCaps_t* caps) {
+  if (args->ginRsm == GIN_RSM_UNSET) args->ginRsm = caps->defaultRsm;
+  if (!caps->allowThreadRsm && args->ginRsm == GIN_RSM_THREAD) {
     fprintf(stderr, "Error: --gin_rsm thread is not supported by throughput tests (expected cta or gpu)\n");
     exit(EXIT_FAILURE);
   }
 
-  configure_op(args, caps);
+  configureOp(args, caps);
 
-  const bool signals_in_use = caps->is_signal_op || args->gin_op == GIN_OP_PUT_SIGNAL;
-  if (!signals_in_use && args->gin_strong_signal) {
+  const bool signalsInUse = caps->isSignalOp || args->ginOp == GIN_OP_PUT_SIGNAL;
+  if (!signalsInUse && args->ginStrongSignal) {
     fprintf(stderr,
       "Error: --gin_strong_signal is only supported by the signal tests and by put tests run with "
       "--gin_op put_signal\n");
     exit(EXIT_FAILURE);
   }
-  if (!caps->allow_aggregate_requests && args->gin_aggregate_requests) {
+  if (!caps->allowAggregateRequests && args->ginAggregateRequests) {
     fprintf(stderr, "Error: --gin_ag is only supported by throughput tests\n");
     exit(EXIT_FAILURE);
   }
-  if (!caps->allow_bidirectional && args->gin_bidirectional) {
+  if (!caps->allowBidirectional && args->ginBidirectional) {
     fprintf(stderr, "Error: --gin_bd is only supported by throughput (bandwidth) tests\n");
     exit(EXIT_FAILURE);
   }
-  if (!caps->allow_multi_cta_threads && (args->num_ctas != 1 || args->num_threads != 1)) {
+  if (!caps->allowMultiCtaThreads && (args->numCtas != 1 || args->numThreads != 1)) {
     fprintf(stderr, "Error: Setting > 1 cta or thread is only supported by throughput tests\n");
     exit(EXIT_FAILURE);
   }
-  if (args->gin_aggregate_requests && args->num_threads % 32 != 0) {
+  if (args->ginAggregateRequests && args->numThreads % 32 != 0) {
     fprintf(stderr,
       "Error: --gin_ag requires -t/--num_threads to be a multiple of 32 (got %d)\n",
-      args->num_threads);
+      args->numThreads);
     exit(EXIT_FAILURE);
   }
 }

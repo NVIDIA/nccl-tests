@@ -6,7 +6,7 @@
  * GIN requirements below, so this guards the remaining case the build system
  * cannot see: a library older than those headers loaded at run time.
  */
-static void check_nccl_version(void) {
+static void checkNcclVersion(void) {
   int runtimeVersion = 0;
   NCCLCHECK_FATAL(ncclGetVersion(&runtimeVersion));
   if (runtimeVersion < NCCL_VERSION(2, 30, 7)) {
@@ -19,25 +19,25 @@ static void check_nccl_version(void) {
   }
 }
 
-size_t gin_max_buffer_bytes(void) {
+size_t ncclTestGinMaxBufferBytes(void) {
   return 20ULL * (1ULL << 31);
 }
 
-void gin_devComm_create(ncclComm_t comm, const args_t* args, gin_context_t* ctx) {
-  check_nccl_version();
+void ncclTestGinDevCommCreate(ncclComm_t comm, const ginArgs_t* args, ginContext_t* ctx) {
+  checkNcclVersion();
 
   ncclDevCommRequirements_t reqs = NCCL_DEV_COMM_REQUIREMENTS_INITIALIZER;
-  reqs.ginContextCount = args->num_ctas;
-  reqs.ginQueueDepth = args->queue_depth;
+  reqs.ginContextCount = args->numCtas;
+  reqs.ginQueueDepth = args->queueDepth;
   reqs.ginConnectionType = NCCL_GIN_CONNECTION_FULL;
   reqs.ginSignalCount = 1;
   reqs.ginCounterCount = 1;
 
-  reqs.ginStrongSignalsRequired = args->gin_strong_signal;
+  reqs.ginStrongSignalsRequired = args->ginStrongSignal;
   reqs.ginVaSignalsRequired = false;
 
   ncclDevResourceRequirements bufReq = {};
-  bufReq.bufferSize = args->maxbytes;
+  bufReq.bufferSize = args->maxBytes;
   bufReq.outBufferHandle = &ctx->hBuf;
   bufReq.next = reqs.resourceRequirementsList;
   reqs.resourceRequirementsList = &bufReq;
@@ -45,6 +45,6 @@ void gin_devComm_create(ncclComm_t comm, const args_t* args, gin_context_t* ctx)
   NCCLCHECK_FATAL(ncclDevCommCreate(comm, &reqs, &ctx->dcomm));
 }
 
-void gin_devComm_destroy(ncclComm_t comm, gin_context_t* ctx) {
-    NCCLCHECK_FATAL(ncclDevCommDestroy(comm, &ctx->dcomm));
+void ncclTestGinDevCommDestroy(ncclComm_t comm, ginContext_t* ctx) {
+  NCCLCHECK_FATAL(ncclDevCommDestroy(comm, &ctx->dcomm));
 }

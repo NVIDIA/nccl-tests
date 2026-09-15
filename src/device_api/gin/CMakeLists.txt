@@ -17,42 +17,42 @@ if(DEVICE_API_GIN_NCCL_TOO_OLD)
     return()
 endif()
 
-function(gin_perf_target_includes target_name)
-    target_include_directories(${target_name}
+function(gin_perf_target_includes TARGET_NAME)
+    target_include_directories(${TARGET_NAME}
         PRIVATE
         ${CMAKE_CURRENT_SOURCE_DIR}/utils
     )
 endfunction()
 
-function(gin_perf_target_compile_options target_name category_dir)
-    if(category_dir STREQUAL "throughput")
-        target_compile_options(${target_name}
+function(gin_perf_target_compile_options TARGET_NAME CATEGORY_DIR)
+    if(CATEGORY_DIR STREQUAL "throughput")
+        target_compile_options(${TARGET_NAME}
             PRIVATE
             "$<$<COMPILE_LANGUAGE:CUDA>:-Xptxas=-maxrregcount=60>"
         )
     endif()
 endfunction()
 
-function(add_gin_perf_category category_dir)
-    set(category_path ${CMAKE_CURRENT_SOURCE_DIR}/${category_dir})
-    if(NOT EXISTS ${category_path})
+function(add_gin_perf_category CATEGORY_DIR)
+    set(CATEGORY_PATH ${CMAKE_CURRENT_SOURCE_DIR}/${CATEGORY_DIR})
+    if(NOT EXISTS ${CATEGORY_PATH})
         return()
     endif()
 
-    file(GLOB runner_sources CONFIGURE_DEPENDS ${category_path}/*_main.cu)
-    file(GLOB test_sources CONFIGURE_DEPENDS ${category_path}/*.cu)
-    if(runner_sources)
-        list(REMOVE_ITEM test_sources ${runner_sources})
+    file(GLOB RUNNER_SOURCES CONFIGURE_DEPENDS ${CATEGORY_PATH}/*_main.cu)
+    file(GLOB TEST_SOURCES CONFIGURE_DEPENDS ${CATEGORY_PATH}/*.cu)
+    if(RUNNER_SOURCES)
+        list(REMOVE_ITEM TEST_SOURCES ${RUNNER_SOURCES})
     endif()
-    if(NOT test_sources OR NOT runner_sources)
+    if(NOT TEST_SOURCES OR NOT RUNNER_SOURCES)
         return()
     endif()
 
-    set(tests_lib ginPerf${category_dir})
-    add_library(${tests_lib} STATIC ${test_sources})
-    gin_perf_target_includes(${tests_lib})
-    gin_perf_target_compile_options(${tests_lib} ${category_dir})
-    target_link_libraries(${tests_lib}
+    set(TESTS_LIB ginPerf${CATEGORY_DIR})
+    add_library(${TESTS_LIB} STATIC ${TEST_SOURCES})
+    gin_perf_target_includes(${TESTS_LIB})
+    gin_perf_target_compile_options(${TESTS_LIB} ${CATEGORY_DIR})
+    target_link_libraries(${TESTS_LIB}
         PRIVATE
         nccl_tests_options
         nccl
@@ -60,29 +60,29 @@ function(add_gin_perf_category category_dir)
         CUDA::cudart
     )
 
-    foreach(runner_file ${runner_sources})
-        get_filename_component(runner_name ${runner_file} NAME_WE)
-        string(REGEX REPLACE "_main$" "" test_name ${runner_name})
-        set(target_name ${test_name}_perf)
+    foreach(RUNNER_FILE ${RUNNER_SOURCES})
+        get_filename_component(RUNNER_NAME ${RUNNER_FILE} NAME_WE)
+        string(REGEX REPLACE "_main$" "" TEST_NAME ${RUNNER_NAME})
+        set(TARGET_NAME ${TEST_NAME}_perf)
 
-        add_executable(${target_name}
-            ${runner_file}
+        add_executable(${TARGET_NAME}
+            ${RUNNER_FILE}
             ${CMAKE_CURRENT_SOURCE_DIR}/utils/common.cc
             ${CMAKE_CURRENT_SOURCE_DIR}/utils/args.cc
             ${CMAKE_CURRENT_SOURCE_DIR}/utils/gin_context.cc
         )
 
-        gin_perf_target_compile_options(${target_name} ${category_dir})
+        gin_perf_target_compile_options(${TARGET_NAME} ${CATEGORY_DIR})
 
-        set_target_properties(${target_name} PROPERTIES
-            RUNTIME_OUTPUT_DIRECTORY ${CMAKE_BINARY_DIR}/device_api/gin/${category_dir}
+        set_target_properties(${TARGET_NAME} PROPERTIES
+            RUNTIME_OUTPUT_DIRECTORY ${CMAKE_BINARY_DIR}/device_api/gin/${CATEGORY_DIR}
         )
 
-        gin_perf_target_includes(${target_name})
+        gin_perf_target_includes(${TARGET_NAME})
 
-        target_link_libraries(${target_name}
+        target_link_libraries(${TARGET_NAME}
             PRIVATE
-            ${tests_lib}
+            ${TESTS_LIB}
             nccl_tests_options
             nccl
             MPI::MPI_CXX

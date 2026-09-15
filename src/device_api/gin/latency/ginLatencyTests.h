@@ -8,27 +8,27 @@
  * runners select one of these according to --gin_op; the linker then pulls only
  * the referenced implementations out of the category archive.
  *
- * Every entry point matches gin_run_fn_t so it can be assigned to
- * gin_benchmark_t::run directly.
+ * Every entry point matches ginRunFn_t so it can be assigned to
+ * ginBenchmark_t::run directly.
  */
 
-void ginPutLatency_ping_launch(ncclDevComm dcomm, ncclDevResourceHandle hBuf, cudaStream_t stream,
-                               const args_t* args, size_t numElems, int iters);
-void ginPutSignalLatency_ping_launch(ncclDevComm dcomm, ncclDevResourceHandle hBuf, cudaStream_t stream,
-                                     const args_t* args, size_t numElems, int iters);
-void ginPutCounterLatency_ping_launch(ncclDevComm dcomm, ncclDevResourceHandle hBuf, cudaStream_t stream,
-                                      const args_t* args, size_t numElems, int iters);
+void ncclTestGinPutLatencyPingLaunch(ncclDevComm dcomm, ncclDevResourceHandle hBuf, cudaStream_t stream,
+                                     const ginArgs_t* args, size_t numElems, int iters);
+void ncclTestGinPutSignalLatencyPingLaunch(ncclDevComm dcomm, ncclDevResourceHandle hBuf, cudaStream_t stream,
+                                           const ginArgs_t* args, size_t numElems, int iters);
+void ncclTestGinPutCounterLatencyPingLaunch(ncclDevComm dcomm, ncclDevResourceHandle hBuf, cudaStream_t stream,
+                                            const ginArgs_t* args, size_t numElems, int iters);
 
-void ginGetLatency_ping_launch(ncclDevComm dcomm, ncclDevResourceHandle hBuf, cudaStream_t stream,
-                               const args_t* args, size_t numElems, int iters);
+void ncclTestGinGetLatencyPingLaunch(ncclDevComm dcomm, ncclDevResourceHandle hBuf, cudaStream_t stream,
+                                     const ginArgs_t* args, size_t numElems, int iters);
 
-void ginSignalLatency_ping_launch(ncclDevComm dcomm, ncclDevResourceHandle hBuf, cudaStream_t stream,
-                                  const args_t* args, size_t numElems, int iters);
+void ncclTestGinSignalLatencyPingLaunch(ncclDevComm dcomm, ncclDevResourceHandle hBuf, cudaStream_t stream,
+                                        const ginArgs_t* args, size_t numElems, int iters);
 
-void ginPutLatency_pingPong_launch(ncclDevComm dcomm, ncclDevResourceHandle hBuf, cudaStream_t stream,
-                                   const args_t* args, size_t numElems, int iters);
-void ginPutSignalLatency_pingPong_launch(ncclDevComm dcomm, ncclDevResourceHandle hBuf, cudaStream_t stream,
-                                         const args_t* args, size_t numElems, int iters);
+void ncclTestGinPutLatencyPingPongLaunch(ncclDevComm dcomm, ncclDevResourceHandle hBuf, cudaStream_t stream,
+                                         const ginArgs_t* args, size_t numElems, int iters);
+void ncclTestGinPutSignalLatencyPingPongLaunch(ncclDevComm dcomm, ncclDevResourceHandle hBuf, cudaStream_t stream,
+                                               const ginArgs_t* args, size_t numElems, int iters);
 
-void ginSignalLatency_pingPong_launch(ncclDevComm dcomm, ncclDevResourceHandle hBuf, cudaStream_t stream,
-                                      const args_t* args, size_t numElems, int iters);
+void ncclTestGinSignalLatencyPingPongLaunch(ncclDevComm dcomm, ncclDevResourceHandle hBuf, cudaStream_t stream,
+                                            const ginArgs_t* args, size_t numElems, int iters);
