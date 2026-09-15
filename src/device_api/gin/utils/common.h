@@ -23,36 +23,24 @@ using GinGetFn = void (*)(ncclGin&, ncclTeam, int, ncclWindow_t, size_t, ncclWin
 using GinPutFn = void (*)(ncclGin&, ncclTeam, int, ncclSymPtr<int>, ncclSymPtr<int>, size_t, ncclGin_None,
                           ncclGin_None, ncclCoopThread, ncclGin_None, cuda::thread_scope, cuda::thread_scope, uint32_t);
 
-using GinPutCounterFn = void (*)(ncclGin&, ncclTeam, int, ncclSymPtr<int>, ncclSymPtr<int>, size_t, ncclGin_None,
-                                 ncclGin_WeakCounterInc, ncclCoopThread, ncclGin_None, cuda::thread_scope,
-                                 cuda::thread_scope, uint32_t);
-
-using GinPutStrongSignalFn = void (*)(ncclGin&, ncclTeam, int, ncclSymPtr<int>, ncclSymPtr<int>, size_t,
-                                      ncclGin_StrongSignalInc, ncclGin_None, ncclCoopThread, ncclGin_None,
-                                      cuda::thread_scope, cuda::thread_scope, uint32_t);
-
-using GinPutWeakSignalFn = void (*)(ncclGin&, ncclTeam, int, ncclSymPtr<int>, ncclSymPtr<int>, size_t,
-                                    ncclGin_WeakSignalInc, ncclGin_None, ncclCoopThread, ncclGin_None,
-                                    cuda::thread_scope, cuda::thread_scope, uint32_t);
-
 #if __CUDA_ARCH__ >= 700
 
-NCCL_DEVICE_INLINE void ginGetDevice(ncclGin& gin, ncclTeam team, int peer, ncclWindow_t srcWindow, size_t srcOffset,
-                                     ncclWindow_t dstWindow, size_t dstOffset, size_t bytes, ncclCoopThread coop,
-                                     ncclGin_None descriptor, uint32_t optFlags) {
-  gin.get(team, peer, srcWindow, srcOffset, dstWindow, dstOffset, bytes, coop, descriptor, optFlags,
+NCCL_DEVICE_INLINE void ginGetDevice(ncclGin& gin, ncclTeam team, int peer, ncclWindow_t remoteWnd,
+                                     size_t remoteOffset, ncclWindow_t localWnd, size_t localOffset, size_t bytes,
+                                     ncclCoopThread coop, ncclGin_None descriptor, uint32_t optFlags) {
+  gin.get(team, peer, remoteWnd, remoteOffset, localWnd, localOffset, bytes, coop, descriptor, optFlags,
           ncclGin_SegmentDevice{});
 }
-NCCL_DEVICE_INLINE void ginGetHostNuma(ncclGin& gin, ncclTeam team, int peer, ncclWindow_t srcWindow,
-                                       size_t srcOffset, ncclWindow_t dstWindow, size_t dstOffset, size_t bytes,
+NCCL_DEVICE_INLINE void ginGetHostNuma(ncclGin& gin, ncclTeam team, int peer, ncclWindow_t remoteWnd,
+                                       size_t remoteOffset, ncclWindow_t localWnd, size_t localOffset, size_t bytes,
                                        ncclCoopThread coop, ncclGin_None descriptor, uint32_t optFlags) {
-  gin.get(team, peer, srcWindow, srcOffset, dstWindow, dstOffset, bytes, coop, descriptor, optFlags,
+  gin.get(team, peer, remoteWnd, remoteOffset, localWnd, localOffset, bytes, coop, descriptor, optFlags,
           ncclGin_SegmentHostNuma{});
 }
-NCCL_DEVICE_INLINE void ginGetMixed(ncclGin& gin, ncclTeam team, int peer, ncclWindow_t srcWindow, size_t srcOffset,
-                                    ncclWindow_t dstWindow, size_t dstOffset, size_t bytes, ncclCoopThread coop,
-                                    ncclGin_None descriptor, uint32_t optFlags) {
-  gin.get(team, peer, srcWindow, srcOffset, dstWindow, dstOffset, bytes, coop, descriptor, optFlags,
+NCCL_DEVICE_INLINE void ginGetMixed(ncclGin& gin, ncclTeam team, int peer, ncclWindow_t remoteWnd,
+                                    size_t remoteOffset, ncclWindow_t localWnd, size_t localOffset, size_t bytes,
+                                    ncclCoopThread coop, ncclGin_None descriptor, uint32_t optFlags) {
+  gin.get(team, peer, remoteWnd, remoteOffset, localWnd, localOffset, bytes, coop, descriptor, optFlags,
           ncclGin_SegmentMixed{});
 }
 
