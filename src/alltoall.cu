@@ -8,7 +8,6 @@
 #include "common.h"
 #if NCCL_VERSION_CODE >= NCCL_VERSION(2,28,0)
 #include "nccl_device.h"
-#include "vector_types.h"
 #endif
 
 #if defined(NCCL_OS_LINUX)
@@ -172,7 +171,7 @@ __global__ void NvlAlltoAllKernel(ncclWindow_t sendwin, size_t sendoffset, ncclW
 template <typename T>
 __device__ void AlltoAllLsaVecImpl(ncclWindow_t sendwin, size_t sendoffset, ncclWindow_t recvwin, size_t recvoffset,
     size_t count, int worldRank, int startLsa, int lsaSize, int tid, int nthreads) {
-  using TN = typename VectorTypeMapping<T>::Type;
+  using TN = uint4; // Alltoall is type insensitive, so using generic uint4 for data transport
   constexpr int VECTOR_FACTOR = sizeof(TN) / sizeof(T);
   constexpr int UNROLL_FACTOR = 128/sizeof(TN);
   constexpr int PEER_UNROLL = 2;
