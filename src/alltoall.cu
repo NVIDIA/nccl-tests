@@ -75,12 +75,17 @@ testResult_t AlltoAllGetDevCommRequirements(int deviceImpl, ncclDevCommRequireme
       reqs->lsaBarrierCount = deviceCtaCount;
       return testSuccess;
     #if defined(NCCL_OS_LINUX)
+    case 5: // GinAlltoAllKernelMultiContext
+      reqs->ginContextCount = deviceCtaCount;           // 1 ctx per CTA
+      // fall through
     case 3: // GinAlltoAllKernel
+      if (deviceImpl == 3) reqs->ginContextCount = 1;   // 1 ctx per GIN connection
 #if NCCL_VERSION_CODE >= NCCL_VERSION(2, 30, 0)
       reqs->worldGinBarrierCount = deviceCtaCount;
 #endif
       // fall through
     case 4: // HybridAlltoAllKernel (LSA+GIN)
+      if (deviceImpl == 4) reqs->ginContextCount = 1;   // 1 ctx per GIN connection
       if (commProperties.ginType == NCCL_GIN_TYPE_NONE) {
         fprintf(stderr, "This test requires GIN support, but GIN support is not enabled for this communicator.\n");
         return testInvalidUsage;
@@ -117,8 +122,12 @@ bool AlltoAllGetDevCommRequirements(int deviceImpl, ncclDevCommRequirements* req
       reqs->lsaBarrierCount = deviceCtaCount;
       return true;
 #if NCCL_VERSION_CODE >= NCCL_VERSION(2,28,7) && defined(NCCL_OS_LINUX)
+    case 5: // GinAlltoAllKernelMultiContext
+      reqs->ginContextCount = deviceCtaCount;   // 1 ctx per CTA
+      // fall through
     case 3: // GinAlltoAllKernel
     case 4: // HybridAlltoAllKernel (LSA+GIN)
+      if (deviceImpl == 3 || deviceImpl == 4) reqs->ginContextCount = 1;   // 1 ctx per GIN connection
       reqs->barrierCount = deviceCtaCount;
       reqs->ginSignalCount = deviceCtaCount;
       return true;
@@ -159,27 +168,23 @@ __global__ void NvlAlltoAllKernel(ncclWindow_t sendwin, size_t sendoffset, ncclW
   bar.sync(ncclCoopCta(), cuda::memory_order_release);
 }
 
-// Device implementation #2 - optimized NVL kernel using vectorization and unrolling
+// shared across -D 2 and -D 4 kernels - optimized NVL kernel using vectorization and unrolling
 template <typename T>
-__global__ void NvlAlltoAllKernelOptimized(ncclWindow_t sendwin, size_t sendoffset, ncclWindow_t recvwin, size_t recvoffset, size_t count, int root, struct ncclDevComm devComm) {
-  ncclLsaBarrierSession<ncclCoopCta> bar { ncclCoopCta(), devComm, ncclTeamLsa(devComm), devComm.lsaBarrier, blockIdx.x };
-  bar.sync(ncclCoopCta(), cuda::memory_order_acquire);
-
+__device__ void AlltoAllLsaVecImpl(ncclWindow_t sendwin, size_t sendoffset, ncclWindow_t recvwin, size_t recvoffset,
+    size_t count, int worldRank, int startLsa, int lsaSize, int tid, int nthreads) {
   using TN = typename VectorTypeMapping<T>::Type;
   constexpr int VECTOR_FACTOR = sizeof(TN) / sizeof(T);
   constexpr int UNROLL_FACTOR = 128/sizeof(TN);
   constexpr int PEER_UNROLL = 2;
 
-  int rank = devComm.rank, nRanks = devComm.nRanks;
-  int tid = threadIdx.x + blockDim.x * blockIdx.x;
-  int nthreads = blockDim.x * gridDim.x;
-
-  T* sendPtr = (T*)ncclGetLsaPointer(sendwin, sendoffset, rank);
+  T* sendPtr = (T*)ncclGetLocalPointer(sendwin, sendoffset);
+  T* recvPtr = (T*)ncclGetLocalPointer(recvwin, recvoffset);
 
   // alignment check: can we use vectorized operations?
-  bool canVectorize = (sizeof(TN) > sizeof(T)) &&  // Only if vectorization helps
-                      (reinterpret_cast<uintptr_t>(sendPtr) % sizeof(TN) == 0) &&  // Base aligned
-                      ((count * sizeof(T)) % sizeof(TN) == 0);  // Stride compatible
+  bool canVectorize = (sizeof(TN) > sizeof(T)) &&
+                      (reinterpret_cast<uintptr_t>(sendPtr) % sizeof(TN) == 0) &&
+                      (reinterpret_cast<uintptr_t>(recvPtr) % sizeof(TN) == 0) &&
+                      ((count * sizeof(T)) % sizeof(TN) == 0);
 
   if (canVectorize) {
     size_t vector_count = count / VECTOR_FACTOR;
@@ -189,14 +194,14 @@ __global__ void NvlAlltoAllKernelOptimized(ncclWindow_t sendwin, size_t sendoffs
     size_t aligned_vector_count = (vector_count / elements_per_iteration) * elements_per_iteration;
     for (size_t base_offset = tid; base_offset < aligned_vector_count; base_offset += elements_per_iteration) {
       // unroll a limited number of peers at a time
-      for (int peerBase = 0; peerBase < nRanks; peerBase += PEER_UNROLL) {
-        int peersInGroup = min(PEER_UNROLL, nRanks - peerBase);
+      for (int peerBase = 0; peerBase < lsaSize; peerBase += PEER_UNROLL) {
+        int peersInGroup = min(PEER_UNROLL, lsaSize - peerBase);
 
         #pragma unroll
         for (int p = 0; p < peersInGroup; p++) {
-          int peer = peerBase + p;
-          TN* sendVecPtr = (TN*)(sendPtr + peer * count);
-          TN* recvVecPtr = (TN*)((T*)ncclGetLsaPointer(recvwin, recvoffset, peer) + rank * count);
+          int lp = peerBase + p;
+          TN* sendVecPtr = (TN*)(sendPtr + (size_t)(startLsa + lp) * count);
+          TN* recvVecPtr = (TN*)((T*)ncclGetLsaPointer(recvwin, recvoffset, lp) + (size_t)worldRank * count);
           TN values[UNROLL_FACTOR];
 
           // split load/store into separate loops for better overlap and ILP
@@ -216,26 +221,33 @@ __global__ void NvlAlltoAllKernelOptimized(ncclWindow_t sendwin, size_t sendoffs
 
     // handle remaining vectorized elements that didn't fit in aligned chunks
     for (size_t base_offset = aligned_vector_count + tid; base_offset < vector_count; base_offset += nthreads) {
-      for (int peer = 0; peer < nRanks; peer++) {
-        TN* sendVecPtr = (TN*)(sendPtr + peer * count);
-        TN* recvVecPtr = (TN*)((T*)ncclGetLsaPointer(recvwin, recvoffset, peer) + rank * count);
+      for (int lp = 0; lp < lsaSize; lp++) {
+        TN* sendVecPtr = (TN*)(sendPtr + (size_t)(startLsa + lp) * count);
+        TN* recvVecPtr = (TN*)((T*)ncclGetLsaPointer(recvwin, recvoffset, lp) + (size_t)worldRank * count);
         recvVecPtr[base_offset] = sendVecPtr[base_offset];
-      }
-    }
-
-    // handle any remaining elements not divisible by vectorization factor
-    size_t scalar_start = vector_count * VECTOR_FACTOR;
-    for (size_t offset = scalar_start + tid; offset < count; offset += nthreads) {
-      for (int peer = 0; peer < nRanks; peer++) {
-        T value = sendPtr[peer * count + offset];
-        T* recvPtr = (T*)ncclGetLsaPointer(recvwin, recvoffset, peer);
-        recvPtr[rank * count + offset] = value;
       }
     }
   } else {
     // simple scalar fallback for unaligned data (identical to simple kernel)
-    AlltoAllScalarImpl<T>(sendwin, sendoffset, recvwin, recvoffset, count, rank, nRanks, tid, nthreads);
+    for (size_t offset = tid; offset < count; offset += nthreads) {
+      for (int lp = 0; lp < lsaSize; lp++) {
+        T* recvPtr = (T*)ncclGetLsaPointer(recvwin, recvoffset, lp);
+        recvPtr[(size_t)worldRank * count + offset] = sendPtr[(size_t)(startLsa + lp) * count + offset];
+      }
+    }
   }
+}
+
+// Device implementation #2 - Optimized NVL kernel
+template <typename T>
+__global__ void NvlAlltoAllKernelOptimized(ncclWindow_t sendwin, size_t sendoffset, ncclWindow_t recvwin, size_t recvoffset, size_t count, int root, struct ncclDevComm devComm) {
+  ncclLsaBarrierSession<ncclCoopCta> bar { ncclCoopCta(), devComm, ncclTeamLsa(devComm), devComm.lsaBarrier, blockIdx.x };
+  bar.sync(ncclCoopCta(), cuda::memory_order_acquire);
+
+  int tid = threadIdx.x + blockDim.x * blockIdx.x;
+  int nthreads = blockDim.x * gridDim.x;
+
+  AlltoAllLsaVecImpl<T>(sendwin, sendoffset, recvwin, recvoffset, count, devComm.rank, 0, devComm.nRanks, tid, nthreads);
 
   bar.sync(ncclCoopCta(), cuda::memory_order_release);
 }
@@ -247,6 +259,8 @@ __global__ void NvlAlltoAllKernelOptimized(ncclWindow_t sendwin, size_t sendoffs
 #else
 #define NCCL_TEST_GIN_FENCE_LEVEL ncclGinFenceLevel::Relaxed
 #endif
+// Device implementation #3 - GIN kernel requesting one context per GIN connection,
+// but the kernel itself only uses context 0
 template <typename T>
 __global__ void GinAlltoAllKernel(ncclWindow_t sendwin, size_t sendoffset, ncclWindow_t recvwin, size_t recvoffset, size_t count, int root, struct ncclDevComm devComm) {
   int ginContext = 0;
@@ -287,11 +301,17 @@ __global__ void GinAlltoAllKernel(ncclWindow_t sendwin, size_t sendoffset, ncclW
 #endif
 }
 
+// Device implementation #4 - Hybrid kernel using LSA for local peers and GIN for remote ones
 template <typename T>
-__global__ void HybridAlltoAllKernel(ncclWindow_t sendwin, size_t sendoffset, ncclWindow_t recvwin, size_t recvoffset, size_t count, int root, struct ncclDevComm devComm) {
-  int ginContext = 0;
-  unsigned int signalIndex = blockIdx.x;
-  ncclGin gin { devComm, ginContext };
+__global__ void __launch_bounds__(512) HybridAlltoAllKernel(ncclWindow_t sendwin, size_t sendoffset, ncclWindow_t recvwin, size_t recvoffset, size_t count, int root, struct ncclDevComm devComm) {
+  // Requires gridDim.x >= ginContextCount to use all available GIN devices
+  int numCtx = min((int)gridDim.x, (int)devComm.ginContextCount);
+  int myCtx = blockIdx.x % numCtx;
+  int ctaInCtx = blockIdx.x / numCtx;
+  int ctasPerCtx = ((int)gridDim.x - myCtx + numCtx - 1) / numCtx;
+
+  ncclGin gin { devComm, myCtx };
+  unsigned int signalIndex = myCtx;
   uint64_t signalValue = gin.readSignal(signalIndex);
 
   ncclBarrierSession<ncclCoopCta> bar { ncclCoopCta(), ncclTeamTagWorld(), gin, blockIdx.x };
@@ -307,12 +327,77 @@ __global__ void HybridAlltoAllKernel(ncclWindow_t sendwin, size_t sendoffset, nc
 
   /* handle remote peers (i.e., non-LSA) using GIN */
   const size_t size = count * sizeof(T);
-  for (int r = tid; r < world.nRanks; r += nthreads) {
-    if (r < startLsa || r >= startLsa + lsaSize) {
-      gin.put(world, r,
-          recvwin, recvoffset + world.rank * size,
-          sendwin, sendoffset + r * size,
-          size,
+  const size_t base = size / numCtx;
+  const size_t rem = size % numCtx;
+  const size_t sliceSize = base + (myCtx == numCtx - 1 ? rem : 0);
+  const size_t sliceOff = (size_t)myCtx * base;
+
+  int stride = ctasPerCtx * blockDim.x;
+  if (sliceSize > 0) {
+    for (int r = ctaInCtx + threadIdx.x*ctasPerCtx; r < world.nRanks; r += stride) {
+      if (r < startLsa || r >= startLsa + lsaSize) {
+        gin.put(world, r,
+            recvwin, recvoffset + (size_t)world.rank * size + sliceOff,
+            sendwin, sendoffset + (size_t)r * size + sliceOff,
+            sliceSize,
+#if NCCL_VERSION_CODE >= NCCL_VERSION(2, 30, 7)
+            ncclGin_WeakSignalInc{signalIndex});
+#else
+            ncclGin_SignalInc{signalIndex});
+#endif
+      }
+    }
+  }
+
+  /* handle local peers with LSA */
+  AlltoAllLsaVecImpl<T>(sendwin, sendoffset, recvwin, recvoffset, count, world.rank, startLsa, lsaSize, tid, nthreads);
+
+  // This context receives numRemotePeers increments; all CTAs sharing this context share
+  // the same signal, so a single CTA waiter is enough
+  int numRemotePeers = world.nRanks - lsa.nRanks;
+  if (ctaInCtx == 0 && sliceSize > 0)
+    gin.waitSignal(ncclCoopCta(), signalIndex, signalValue + numRemotePeers);
+  gin.flush(ncclCoopCta());
+
+  bar.sync(ncclCoopCta(), cuda::memory_order_release, NCCL_TEST_GIN_FENCE_LEVEL);
+}
+
+// Device implementation #5 - GIN kernel with one context per CTA
+template <typename T>
+__global__ void GinAlltoAllKernelMultiContext(ncclWindow_t sendwin, size_t sendoffset,
+    ncclWindow_t recvwin, size_t recvoffset, size_t count, int root, struct ncclDevComm devComm) {
+  // Requires gridDim.x >= ginContextCount to use all available GIN devices.
+  int numCtx = min((int)gridDim.x, (int)devComm.ginContextCount);
+  int myCtx = blockIdx.x % numCtx;
+  int ctaInCtx = blockIdx.x / numCtx;
+  int ctasPerCtx = ((int)gridDim.x - myCtx + numCtx - 1) / numCtx;
+
+  ncclGin gin { devComm, myCtx };
+  unsigned int signalIndex = myCtx;
+  uint64_t signalValue = gin.readSignal(signalIndex);
+
+#if NCCL_VERSION_CODE >= NCCL_VERSION(2, 30, 0)
+  ncclGinBarrierSession<ncclCoopCta> bar { ncclCoopCta(), gin, ncclTeamTagWorld(), blockIdx.x };
+#else
+  ncclBarrierSession<ncclCoopCta> bar { ncclCoopCta(), ncclTeamTagWorld(), gin, blockIdx.x };
+#endif
+  bar.sync(ncclCoopCta(), cuda::memory_order_acquire, NCCL_TEST_GIN_FENCE_LEVEL);
+
+  // Split each peer's block across the GIN contexts
+  const size_t size = count * sizeof(T);
+  const size_t base = size / numCtx;
+  const size_t rem = size % numCtx;
+  const size_t sliceSize = base + (myCtx == numCtx - 1 ? rem : 0);
+  const size_t sliceOff = (size_t)myCtx * base;
+
+  // nRanks work items distributed across the threads of this CTA
+  int stride = ctasPerCtx * blockDim.x;
+  if (sliceSize > 0) {
+    for (int w = ctaInCtx + threadIdx.x * ctasPerCtx; w < devComm.nRanks; w += stride) {
+      gin.put(ncclTeamWorld(devComm), w,
+          recvwin, recvoffset + (size_t)devComm.rank*size + sliceOff,
+          sendwin, sendoffset + (size_t)w*size + sliceOff,
+          sliceSize,
 #if NCCL_VERSION_CODE >= NCCL_VERSION(2, 30, 7)
           ncclGin_WeakSignalInc{signalIndex});
 #else
@@ -321,23 +406,14 @@ __global__ void HybridAlltoAllKernel(ncclWindow_t sendwin, size_t sendoffset, nc
     }
   }
 
-  /* handle local peers with LSA */
-  T* sendLocal = (T*)ncclGetLocalPointer(sendwin, sendoffset);
-  for (size_t offset = tid; offset < count; offset += nthreads) {
-    for (int lp = 0; lp < lsa.nRanks; lp++) {
-      int wr = startLsa + lp;
-      T* recvPtr = (T*)ncclGetLsaPointer(recvwin, recvoffset, lp);
-      recvPtr[world.rank * count + offset] = sendLocal[wr * count + offset];
-    }
+  // This context receives nRanks increments; this CTA waits on them
+  if (ctaInCtx == 0 && sliceSize > 0) {
+    gin.waitSignal(ncclCoopCta(), signalIndex, signalValue + devComm.nRanks);
   }
-
-  int numRemotePeers = world.nRanks - lsa.nRanks;
-  int receivingCta = (world.rank % nthreads) / blockDim.x;
-  if (blockIdx.x == receivingCta)
-    gin.waitSignal(ncclCoopCta(), signalIndex, signalValue + numRemotePeers);
   gin.flush(ncclCoopCta());
-
+#if NCCL_VERSION_CODE < NCCL_VERSION(2, 30, 0)
   bar.sync(ncclCoopCta(), cuda::memory_order_release, NCCL_TEST_GIN_FENCE_LEVEL);
+#endif
 }
 #endif
 #endif
@@ -436,6 +512,9 @@ testResult_t AlltoAllRunColl(void* sendbuff, size_t sendoffset, void* recvbuff, 
         return testSuccess;
       case 4:
         TESTCHECK(testLaunchDeviceKernel(SPECIALIZE_KERNEL(HybridAlltoAllKernel, type, op), sendbuff, sendoffset, recvbuff, recvoffset, count, type, op, root, comm, stream));
+        return testSuccess;
+      case 5:
+        TESTCHECK(testLaunchDeviceKernel(SPECIALIZE_KERNEL(GinAlltoAllKernelMultiContext, type, op), sendbuff, sendoffset, recvbuff, recvoffset, count, type, op, root, comm, stream));
         return testSuccess;
 #endif
       default:
