@@ -11,6 +11,7 @@
 #include <limits>
 #include <string.h>
 #include <ctype.h>
+#include <errno.h>
 #include <mutex>
 #include <condition_variable>
 #include <thread>
@@ -1556,12 +1557,17 @@ static bool parseInt(char *s, int *num) {
   while (*s && isspace(*s)) ++s;
   if (!*s) return false;
 
-  if (ncclTestStrncasecmp(s, "0b", 2) == 0)
-    *num = (int)strtoul(s + 2, &p, 2);
-  else
-    *num = (int)strtoul(s, &p, 0);
+  errno = 0;
+  char *start = s;
+  if (ncclTestStrncasecmp(s, "0b", 2) == 0) {
+    start = s + 2;
+    *num = (int)strtoul(start, &p, 2);
+  } else {
+    *num = (int)strtoul(start, &p, 0);
+  }
 
-  if (p == s)
+  while (*p && isspace(*p)) ++p;
+  if (p == start || *p != '\0' || errno == ERANGE)
     return false;
   return true;
 }
@@ -1585,9 +1591,16 @@ testResult_t run() {
   }
 
   char *splitMaskEnv = NULL;
-  if (splitMaskEnv = getenv("NCCL_TESTS_SPLIT_MASK")) {
-    color = proc & strtoul(splitMaskEnv, NULL, 16);
-  } else if (splitMaskEnv = getenv("NCCL_TESTS_SPLIT")) {
+  if ((splitMaskEnv = getenv("NCCL_TESTS_SPLIT_MASK"))) {
+    char *end;
+    errno = 0;
+    unsigned long mask = strtoul(splitMaskEnv, &end, 16);
+    if (end == splitMaskEnv || *end != '\0' || errno == ERANGE) {
+      fprintf(stderr, "Warning: invalid NCCL_TESTS_SPLIT_MASK='%s', ignoring\n", splitMaskEnv);
+    } else {
+      color = proc & (int)mask;
+    }
+  } else if ((splitMaskEnv = getenv("NCCL_TESTS_SPLIT"))) {
     if (
       (ncclTestStrncasecmp(splitMaskEnv, "AND", strlen("AND")) == 0 && parseInt(splitMaskEnv + strlen("AND"), &color)) ||
       (ncclTestStrncasecmp(splitMaskEnv, "&", strlen("&")) == 0 && parseInt(splitMaskEnv + strlen("&"), &color))
@@ -1601,13 +1614,23 @@ testResult_t run() {
     if (
       (ncclTestStrncasecmp(splitMaskEnv, "MOD", strlen("MOD")) == 0 && parseInt(splitMaskEnv + strlen("MOD"), &color)) ||
       (ncclTestStrncasecmp(splitMaskEnv, "%", strlen("%")) == 0 && parseInt(splitMaskEnv + strlen("%"), &color))
-    )
-        color = proc % color;
+    ) {
+        if (color == 0) {
+          fprintf(stderr, "Warning: NCCL_TESTS_SPLIT modulo by zero, ignoring\n");
+        } else {
+          color = proc % color;
+        }
+    }
     if (
       (ncclTestStrncasecmp(splitMaskEnv, "DIV", strlen("DIV")) == 0 && parseInt(splitMaskEnv + strlen("DIV"), &color)) ||
       (ncclTestStrncasecmp(splitMaskEnv, "/", strlen("/")) == 0 && parseInt(splitMaskEnv + strlen("/"), &color))
-    )
-        color = proc / color;
+    ) {
+        if (color == 0) {
+          fprintf(stderr, "Warning: NCCL_TESTS_SPLIT division by zero, ignoring\n");
+        } else {
+          color = proc / color;
+        }
+    }
   }
 
   MPI_Comm mpi_comm;
