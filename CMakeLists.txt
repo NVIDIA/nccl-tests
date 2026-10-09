@@ -22,6 +22,11 @@ endif()
 
 find_package(CUDAToolkit REQUIRED)
 find_package(MPI QUIET)
+if(MPI_FOUND)
+  # Only the MPI C API is used. Keep mpi.h from pulling in the deprecated C++
+  # bindings, which some installs ship in a separate libmpi_cxx.
+  add_compile_definitions(OMPI_SKIP_MPICXX MPICH_SKIP_MPICXX)
+endif()
 
 set(GIT_VERSION_FILE "${CMAKE_BINARY_DIR}/obj/include/nccl_tests_git_version.h")
 add_custom_target(generate_git_version ALL

@@ -30,6 +30,10 @@ ifeq ($(MPI), 1)
 MPI_INCLUDE ?= $(MPI_HOME)/include
 NVCUFLAGS += -DMPI_SUPPORT -I$(MPI_INCLUDE)
 NVLDFLAGS += -L$(MPI_HOME)/lib -L$(MPI_HOME)/lib64 -lmpi
+# Only the MPI C API is used. Keep mpi.h from pulling in the deprecated C++
+# bindings, which some installs ship in a separate libmpi_cxx we don't link.
+CXXFLAGS += -DOMPI_SKIP_MPICXX -DMPICH_SKIP_MPICXX
+NVCUFLAGS += -DOMPI_SKIP_MPICXX -DMPICH_SKIP_MPICXX
 endif
 ifeq ($(MPI_IBM),1)
 NVCUFLAGS += -DMPI_SUPPORT
