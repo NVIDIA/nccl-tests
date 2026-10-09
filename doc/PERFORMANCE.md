@@ -1,6 +1,6 @@
 # Performance reported by NCCL tests
 
-NCCL tests report the average operation time in ms, and two bandwidths in GB/s : algorithm bandwidth and bus bandwidth. This page explains what those numbers mean and what you should expect depending on the hardware used.
+NCCL tests report the average operation time in ms, and two bandwidths in GB/s : algorithm bandwidth and bus bandwidth. The measurement is of a unidirectional bandwidth. This page explains what those numbers mean and what you should expect depending on the hardware used.
 
 # Time
 
