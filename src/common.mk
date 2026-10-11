@@ -31,9 +31,9 @@ ifeq ($(shell test "0$(CUDA_MAJOR)" -ge 13; echo $$?),0)
 NVCC_GENCODE ?= -gencode=arch=compute_75,code=sm_75 \
 		-gencode=arch=compute_80,code=sm_80 \
 		-gencode=arch=compute_90,code=sm_90 \
-		-gencode=arch=compute_100,code=sm_100 \
-		-gencode=arch=compute_120,code=sm_120 \
-		-gencode=arch=compute_120,code=compute_120
+		-gencode=arch=compute_100f,code=sm_100 \
+		-gencode=arch=compute_110f,code=sm_110 \
+		-gencode=arch=compute_120f,code=sm_120
 else ifeq ($(shell test "0$(CUDA_MAJOR)" -eq 12 -a "0$(CUDA_MINOR)" -ge 8; echo $$?),0)
 # Include Blackwell support if we're using CUDA12.8 or above
 NVCC_GENCODE ?= -gencode=arch=compute_60,code=sm_60 \
