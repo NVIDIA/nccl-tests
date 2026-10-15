@@ -84,13 +84,14 @@ testResult_t AlltoAllGetDevCommRequirements(int deviceImpl, ncclDevCommRequireme
 #endif
       // fall through
     case 4: // HybridAlltoAllKernel (LSA+GIN)
-      if (deviceImpl == 4) reqs->ginContextCount = 1;   // 1 ctx per GIN connection
+    case 6: // HybridAlltoAllKernelFlushBeforeLsa (diagnostic control)
+      if (deviceImpl == 4 || deviceImpl == 6) reqs->ginContextCount = 1;   // 1 ctx per GIN connection
       if (commProperties.ginType == NCCL_GIN_TYPE_NONE) {
         fprintf(stderr, "This test requires GIN support, but GIN support is not enabled for this communicator.\n");
         return testInvalidUsage;
       }
 #if NCCL_VERSION_CODE >= NCCL_VERSION(2, 30, 0)
-      if (deviceImpl == 4)
+      if (deviceImpl == 4 || deviceImpl == 6)
 #endif
         reqs->barrierCount = deviceCtaCount;
       reqs->ginSignalCount = deviceCtaCount;
@@ -104,6 +105,25 @@ testResult_t AlltoAllGetDevCommRequirements(int deviceImpl, ncclDevCommRequireme
       reqs->ginForceEnable = true;
 #endif
       return testSuccess;
+    case 7: // HybridLeanAlltoAllKernel (LSA+GIN, lean synchronization)
+#if NCCL_VERSION_CODE >= NCCL_VERSION(2, 30, 0)
+      if (commProperties.ginType == NCCL_GIN_TYPE_NONE) {
+        fprintf(stderr, "This test requires GIN support, but GIN support is not enabled for this communicator.\n");
+        return testInvalidUsage;
+      }
+      reqs->ginContextCount = 1;                        // 1 ctx per GIN connection
+      reqs->worldGinBarrierCount = 1;                   // start: GIN world barrier in CTA 0 only
+      reqs->lsaBarrierCount = deviceCtaCount;           // start and end: LSA barrier in every CTA
+      reqs->ginSignalCount = deviceCtaCount;
+#if NCCL_VERSION_CODE >= NCCL_VERSION(2, 30, 7)
+      reqs->ginStrongSignalsRequired = false;
+      reqs->ginVaSignalsRequired = false;
+#endif
+      reqs->ginConnectionType = NCCL_GIN_CONNECTION_FULL;
+      return testSuccess;
+#else
+      return testNotImplemented;
+#endif
     #endif
     default:
       return testNotImplemented;
@@ -126,7 +146,8 @@ bool AlltoAllGetDevCommRequirements(int deviceImpl, ncclDevCommRequirements* req
       // fall through
     case 3: // GinAlltoAllKernel
     case 4: // HybridAlltoAllKernel (LSA+GIN)
-      if (deviceImpl == 3 || deviceImpl == 4) reqs->ginContextCount = 1;   // 1 ctx per GIN connection
+    case 6: // HybridAlltoAllKernelFlushBeforeLsa (diagnostic control)
+      if (deviceImpl == 3 || deviceImpl == 4 || deviceImpl == 6) reqs->ginContextCount = 1;   // 1 ctx per GIN connection
       reqs->barrierCount = deviceCtaCount;
       reqs->ginSignalCount = deviceCtaCount;
       return true;
@@ -300,8 +321,9 @@ __global__ void GinAlltoAllKernel(ncclWindow_t sendwin, size_t sendoffset, ncclW
 #endif
 }
 
-// Device implementation #4 - Hybrid kernel using LSA for local peers and GIN for remote ones
-template <typename T>
+// Device implementations #4 and #6 - Hybrid kernel using LSA for local peers
+// and GIN for remote ones, with an optional flush-before-LSA diagnostic control.
+template <typename T, bool FlushBeforeLsa = false>
 __global__ void __launch_bounds__(512) HybridAlltoAllKernel(ncclWindow_t sendwin, size_t sendoffset, ncclWindow_t recvwin, size_t recvoffset, size_t count, int root, struct ncclDevComm devComm) {
   // Requires gridDim.x >= ginContextCount to use all available GIN devices
   int numCtx = min((int)gridDim.x, (int)devComm.ginContextCount);
@@ -348,6 +370,10 @@ __global__ void __launch_bounds__(512) HybridAlltoAllKernel(ncclWindow_t sendwin
     }
   }
 
+  // Diagnostic control: each CTA waits for GIN completion before its LSA copy.
+  // The normal hybrid implementation keeps the intended GIN/LSA overlap.
+  if (FlushBeforeLsa) gin.flush(ncclCoopCta());
+
   /* handle local peers with LSA */
   AlltoAllLsaVecImpl<T>(sendwin, sendoffset, recvwin, recvoffset, count, world.rank, startLsa, lsaSize, tid, nthreads);
 
@@ -360,6 +386,86 @@ __global__ void __launch_bounds__(512) HybridAlltoAllKernel(ncclWindow_t sendwin
 
   bar.sync(ncclCoopCta(), cuda::memory_order_release, NCCL_TEST_GIN_FENCE_LEVEL);
 }
+
+// Device implementation #6 - Hybrid flush-before-LSA diagnostic control.
+template <typename T>
+constexpr auto HybridAlltoAllKernelFlushBeforeLsa = HybridAlltoAllKernel<T, true>;
+
+#if NCCL_VERSION_CODE >= NCCL_VERSION(2, 30, 0)
+// Device implementation #7 - Hybrid kernel with lean synchronization and single-warp GIN.
+// Warp 0 of CTA 0 posts all remote puts, waits for the incoming signals and flushes, while every
+// thread runs the vectorized LSA copy. Each peer's block is sent as up to kHybridLeanMaxPutsPerPeer
+// puts of at least kHybridLeanMinPutBytes: one put per peer for small messages, several in flight
+// per peer for large ones. Only CTA 0 writes to remote peers, so only CTA 0 runs a GIN world
+// barrier at the start; every CTA runs an LSA barrier for same-node peers. The other CTAs never
+// wait on GIN signals that could queue behind this iteration's puts, so their LSA copies overlap
+// the GIN transfer. At the end the signal wait already covers remote data, so only same-node LSA
+// stores need a barrier, instead of a combined LSA+GIN barrier at both ends.
+constexpr size_t kHybridLeanMinPutBytes = (size_t)4 << 20;
+constexpr int kHybridLeanMaxPutsPerPeer = 4;
+
+template <typename T>
+__global__ void __launch_bounds__(512) HybridLeanAlltoAllKernel(ncclWindow_t sendwin, size_t sendoffset, ncclWindow_t recvwin, size_t recvoffset, size_t count, int root, struct ncclDevComm devComm) {
+  ncclGin gin { devComm, 0 };
+  const unsigned int signalIndex = 0;
+  uint64_t signalValue = gin.readSignal(signalIndex);
+
+  if (blockIdx.x == 0) {
+    ncclGinBarrierSession<ncclCoopCta> remote { ncclCoopCta(), gin, ncclTeamTagWorld(), 0 };
+    remote.sync(ncclCoopCta(), cuda::memory_order_acquire, NCCL_TEST_GIN_FENCE_LEVEL);
+  }
+  ncclLsaBarrierSession<ncclCoopCta> local { ncclCoopCta(), devComm, ncclTeamLsa(devComm), devComm.lsaBarrier, blockIdx.x };
+  local.sync(ncclCoopCta(), cuda::memory_order_acquire);
+
+  int tid = threadIdx.x + blockIdx.x*blockDim.x;
+  int nthreads = blockDim.x * gridDim.x;
+
+  ncclTeam world = ncclTeamWorld(devComm);
+  ncclTeam lsa = ncclTeamLsa(devComm);
+  const int startLsa = world.rank - lsa.rank;
+  const int lsaSize  = lsa.nRanks;
+
+  /* handle remote peers (i.e., non-LSA) using GIN from a single warp */
+  const size_t size = count * sizeof(T);
+  const size_t wanted = (size + kHybridLeanMinPutBytes - 1) / kHybridLeanMinPutBytes;
+  const int putsPerPeer = (int)max((size_t)1, min((size_t)kHybridLeanMaxPutsPerPeer, wanted));
+  const bool ginWarp = blockIdx.x == 0 && threadIdx.x < 32 && size > 0;
+
+  if (ginWarp) {
+    const size_t chunk = size / putsPerPeer;
+    const int totalWork = putsPerPeer * world.nRanks;
+    for (int w = threadIdx.x; w < totalWork; w += 32) {
+      int r = w / putsPerPeer;
+      int putIdx = w % putsPerPeer;
+      if (r < startLsa || r >= startLsa + lsaSize) {
+        size_t off = (size_t)putIdx * chunk;
+        size_t len = (putIdx == putsPerPeer - 1) ? (size - off) : chunk;
+        gin.put(world, r,
+            recvwin, recvoffset + (size_t)world.rank * size + off,
+            sendwin, sendoffset + (size_t)r * size + off,
+            len,
+#if NCCL_VERSION_CODE >= NCCL_VERSION(2, 30, 7)
+            ncclGin_WeakSignalInc{signalIndex});
+#else
+            ncclGin_SignalInc{signalIndex});
+#endif
+      }
+    }
+  }
+
+  /* handle local peers with LSA */
+  AlltoAllLsaVecImpl<T>(sendwin, sendoffset, recvwin, recvoffset, count, world.rank, startLsa, lsaSize, tid, nthreads);
+
+  // Every remote peer sends putsPerPeer signal increments to this rank
+  if (ginWarp) {
+    const int numRemotePeers = world.nRanks - lsa.nRanks;
+    gin.waitSignal(ncclCoopWarp(), signalIndex, signalValue + (uint64_t)numRemotePeers * putsPerPeer);
+    gin.flush(ncclCoopWarp());
+  }
+
+  local.sync(ncclCoopCta(), cuda::memory_order_acq_rel);
+}
+#endif
 
 // Device implementation #5 - GIN kernel with one context per CTA
 template <typename T>
@@ -515,6 +621,14 @@ testResult_t AlltoAllRunColl(void* sendbuff, size_t sendoffset, void* recvbuff, 
       case 5:
         TESTCHECK(testLaunchDeviceKernel(SPECIALIZE_KERNEL(GinAlltoAllKernelMultiContext, type, op), sendbuff, sendoffset, recvbuff, recvoffset, count, type, op, root, comm, stream));
         return testSuccess;
+      case 6:
+        TESTCHECK(testLaunchDeviceKernel(SPECIALIZE_KERNEL(HybridAlltoAllKernelFlushBeforeLsa, type, op), sendbuff, sendoffset, recvbuff, recvoffset, count, type, op, root, comm, stream));
+        return testSuccess;
+#if NCCL_VERSION_CODE >= NCCL_VERSION(2, 30, 0)
+      case 7:
+        TESTCHECK(testLaunchDeviceKernel(SPECIALIZE_KERNEL(HybridLeanAlltoAllKernel, type, op), sendbuff, sendoffset, recvbuff, recvoffset, count, type, op, root, comm, stream));
+        return testSuccess;
+#endif
 #endif
       default:
         return testNotImplemented;
