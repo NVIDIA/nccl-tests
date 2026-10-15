@@ -143,6 +143,20 @@ Measures latency and bandwidth / message rate of NCCL GIN point-to-point device 
 
 See [src/device_api/gin/README.md](src/device_api/gin/README.md) for the full list of benchmarks and their options.
 
+### Troubleshooting: startup hang with Open MPI and HCOLL multicast
+
+With `MPI=1` binaries launched through Open MPI using the HCOLL collective component (`coll/hcoll`), multi-node runs can occasionally hang at startup, before NCCL is initialized. Most ranks are then inside the `MPI_Allreduce` of `minCudaArch` in `src/common.cu`, in HCOLL's InfiniBand multicast fan-out, while the ranks of one node have already entered `ncclCommInitRank` and wait in the NCCL bootstrap.
+
+HCOLL uses InfiniBand multicast once its inter-node group of node leaders reaches `HCOLL_MCAST_NP` (8 by default), so with default settings this needs 8 or more nodes. The first multicast fan-out on a freshly joined group can miss every receiver, and HCOLL then needs a rank that already holds the data to keep calling into MPI. After this `MPI_Allreduce` the tests make no MPI call until NCCL initialization, so that recovery may never happen. An extra `MPI_Barrier` after the `MPI_Allreduce` only moves the problem: the barrier can stall the same way.
+
+To avoid it, disable HCOLL multicast on every rank, for example:
+
+```shell
+$ mpirun -x HCOLL_ENABLE_MCAST=0 -np 64 -N 8 ./build/all_reduce_perf -b 8 -e 8G -f 2 -g 1
+```
+
+Disabling HCOLL entirely (`-x OMPI_MCA_coll_hcoll_enable=0`) also works. Both settings only change how MPI's own collectives run; the collective benchmarks use MPI outside their timed loops (setup, synchronization between tests and combining results), so the NCCL numbers they report are not affected.
+
 ## Copyright
 
 NCCL tests are provided under the BSD license. All source code and accompanying documentation is copyright (c) 2016-2026, NVIDIA CORPORATION. All rights reserved.
