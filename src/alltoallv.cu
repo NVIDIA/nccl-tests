@@ -86,7 +86,8 @@
  * The test outputs standard NCCL perf test metrics (algorithmic and bus
  * bandwidth), but these are based on the rank with the most send/recv bytes
  * and the maximum time across ranks. This approach is most representative of
- * collective performance in imbalanced workloads. Use the -a 3 option to report
+ * collective performance in imbalanced workloads. The bus bandwidth counts only
+ * the bytes a rank exchanges with other ranks (see doc/PERFORMANCE.md). Use the -a 3 option to report
  * max time across ranks rather than the default average time, which can be skewed
  * by inactive ranks.
  *
@@ -464,6 +465,37 @@ testResult_t AlltoAllvInitData(struct threadArgs* args, ncclDataType_t type, ncc
   return testSuccess;
 }
 
+// Bytes a rank sends to / receives from peers other than itself. Self traffic is a local copy that does not use
+// the links busbw is meant to measure (the same reason AlltoAll uses (n-1)/n).
+static void AlltoAllvGetRankPeerBytes(int rank, int nranks, size_t total_bytes, size_t* sendBytes, size_t* recvBytes) {
+  size_t s = 0, r = 0;
+  for (int peer = 0; peer < nranks; peer++) {
+    if (peer == rank) continue;
+    if (alltoallv_use_generated_pattern) {
+      s += AlltoAllvGetPeerBytesDistanceWeighted(rank, peer, nranks, total_bytes);
+      r += AlltoAllvGetPeerBytesDistanceWeighted(peer, rank, nranks, total_bytes);
+    } else {
+      s += AlltoAllvGetPeerBytesFromMatrix(rank, peer);
+      r += AlltoAllvGetPeerBytesFromMatrix(peer, rank);
+    }
+  }
+  *sendBytes = s;
+  *recvBytes = r;
+}
+
+// Largest number of bytes any rank sends to or receives from other ranks.
+static size_t AlltoAllvGetMaxPeerBytes(int nranks, size_t total_bytes) {
+  size_t maxBytes = 0;
+  // Generated patterns are symmetric and balanced, so rank 0 is representative (O(N)); matrices are scanned (O(N^2)).
+  int nscan = alltoallv_use_generated_pattern ? 1 : nranks;
+  for (int rank = 0; rank < nscan; rank++) {
+    size_t s, r;
+    AlltoAllvGetRankPeerBytes(rank, nranks, total_bytes, &s, &r);
+    maxBytes = MAX(maxBytes, MAX(s, r));
+  }
+  return maxBytes;
+}
+
 static void AlltoAllvPrintRankBandwidths(int nranks, size_t total_bytes, double sec) {
   if (alltoallv_use_generated_pattern) {
     printf("# NCCL_TESTS_ALLTOALLV_PRINT_SUMMARY: mode=generated nranks=%d total_bytes=%zu spread=%.3f time_usec=%.2f\n",
@@ -487,8 +519,9 @@ static void AlltoAllvPrintRankBandwidths(int nranks, size_t total_bytes, double 
 
     size_t rank_max_bytes = MAX(rank_send_bytes, rank_recv_bytes);
     double rank_alg_bw = (double)rank_max_bytes / 1.0E9 / sec;
-    double factor = ((double)(nranks-1))/((double)(nranks));
-    double rank_bus_bw = rank_alg_bw * factor;
+    size_t rank_peer_send_bytes, rank_peer_recv_bytes;
+    AlltoAllvGetRankPeerBytes(rank, nranks, total_bytes, &rank_peer_send_bytes, &rank_peer_recv_bytes);
+    double rank_bus_bw = (double)MAX(rank_peer_send_bytes, rank_peer_recv_bytes) / 1.0E9 / sec;
 
     printf("#   rank=%d send_bytes=%zu recv_bytes=%zu alg_bw=%.2f bus_bw=%.2f\n",
           rank, rank_send_bytes, rank_recv_bytes, rank_alg_bw, rank_bus_bw);
@@ -503,8 +536,9 @@ void AlltoAllvGetBw(size_t count, size_t typesize, double sec, double* algBw, do
   double baseBw = (double)max_bytes / 1.0E9 / sec;
 
   *algBw = baseBw;
-  double factor = ((double)(nranks-1))/((double)(nranks));
-  *busBw = baseBw * factor;
+  // Count only the bytes exchanged with other ranks: with the default distance-weighted pattern (spread 1.0) a rank
+  // sends nothing to itself, so a fixed (n-1)/n factor would understate busbw by 1/n.
+  *busBw = (double)AlltoAllvGetMaxPeerBytes(nranks, total_bytes) / 1.0E9 / sec;
 
   if (alltoallv_print_summary && is_main_thread) {
     // print per-rank bandwidth summary (rank 0 computes and prints all ranks)
