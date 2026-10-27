@@ -101,9 +101,15 @@ testResult_t HyperCubeRunTest(struct threadArgs* args, int root, ncclDataType_t 
     run_typenames = test_typenames;
   }
 
-  // Check if this is a power of 2
+  // With several GPUs per thread, startColl wraps the runColl calls of all GPUs in one ncclGroupStart/End, so the
+  // per-step groups below are merged into one: a step can send data that the previous step has not received yet
+  // (wrong results with 4 or more ranks), and the local cudaMemcpyAsync is issued while another GPU is current
+  // ('invalid argument' when the GPUs have no P2P access). Run with one GPU per thread instead.
   int nRanks = args->nProcs*args->nThreads*args->nGpus;
-  if (nRanks && !(nRanks & (nRanks - 1))) {
+  if (args->nGpus > 1) {
+    printf("hypercube requires one GPU per thread (-g 1, got -g %d); use -t %d -g 1 or one process per GPU, skipping\n",
+           args->nGpus, args->nThreads*args->nGpus);
+  } else if (nRanks && !(nRanks & (nRanks - 1))) {  // power of 2
     for (int i=0; i<type_count; i++) {
       TESTCHECK(TimeTest(args, run_types[i], run_typenames[i], (ncclRedOp_t)0, "", -1));
     }
