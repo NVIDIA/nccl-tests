@@ -1,0 +1,4 @@
+nccl4py[cu13]>=0.6.0
+# CuPy 14's NVRTC path needs the CUDA toolkit components supplied by the ctk extra.
+cupy-cuda13x[ctk]>=14.0
+mpi4py

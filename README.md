@@ -143,6 +143,12 @@ Measures latency and bandwidth / message rate of NCCL GIN point-to-point device 
 
 See [src/device_api/gin/README.md](src/device_api/gin/README.md) for the full list of benchmarks and their options.
 
+### CuTe DSL device API microbenchmarks (`device_api/dsl`)
+
+Measures NCCL GIN put and LSACopy ping latency, ping-pong latency, and bandwidth from Python CuTe DSL kernels. Requires NCCL4Py, CuPy, MPI, and exactly two ranks. GIN runs across nodes; LSACopy runs on two GPUs in the same LSA team.
+
+See [src/device_api/dsl/README.md](src/device_api/dsl/README.md) for dependencies, launch commands, and options.
+
 ## Copyright
 
 NCCL tests are provided under the BSD license. All source code and accompanying documentation is copyright (c) 2016-2026, NVIDIA CORPORATION. All rights reserved.
