@@ -30,6 +30,12 @@ void jsonIdentifyWriter(bool is_writer);
 // Write end time and close top-level object. Reset json state and close output file.
 void jsonOutputFinalize();
 
+class ProfilerPause {
+ public:
+  ProfilerPause();
+  ~ProfilerPause();
+};
+
 struct IterStats {
   double min, max, avg, p50, p95, p99, stdev;
 };

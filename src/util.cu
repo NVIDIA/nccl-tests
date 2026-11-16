@@ -95,6 +95,15 @@ struct proxyEvent {
 static struct groupEvent group;
 static struct taskEvent task;
 static struct proxyEvent proxy;
+static std::atomic<bool> profilerPaused(false);
+
+ProfilerPause::ProfilerPause() {
+  if (tuning) profilerPaused.store(true, std::memory_order_relaxed);
+}
+
+ProfilerPause::~ProfilerPause() {
+  if (tuning) profilerPaused.store(false, std::memory_order_relaxed);
+}
 
 #define JSON_FILE_VERSION 4
 
@@ -1051,6 +1060,10 @@ static ncclResult_t ncclProfilerStartEventCommon(void** eHandle, EventDescr* eDe
 }
 
 static ncclResult_t ncclProfilerStartEvent_v5(void*, void** eHandle, ncclProfilerEventDescr_v5_t* eDescr) {
+  if (profilerPaused.load(std::memory_order_relaxed)) {
+    *eHandle = nullptr;
+    return ncclSuccess;
+  }
   if (eDescr->type == ncclProfileColl) {
     ncclProfilerStartCollEvent(eHandle, eDescr->type, "GEN", eDescr->coll.algo, eDescr->coll.proto, nullptr,
                                eDescr->coll.nChannels, eDescr->coll.nWarps);
@@ -1060,6 +1073,10 @@ static ncclResult_t ncclProfilerStartEvent_v5(void*, void** eHandle, ncclProfile
 }
 
 static ncclResult_t ncclProfilerStartEvent_v6(void*, void** eHandle, ncclProfilerEventDescr_v6_t* eDescr) {
+  if (profilerPaused.load(std::memory_order_relaxed)) {
+    *eHandle = nullptr;
+    return ncclSuccess;
+  }
   if (eDescr->type == ncclProfileCeColl) {
     ncclProfilerStartCeEvent(eHandle, eDescr->type, eDescr->ceColl.syncStrategy);
     return ncclSuccess;
@@ -1073,6 +1090,10 @@ static ncclResult_t ncclProfilerStartEvent_v6(void*, void** eHandle, ncclProfile
 }
 
 static ncclResult_t ncclProfilerStartEvent_v7(void*, void** eHandle, ncclProfilerEventDescr_v7_t* eDescr) {
+  if (profilerPaused.load(std::memory_order_relaxed)) {
+    *eHandle = nullptr;
+    return ncclSuccess;
+  }
   if (eDescr->type == ncclProfileColl) {
     const char* kernelVariant = eDescr->coll.isSymColl ? eDescr->coll.kernelVariant : nullptr;
     if (kernelVariant && eDescr->coll.func) {
@@ -1093,6 +1114,7 @@ static ncclResult_t ncclProfilerStartEvent_v7(void*, void** eHandle, ncclProfile
 }
 
 static ncclResult_t ncclProfilerStopEvent(void* eHandle) {
+  if (eHandle == nullptr) return ncclSuccess;
   uint64_t type = *(uint64_t *)eHandle;
   switch (type) {
     case ncclProfileGroup: {

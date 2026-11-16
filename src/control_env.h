@@ -234,6 +234,7 @@ class TestControl {
       }
     }
 
+    ProfilerPause pause;
     NCCLCHECK(ncclGroupStart());
     ncclResult_t result = ncclSuccess;
     cudaError_t cudaResult = cudaSuccess;
