@@ -1,0 +1,145 @@
+# MPI-free nccl-tests: two processes, one GPU per pod, on two different nodes.
+#
+# Prerequisites:
+# - Kubernetes 1.31+ (Indexed Jobs and stable podFailurePolicy).
+# - NVIDIA drivers, container runtime integration, and GPU device plugin.
+# - An image containing this MR's non-MPI binaries, NCCL/CUDA runtime libraries,
+#   /bin/sh, and getent. Replace the example image and binary path below.
+# - Two schedulable GPU nodes. This ordinary Job does not provide gang scheduling;
+#   all ranks must fit concurrently. Use your cluster's batch scheduler if needed.
+# - Pod-to-pod connectivity and DNS. NetworkPolicy must permit communication
+#   between all test pods, including NCCL's dynamically chosen TCP ports.
+#   The Service below provides discovery; it is not a proxy for NCCL traffic.
+#
+# Run in your chosen namespace:
+#   kubectl apply -f examples/kubernetes.yaml
+#   kubectl get pods -l batch.kubernetes.io/job-name=nccl-tests -w
+#   kubectl logs -f -l batch.kubernetes.io/job-name=nccl-tests \
+#     --all-containers=true --prefix=true --max-log-requests=2
+#   kubectl wait --for=condition=complete job/nccl-tests --timeout=650s
+#
+# Inspect failures with: kubectl describe job nccl-tests
+# A failed rank cannot rejoin this fixed communicator. Rerun the entire Job:
+#   kubectl delete -f examples/kubernetes.yaml --ignore-not-found --wait=true
+#   kubectl apply -f examples/kubernetes.yaml
+#
+# Scaling: keep completions, parallelism, and NCCL_TESTS_COMM_NRANKS equal.
+# Each pod is one process. To use multiple GPUs in each pod, change both the
+# nvidia.com/gpu limit and -g; keep the process count unchanged and local rank 0.
+# Renaming: update the Service/Job names, selectors, subdomain, and MASTER_ADDR
+# together. Concurrent runs need distinct names to keep bootstrap endpoints apart.
+#
+# References:
+# https://kubernetes.io/docs/tasks/job/job-with-pod-to-pod-communication/
+# https://kubernetes.io/docs/tasks/job/pod-failure-policy/
+# https://kubernetes.io/docs/tasks/manage-gpus/scheduling-gpus/
+apiVersion: v1
+kind: Service
+metadata:
+  name: nccl-tests
+spec:
+  clusterIP: None
+  # Publish rank zero before application readiness to avoid a bootstrap/DNS cycle.
+  publishNotReadyAddresses: true
+  selector:
+    batch.kubernetes.io/job-name: nccl-tests
+  ports:
+    - name: bootstrap
+      port: 45678
+      targetPort: 45678
+      protocol: TCP
+---
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: nccl-tests
+spec:
+  completionMode: Indexed
+  completions: 2
+  parallelism: 2
+  backoffLimit: 0
+  # Bound scheduling, image pulls, bootstrap, and runtime; retain pods/logs afterward.
+  activeDeadlineSeconds: 600
+  # Stop the whole Job if a rank fails; never restart one rank in isolation.
+  podFailurePolicy:
+    rules:
+      - action: FailJob
+        onExitCodes:
+          containerName: nccl-tests
+          operator: NotIn
+          values: [0]
+  template:
+    spec:
+      restartPolicy: Never
+      automountServiceAccountToken: false
+      # Indexed Jobs assign hostnames nccl-tests-0, nccl-tests-1, etc.
+      # The subdomain must match the headless Service in the same namespace.
+      subdomain: nccl-tests
+      # Uncomment if this RuntimeClass is required and configured in your cluster.
+      # runtimeClassName: nvidia
+      affinity:
+        podAntiAffinity:
+          requiredDuringSchedulingIgnoredDuringExecution:
+            - labelSelector:
+                matchLabels:
+                  batch.kubernetes.io/job-name: nccl-tests
+              topologyKey: kubernetes.io/hostname
+      containers:
+        - name: nccl-tests
+          image: registry.example.com/nccl-tests:non-mpi
+          imagePullPolicy: IfNotPresent
+          env:
+            # Kubernetes expands this variable in NCCL_COMM_ID below.
+            - name: MASTER_ADDR
+              value: nccl-tests-0.nccl-tests
+            - name: NCCL_COMM_ID
+              value: "$(MASTER_ADDR):45678"
+            - name: NCCL_TESTS_COMM_RANK
+              valueFrom:
+                fieldRef:
+                  fieldPath: metadata.annotations['batch.kubernetes.io/job-completion-index']
+            - name: NCCL_TESTS_COMM_NRANKS
+              value: "2"
+            # GPUs are numbered within the container's device-plugin allocation.
+            - name: NCCL_TESTS_COMM_LOCAL_RANK
+              value: "0"
+            - name: NCCL_DEBUG
+              value: INFO
+            # Portable TCP baseline, without requiring an RDMA device plugin.
+            # For IB/RoCE, remove this override and configure your cluster's
+            # RDMA resource requests, devices, interfaces, and memlock limits.
+            - name: NCCL_NET
+              value: Socket
+          command: ["/bin/sh", "-ec"]
+          args:
+            - |
+              # Endpoints/DNS may appear after the container starts. No API access needed.
+              attempts=0
+              until getent hosts "$MASTER_ADDR" >/dev/null; do
+                attempts=$((attempts + 1))
+                if [ "$attempts" -ge 120 ]; then
+                  echo "Bootstrap DNS did not resolve: $MASTER_ADDR" >&2
+                  exit 1
+                fi
+                sleep 1
+              done
+              exec /opt/nccl-tests/build/all_reduce_perf \
+                -b 8 -e 128M -f 2 -g 1 -t 1 -w 5 -n 20 -c 1 -T 120
+          resources:
+            requests:
+              cpu: "2"
+              memory: 4Gi
+            limits:
+              cpu: "2"
+              memory: 4Gi
+              nvidia.com/gpu: 1
+          volumeMounts:
+            - name: shm
+              mountPath: /dev/shm
+      volumes:
+        # Useful when expanding to multiple local GPUs; actual usage counts
+        # against the pod memory limit. Avoid the container's small default shm.
+        - name: shm
+          emptyDir:
+            medium: Memory
+            sizeLimit: 1Gi

@@ -73,6 +73,23 @@ For non-MPI launches, `-J,--output_file` creates a JSON file only on process ran
 
 When `NCCL_COMM_ID` is set, non-MPI builds can also derive the process rank and process count from common launcher variables: `SLURM_PROCID` with `SLURM_NTASKS` or `SLURM_NPROCS`, `PMI_RANK` with `PMI_SIZE`, `PMIX_RANK` with `PMIX_SIZE`, `OMPI_COMM_WORLD_RANK` with `OMPI_COMM_WORLD_SIZE`, `MV2_COMM_WORLD_RANK` with `MV2_COMM_WORLD_SIZE`, or `RANK` with `WORLD_SIZE`. Explicit `NCCL_TESTS_COMM_RANK` and `NCCL_TESTS_COMM_NRANKS` take precedence.
 
+For SLURM allocations, `scripts/slurm-nccl-tests.sh` can either launch the test with `srun` or run as the command wrapper inside an existing `srun` launch. Bootstrap discovery runs inside the actual step, using `SLURM_STEP_NODELIST` or, as a fallback, `SLURM_JOB_NODELIST`. A supplied `NCCL_COMM_ID` skips host discovery and does not require `scontrol`:
+
+```shell
+$ scripts/slurm-nccl-tests.sh --ntasks=2 --gpus-per-task=1 -- ./build/all_reduce_perf -b 8 -e 128M -g 1
+$ srun --kill-on-bad-exit=1 --ntasks=2 --gpus-per-task=1 scripts/slurm-nccl-tests.sh ./build/all_reduce_perf -b 8 -e 128M -g 1
+```
+
+The SLURM helper is quiet by default; pass `-v,--verbose` or set `NCCL_TESTS_SLURM_VERBOSE=1` to print the derived `NCCL_COMM_ID` and nodelist diagnostics.
+
+Launcher mode defaults to `--kill-on-bad-exit=1`; include that option when invoking `srun` yourself so a failed rank terminates its peers. `NCCL_TESTS_COMM_PORT` overrides the derived bootstrap port and must be in 1-65535.
+
+The default bootstrap port incorporates both the SLURM job and step IDs to separate concurrent steps within an allocation. It is not a collision-free port reservation; use an explicit port when needed.
+
+When `CUDA_VISIBLE_DEVICES` contains a single device, the wrapper defaults `NCCL_TESTS_COMM_LOCAL_RANK` to `0`, preserving an explicit override. For task-isolated sets of multiple GPUs, set `NCCL_TESTS_COMM_LOCAL_RANK=0` explicitly and match `-g` to the visible allocation. When all node GPUs are visible to every task, leave local-rank assignment to the launcher instead.
+
+For Kubernetes, [examples/kubernetes.yaml](examples/kubernetes.yaml) provides an annotated two-node Indexed Job and headless Service. It assigns one process and GPU per pod, injects rank variables directly, and uses rank-zero pod DNS for bootstrap. Replace the image and binary path before applying it; the example uses TCP, with notes for adapting it to RDMA.
+
 ### Performance
 
 See the [Performance](doc/PERFORMANCE.md) page for explanation about numbers, and in particular the "busbw" column.
