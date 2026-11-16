@@ -117,6 +117,8 @@ ${DST_DIR}/%$(NAME_SUFFIX).o: %.cu common.h util.h $(TEST_VERIFIABLE_HDRS)
 
 ${DST_DIR}/util$(NAME_SUFFIX).o: $(GIT_VERSION_FILE) nccl_profiler.h profiler_v5.h profiler_v6.h profiler_v7.h
 
+${DST_DIR}/common$(NAME_SUFFIX).o: control.h control_mpi.h control_env.h
+
 ${DST_DIR}/timer.o: timer.cc timer.h
 	@printf "Compiling  %-35s > %s\n" $< $@
 	@mkdir -p ${DST_DIR}

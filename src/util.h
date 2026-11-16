@@ -42,7 +42,7 @@ void writeBenchMarkLineNullBody();
 void writeBenchmarkLineBody(double timeUsec, double algBw, double busBw, bool reportErrors, int64_t wrongElts, bool report_cputime, bool report_timestamps, bool out_of_place);
 void writePerIterReport(const struct IterStats* stats, const double* iterTimes, int nIters, int skippedIters, bool out_of_place, const double* allProcessTimes, int nProcs);
 void writeTimestamp();
-testResult_t writeDeviceReport(size_t *maxMem, int localRank, int proc, int totalProcs, int color, const char hostname[], const char *program_name);
+testResult_t writeDeviceReport(size_t *maxMem, int localRank, int proc, int totalProcs, int color, const char hostname[], const char *program_name, bool printAllProcs);
 void writeResultHeader(bool report_cputime, bool report_timestamps);
 void writeResultFooter(const int errors[], const double bw[], double check_avg_bw, const char *program_name);
 void finalizeFooter();

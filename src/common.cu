@@ -9,6 +9,7 @@
 #include <cstdio>
 #include <type_traits>
 #include <limits>
+#include <errno.h>
 #include <string.h>
 #include <ctype.h>
 #include <mutex>
@@ -18,6 +19,7 @@
 #include "cuda.h"
 
 #include "util.h"
+#include "control.h"
 #include "../verifiable/verifiable.h"
 
 #if defined(NCCL_OS_LINUX)
@@ -114,6 +116,7 @@ static int hostRmaImpl = 0;
 int unalign = 0;
 int memory_report = 0;
 int tuning = 0;
+static TestControl control;
 
 int deviceCtaCount = 16; // Default number of CTAs for device implementation
 int rmaCtxCount = 1;     // Number of RMA contexts to provision for host RMA (-H)
@@ -290,50 +293,52 @@ testResult_t InitData(void* data, const size_t count, size_t offset, ncclDataTyp
   return testSuccess;
 }
 
-void Barrier(struct threadArgs *args) {
+testResult_t Barrier(struct threadArgs *args) {
   thread_local int epoch = 0;
   static std::mutex lock[2];
   static std::condition_variable cond[2];
   static int counter[2] = {0, 0};
+  static testResult_t result[2];
 
   std::unique_lock<std::mutex> ul(lock[epoch]);
-  if(++counter[epoch] == args->nThreads)
+  if (++counter[epoch] == args->nThreads)
     cond[epoch].notify_all();
 
-  if(args->thread+1 == args->nThreads) {
-    while(counter[epoch] != args->nThreads)
+  if (args->thread+1 == args->nThreads) {
+    while (counter[epoch] != args->nThreads)
       cond[epoch].wait(ul);
-    #ifdef MPI_SUPPORT
-      MPI_Barrier(MPI_COMM_WORLD);
-    #endif
+    result[epoch] = control.barrier();
     counter[epoch] = 0;
     cond[epoch].notify_all();
   }
   else {
-    while(counter[epoch] != 0)
+    while (counter[epoch] != 0)
       cond[epoch].wait(ul);
   }
+  testResult_t ret = result[epoch];
   ul.unlock();
   epoch ^= 1;
+  return ret;
 }
 
 // Inter-thread/process barrier+allreduce. The quality of the return value
 // for average=0 (which means broadcast from rank=0) is dubious. The returned
 // value will actually be the result of process-local broadcast from the local thread=0.
 template<typename T>
-void Allreduce(struct threadArgs* args, T* value, int average) {
+testResult_t Allreduce(struct threadArgs* args, T* value, int average) {
   thread_local int epoch = 0;
   static std::mutex lock[2];
   static std::condition_variable cond[2];
   static T accumulator[2];
   static int counter[2] = {0, 0};
+  static testResult_t result[2];
 
   std::unique_lock<std::mutex> ul(lock[epoch]);
-  if(counter[epoch] == 0) {
-    if(average != 0 || args->thread == 0) accumulator[epoch] = *value;
+  if (counter[epoch] == 0) {
+    if (average != 0 || args->thread == 0) accumulator[epoch] = *value;
   } else {
-    switch(average) {
-    case /*r0*/ 0: if(args->thread == 0) accumulator[epoch] = *value; break;
+    switch (average) {
+    case /*r0*/ 0: if (args->thread == 0) accumulator[epoch] = *value; break;
     case /*avg*/1: accumulator[epoch] += *value; break;
     case /*min*/2: accumulator[epoch] = std::min<T>(accumulator[epoch], *value); break;
     case /*max*/3: accumulator[epoch] = std::max<T>(accumulator[epoch], *value); break;
@@ -341,39 +346,27 @@ void Allreduce(struct threadArgs* args, T* value, int average) {
     }
   }
 
-  if(++counter[epoch] == args->nThreads)
+  if (++counter[epoch] == args->nThreads)
     cond[epoch].notify_all();
 
-  if(args->thread+1 == args->nThreads) {
-    while(counter[epoch] != args->nThreads)
+  if (args->thread+1 == args->nThreads) {
+    while (counter[epoch] != args->nThreads)
       cond[epoch].wait(ul);
-
-    #ifdef MPI_SUPPORT
-    if(average != 0) {
-      static_assert(std::is_same<T, long long>::value || std::is_same<T, double>::value, "Allreduce<T> only for T in {long long, double}");
-      MPI_Datatype ty = std::is_same<T, long long>::value ? MPI_LONG_LONG :
-                        std::is_same<T, double>::value ? MPI_DOUBLE :
-                        MPI_Datatype();
-      MPI_Op op = average == 1 ? MPI_SUM :
-                  average == 2 ? MPI_MIN :
-                  average == 3 ? MPI_MAX :
-                  average == 4 ? MPI_SUM : MPI_Op();
-      MPI_Allreduce(MPI_IN_PLACE, (void*)&accumulator[epoch], 1, ty, op, MPI_COMM_WORLD);
-    }
-    #endif
-
-    if(average == 1) accumulator[epoch] /= args->totalProcs*args->nThreads;
+    result[epoch] = control.allReduce(&accumulator[epoch], average);
+    if (average == 1 && result[epoch] == testSuccess) accumulator[epoch] /= args->totalProcs*args->nThreads;
     counter[epoch] = 0;
     cond[epoch].notify_all();
   }
   else {
-    while(counter[epoch] != 0)
+    while (counter[epoch] != 0)
       cond[epoch].wait(ul);
   }
+  *value = accumulator[epoch];
+  testResult_t ret = result[epoch];
   ul.unlock();
 
-  *value = accumulator[epoch];
   epoch ^= 1;
+  return ret;
 }
 
 // Reduce per-thread iteration times to a process-local max, then gather one row
@@ -405,30 +398,21 @@ void GatherProcessMaxIterTimes(struct threadArgs* args, double* localTimes, int 
     recvPtr[epoch] = recvBuf;
   }
 
-  if(++counter[epoch] == args->nThreads)
+  if (++counter[epoch] == args->nThreads)
     cond[epoch].notify_all();
 
-  if(args->thread+1 == args->nThreads) {
-    while(counter[epoch] != args->nThreads)
+  if (args->thread+1 == args->nThreads) {
+    while (counter[epoch] != args->nThreads)
       cond[epoch].wait(ul);
 
-    #ifdef MPI_SUPPORT
-    if (args->totalProcs > 1) {
-      MPI_Gather(sendBuf[epoch], nIters, MPI_DOUBLE,
-                 recvPtr[epoch], nIters, MPI_DOUBLE,
-                 0, MPI_COMM_WORLD);
-    }
-    #else
-    if (recvPtr[epoch])
-      memcpy(recvPtr[epoch], sendBuf[epoch], nIters * sizeof(double));
-    #endif
+    control.gather(sendBuf[epoch], nIters, recvPtr[epoch]);
 
     memcpy(localTimes, sendBuf[epoch], nIters * sizeof(double));
     counter[epoch] = 0;
     cond[epoch].notify_all();
   }
   else {
-    while(counter[epoch] != 0)
+    while (counter[epoch] != 0)
       cond[epoch].wait(ul);
     memcpy(localTimes, sendBuf[epoch], nIters * sizeof(double));
   }
@@ -648,7 +632,7 @@ testResult_t startColl(struct threadArgs* args, ncclDataType_t type, ncclRedOp_t
     // Complete op before returning
     TESTCHECK(testStreamSynchronize(args->nGpus, args->streams, args->comms));
   }
-  if (blocking_coll == 1) Barrier(args);
+  if(blocking_coll == 1) TESTCHECK(Barrier(args));
   return testSuccess;
 }
 
@@ -730,7 +714,7 @@ testResult_t BenchTime(struct threadArgs* args, ncclDataType_t type, ncclRedOp_t
   }
   TESTCHECK(completeColl(args));
 
-  Barrier(args);
+  TESTCHECK(Barrier(args));
 
 #if CUDART_VERSION >= 11030
   std::vector<cudaGraph_t> graphs(args->nGpus);
@@ -766,7 +750,7 @@ testResult_t BenchTime(struct threadArgs* args, ncclDataType_t type, ncclRedOp_t
       TESTCHECK(testStreamSynchronize(args->nGpus, args->streams, args->comms));
       if (pairedEvents) TESTCHECK(recordEvents(args, iters, iter, 1));
       collOnlySec += tim.elapsed() - t0;
-      Barrier(args);
+      TESTCHECK(Barrier(args));
     }
   }
   if (record && !pairedEvents) TESTCHECK(recordEvents(args, iters, iters));
@@ -782,7 +766,7 @@ testResult_t BenchTime(struct threadArgs* args, ncclDataType_t type, ncclRedOp_t
       CUDACHECK(cudaGraphInstantiate(graphExec.data()+i, graphs[i], NULL, NULL, 0));
     }
     // Resync CPU, restart timing, launch cuda graph
-    Barrier(args);
+    TESTCHECK(Barrier(args));
     tim.reset();
     for (int l=0; l<cudaGraphLaunches; l++) {
       for (int i=0; i<args->nGpus; i++) {
@@ -808,7 +792,7 @@ testResult_t BenchTime(struct threadArgs* args, ncclDataType_t type, ncclRedOp_t
     TESTCHECK(destroyEvents(args, iters));
   }
 
-  Allreduce(args, &deltaSec, average);
+  TESTCHECK(Allreduce(args, &deltaSec, average));
 
 #if CUDART_VERSION >= 11030
   if (cudaGraphLaunches >= 1) {
@@ -823,7 +807,7 @@ testResult_t BenchTime(struct threadArgs* args, ncclDataType_t type, ncclRedOp_t
   double algBw, busBw;
   args->collTest->getBw(count, wordSize(type), deltaSec, &algBw, &busBw, args->nProcs*args->nThreads*args->nGpus);
 
-  Barrier(args);
+  TESTCHECK(Barrier(args));
 
   int64_t wrongElts = 0;
   static thread_local int rep = 0;
@@ -878,7 +862,7 @@ testResult_t BenchTime(struct threadArgs* args, ncclDataType_t type, ncclRedOp_t
       //aggregate delta from all threads and procs
       long long wrongElts1 = wrongElts;
       //if (wrongElts) fprintf(stderr, "\nERROR: Data corruption : rank %d size %ld wrongElts %ld\n", args->proc, args->expectedBytes, wrongElts);
-      Allreduce(args, &wrongElts1, /*sum*/4);
+      TESTCHECK(Allreduce(args, &wrongElts1, /*sum*/4));
       wrongElts = wrongElts1;
       if (wrongElts) break;
   }
@@ -899,7 +883,11 @@ testResult_t BenchTime(struct threadArgs* args, ncclDataType_t type, ncclRedOp_t
     }
 
     double* allProcessTimes = NULL;
-    int nProcessRows = args->totalProcs;
+    int nProcessRows = control.hasProcessTiming() ? args->totalProcs : 1;
+    if (control.needsComms()) {
+      for (int iter = 0; iter < iters; iter++)
+        TESTCHECK(Allreduce(args, &iterTimes[iter], /*max*/3));
+    }
     if (nProcessRows > 1) {
       if (is_main_thread)
         allProcessTimes = (double*)malloc(nProcessRows * iters * sizeof(double));
@@ -941,7 +929,7 @@ void setupArgs(size_t size, ncclDataType_t type, struct threadArgs* args) {
 
 testResult_t TimeTest(struct threadArgs* args, ncclDataType_t type, const char* typeName, ncclRedOp_t op, const char* opName, int root) {
   // Sync to avoid first-call timeout
-  Barrier(args);
+  TESTCHECK(Barrier(args));
 
   // Add forced misalignment
   for (int i = 0; i < args->nGpus; i++) {
@@ -1146,7 +1134,7 @@ testResult_t AllocateBuffs(void **sendbuff, size_t sendBytes, void **recvbuff, s
     return testSuccess;
 }
 
-testResult_t run(); // Main function
+testResult_t run(const char* output_file, int argc, char** argv, char** envp); // Main function
 
 int main(int argc, char* argv[], char **envp) {
   // Make sure everyline is flushed so that we see the progress of the test
@@ -1526,19 +1514,16 @@ int main(int argc, char* argv[], char **envp) {
 #endif
   }
 
-#ifdef MPI_SUPPORT
-  MPI_Init(&argc, &argv);
-#endif
+  TESTCHECK(control.init(&argc, &argv));
 
   const output_file_type_t output_file_type = classifyOutputFile(output_file);
-  outputFileInit(output_file_type, output_file, argc, argv, envp);
+
+  testResult_t result = run(output_file, argc, argv, envp);
 
   if(output_file) {
     free(output_file);
     output_file = nullptr;
   }
-
-  testResult_t result = run();
 
   outputFileFinalize(output_file_type);
 
@@ -1547,103 +1532,57 @@ int main(int argc, char* argv[], char **envp) {
   return 0;
 }
 
-#ifdef MPI_SUPPORT
-// parse int for base 2/10/16, will ignore first whitespaces
-static bool parseInt(char *s, int *num) {
-  char *p = NULL;
-  if (!s || !num)
-    return false;
-  while (*s && isspace(*s)) ++s;
-  if (!*s) return false;
-
-  if (ncclTestStrncasecmp(s, "0b", 2) == 0)
-    *num = (int)strtoul(s + 2, &p, 2);
-  else
-    *num = (int)strtoul(s, &p, 0);
-
-  if (p == s)
-    return false;
-  return true;
-}
-#endif
-
-testResult_t run() {
-  int totalProcs = 1, proc = 0, ncclProcs = 1, ncclProc = 0, color = 0;
-  int localRank = 0;
-  char hostname[1024];
-  getHostName(hostname, 1024);
-
-#ifdef MPI_SUPPORT
-  MPI_Comm_size(MPI_COMM_WORLD, &totalProcs);
-  MPI_Comm_rank(MPI_COMM_WORLD, &proc);
-  std::vector<uint64_t> hostHashs(totalProcs);
-  hostHashs[proc] = getHostHash(hostname);
-  MPI_Allgather(MPI_IN_PLACE, 0, MPI_DATATYPE_NULL, hostHashs.data(), sizeof(uint64_t), MPI_BYTE, MPI_COMM_WORLD);
-  for (int p=0; p<totalProcs; p++) {
-    if (p == proc) break;
-    if (hostHashs[p] == hostHashs[proc]) localRank++;
-  }
-
-  char *splitMaskEnv = NULL;
-  if (splitMaskEnv = getenv("NCCL_TESTS_SPLIT_MASK")) {
-    color = proc & strtoul(splitMaskEnv, NULL, 16);
-  } else if (splitMaskEnv = getenv("NCCL_TESTS_SPLIT")) {
-    if (
-      (ncclTestStrncasecmp(splitMaskEnv, "AND", strlen("AND")) == 0 && parseInt(splitMaskEnv + strlen("AND"), &color)) ||
-      (ncclTestStrncasecmp(splitMaskEnv, "&", strlen("&")) == 0 && parseInt(splitMaskEnv + strlen("&"), &color))
-    )
-        color = proc & color;
-    if (
-      (ncclTestStrncasecmp(splitMaskEnv, "OR", strlen("OR")) == 0 && parseInt(splitMaskEnv + strlen("OR"), &color)) ||
-      (ncclTestStrncasecmp(splitMaskEnv, "|", strlen("|")) == 0 && parseInt(splitMaskEnv + strlen("|"), &color))
-    )
-        color = proc | color;
-    if (
-      (ncclTestStrncasecmp(splitMaskEnv, "MOD", strlen("MOD")) == 0 && parseInt(splitMaskEnv + strlen("MOD"), &color)) ||
-      (ncclTestStrncasecmp(splitMaskEnv, "%", strlen("%")) == 0 && parseInt(splitMaskEnv + strlen("%"), &color))
-    )
-        color = proc % color;
-    if (
-      (ncclTestStrncasecmp(splitMaskEnv, "DIV", strlen("DIV")) == 0 && parseInt(splitMaskEnv + strlen("DIV"), &color)) ||
-      (ncclTestStrncasecmp(splitMaskEnv, "/", strlen("/")) == 0 && parseInt(splitMaskEnv + strlen("/"), &color))
-    )
-        color = proc / color;
-  }
-
-  MPI_Comm mpi_comm;
-  MPI_Comm_split(MPI_COMM_WORLD, color, proc, &mpi_comm);
-  MPI_Comm_size(mpi_comm, &ncclProcs);
-  MPI_Comm_rank(mpi_comm, &ncclProc);
-#endif
-  is_main_thread = is_main_proc = (proc == 0) ? 1 : 0;
-
-  jsonIdentifyWriter(is_main_thread);
-
-  size_t maxMem = ~0;
-  testResult_t report_result = writeDeviceReport(&maxMem, localRank, proc, totalProcs, color, hostname, programName);
-  if(report_result != testSuccess) {
-    return report_result;
-  }
-
-  // Reserve 1GiB of memory for each 16GiB installed, but limit to a max of 4GiB
+static void updateMaxBytes(size_t maxMem, int proc) {
   const size_t GB = (1ULL << 30);
   size_t reserveMem =  std::min(DIVUP(maxMem, 16*GB) * 1*GB, 4*GB);
-  // We need sendbuff, recvbuff, expected (when datacheck enabled), plus 1G for the rest.
   size_t memMaxBytes = (maxMem - reserveMem - 1*GB) / (datacheck ? 3 : 2);
   if (maxBytes > memMaxBytes) {
     maxBytes = memMaxBytes;
     if (minBytes > maxBytes) minBytes = maxBytes;
     if (proc == 0) printf("#\n# Reducing maxBytes to %ld due to memory limitation\n", maxBytes);
   }
+}
+
+static void filterFp8Types() {
+#if defined(__CUDA_FP8_TYPES_EXIST__)
+  if (NCCL_VERSION_CODE >= NCCL_VERSION(2,24,0) && test_ncclVersion >= NCCL_VERSION(2,24,0)) {
+    if (minCudaArch < 900) { // Filter out fp8 on pre-Hopper hardware
+      int n = 0;
+      for (int i=0; i < test_typenum; i++) {
+        if (!(test_types[i] == ncclFloat8e4m3 || test_types[i] == ncclFloat8e5m2)) {
+          test_types[n] = test_types[i];
+          test_typenames[n] = test_typenames[i];
+          n += 1;
+        }
+      }
+      test_typenum = n;
+    }
+  }
+#endif
+}
+
+testResult_t run(const char* output_file, int argc, char** argv, char** envp) {
+  char hostname[1024];
+  getHostName(hostname, 1024);
+  TESTCHECK(control.discoverRanks(hostname, nThreads, nGpus, parallel_init));
+  const int totalProcs = control.totalProcs, proc = control.proc;
+  const int ncclProcs = control.ncclProcs, ncclProc = control.ncclProc;
+  const int localRank = control.localRank, color = control.color;
+  is_main_thread = is_main_proc = (proc == 0) ? 1 : 0;
+
+  if (is_main_proc) outputFileInit(classifyOutputFile(output_file), output_file, argc, argv, envp);
+  jsonIdentifyWriter(is_main_thread);
+
+  size_t maxMem = ~0;
+  testResult_t report_result = writeDeviceReport(&maxMem, localRank, proc, totalProcs, color, hostname, programName, control.needsComms());
+  if (report_result != testSuccess) {
+    return report_result;
+  }
+
+  updateMaxBytes(maxMem, proc);
 
   ncclUniqueId ncclId;
-  if (ncclProc == 0) {
-    NCCLCHECK(ncclGetUniqueId(&ncclId));
-  }
-#ifdef MPI_SUPPORT
-  MPI_Bcast(&ncclId, sizeof(ncclId), MPI_BYTE, 0, mpi_comm);
-  MPI_Barrier(MPI_COMM_WORLD); // Ensure Bcast is complete for HCOLL
-#endif
+  TESTCHECK(control.getUniqueId(&ncclId));
   std::vector<int> gpus(nGpus*nThreads);
   std::vector<cudaStream_t> streams(nGpus*nThreads);
   std::vector<void*> sendbuffs(nGpus*nThreads);
@@ -1671,24 +1610,10 @@ testResult_t run() {
     minCudaArch = std::min(minCudaArch, 100*archMajor + 10*archMinor);
   }
 
-#ifdef MPI_SUPPORT
-  MPI_Allreduce(MPI_IN_PLACE, &minCudaArch, 1, MPI_INT, MPI_MIN, MPI_COMM_WORLD);
-#endif
-#if defined(__CUDA_FP8_TYPES_EXIST__)
-  if (NCCL_VERSION_CODE >= NCCL_VERSION(2,24,0) && test_ncclVersion >= NCCL_VERSION(2,24,0)) {
-    if (minCudaArch < 900) { // Filter out fp8 on pre-Hopper hardware
-      int n = 0;
-      for (int i=0; i < test_typenum; i++) {
-        if (!(test_types[i] == ncclFloat8e4m3 || test_types[i] == ncclFloat8e5m2)) {
-          test_types[n] = test_types[i];
-          test_typenames[n] = test_typenames[i];
-          n += 1;
-        }
-      }
-      test_typenum = n;
-    }
+  if (!control.needsComms()) {
+    TESTCHECK(control.allReduce(&minCudaArch, /*min*/2));
+    filterFp8Types();
   }
-#endif
 
   //if parallel init is not selected, use main thread to initialize NCCL
   ncclComm_t* comms = (ncclComm_t*)malloc(sizeof(ncclComm_t)*nThreads*nGpus);
@@ -1711,6 +1636,7 @@ testResult_t run() {
     //if parallel init is not selected, use main thread to initialize NCCL
     TESTCHECK(initComms(comms, nGpus*nThreads, ncclProc*nThreads*nGpus, ncclProcs*nThreads*nGpus, gpus.data(), ncclId));
 
+     TESTCHECK(control.initComms(comms, streams.data(), gpus.data(), nThreads*nGpus));
      // Capture the memory used by the GPUs after initializing the NCCL communicators
      for (int g = 0; g < nGpus; ++g) {
        CUDACHECK(cudaSetDevice(gpus[g]));
@@ -1720,6 +1646,18 @@ testResult_t run() {
        for (int g = 0; g < nGpus; ++g) {
          initGpuMem[t] = std::max(initGpuMem[t], initFreeGpuMem[g] - initFreeGpuMem[g + nGpus]);
        }
+     }
+     if (control.needsComms()) {
+       int globalMinCudaArch = minCudaArch;
+       TESTCHECK(control.allReduce(&globalMinCudaArch, /*min*/2));
+       minCudaArch = globalMinCudaArch;
+       filterFp8Types();
+
+       int64_t globalMaxMem = (int64_t)maxMem;
+       TESTCHECK(control.allReduce(&globalMaxMem, /*min*/2));
+       maxMem = (size_t)globalMaxMem;
+       updateMaxBytes(maxMem, proc);
+       ncclTestEngine.getBuffSize(&sendBytes, &recvBytes, (size_t)maxBytes, (size_t)ncclProcs*nGpus*nThreads);
      }
 #if NCCL_VERSION_CODE >= NCCL_VERSION(2,19,0)
      NCCLCHECK(ncclGroupStart());
@@ -1884,12 +1822,11 @@ testResult_t run() {
     }
   }
 
-#ifdef MPI_SUPPORT
-  MPI_Allreduce(MPI_IN_PLACE, &errors[0], 1, MPI_INT, MPI_SUM, MPI_COMM_WORLD);
-  MPI_Allreduce(MPI_IN_PLACE, &devMemUsed[0], 1, MPI_INT64_T, MPI_MAX, MPI_COMM_WORLD);
-  MPI_Allreduce(MPI_IN_PLACE, &initGpuMem[0], 1, MPI_INT64_T, MPI_MAX, MPI_COMM_WORLD);
-  MPI_Allreduce(MPI_IN_PLACE, &bufferMemory[0], 1, MPI_INT64_T, MPI_MAX, MPI_COMM_WORLD);
-#endif
+  TESTCHECK(control.allReduce(&errors[0], /*sum*/4));
+  TESTCHECK(control.allReduce(&devMemUsed[0], /*max*/3));
+  TESTCHECK(control.allReduce(&initGpuMem[0], /*max*/3));
+  TESTCHECK(control.allReduce(&bufferMemory[0], /*max*/3));
+  TESTCHECK(control.releaseComms());
 
   if (!parallel_init) {
     for(int i=0; i<nGpus*nThreads; ++i) {
@@ -1942,10 +1879,7 @@ testResult_t run() {
   }
   finalizeFooter();
 
-#ifdef MPI_SUPPORT
-  MPI_Comm_free(&mpi_comm);
-  MPI_Finalize();
-#endif
+  TESTCHECK(control.finalize());
 
   writeErrors();
 

@@ -12,7 +12,7 @@ If CUDA is not installed in `/usr/local/cuda`, you may specify `CUDA_HOME`. Simi
 $ make CUDA_HOME=/path/to/cuda NCCL_HOME=/path/to/nccl
 ```
 
-NCCL tests rely on MPI to work on multiple processes, hence multiple nodes. If you want to compile the tests with MPI support, you need to set `MPI=1` and set `MPI_HOME` to the path where MPI is installed.
+NCCL tests can use MPI to work on multiple processes, hence multiple nodes. If you want to compile the tests with MPI support, you need to set `MPI=1` and set `MPI_HOME` to the path where MPI is installed.
 
 ```shell
 $ make MPI=1 MPI_HOME=/path/to/mpi CUDA_HOME=/path/to/cuda NCCL_HOME=/path/to/nccl
@@ -34,7 +34,7 @@ This will generate test binaries with names such as `all_reduce_perf_mpi`.
 
 ## Usage
 
-NCCL tests can run on multiple processes, multiple threads, and multiple CUDA devices per thread. The number of process is managed by MPI and is therefore not passed to the tests as argument. The total number of ranks (=CUDA devices) will be equal to `(number of processes)*(number of threads)*(number of GPUs per thread)`.
+NCCL tests can run on multiple processes, multiple threads, and multiple CUDA devices per thread. With MPI, the number of processes is managed by MPI and is therefore not passed to the tests as an argument. With a non-MPI launch, set `NCCL_TESTS_COMM_NRANKS` and `NCCL_TESTS_COMM_RANK` instead. The total number of ranks (=CUDA devices) will be equal to `(number of processes)*(number of threads)*(number of GPUs per thread)`.
 
 ### Quick examples
 
@@ -51,6 +51,27 @@ Scanning from 8 Bytes to 8GiB (Gibibytes), doubling between each test (`-f 2`).
 ```shell
 $ mpirun -np 64 -N 8 ./build/all_reduce_perf -b 8 -e 8G -f 2 -g 1
 ```
+
+### MPI-free launches
+
+Non-MPI builds can also be launched as multiple processes by setting the same NCCL bootstrap ID and one process rank per process:
+
+```shell
+$ NCCL_COMM_ID=node0:45678 NCCL_TESTS_COMM_NRANKS=2 NCCL_TESTS_COMM_RANK=0 NCCL_TESTS_COMM_LOCAL_RANK=0 ./build/all_reduce_perf -b 8 -e 128M -g 1
+$ NCCL_COMM_ID=node0:45678 NCCL_TESTS_COMM_NRANKS=2 NCCL_TESTS_COMM_RANK=1 NCCL_TESTS_COMM_LOCAL_RANK=1 ./build/all_reduce_perf -b 8 -e 128M -g 1
+```
+
+`NCCL_COMM_ID` uses NCCL's native `<host>:<port>` bootstrap format and must be identical for all processes. IPv6 literals should use bracket syntax, for example `[2001:db8::1]:45678`. `NCCL_TESTS_COMM_NRANKS` and `NCCL_TESTS_COMM_RANK` replace the MPI process count and process rank; the total NCCL rank count remains `(NCCL_TESTS_COMM_NRANKS)*(number of threads)*(number of GPUs per thread)`. `NCCL_TESTS_COMM_LOCAL_RANK` is optional, and common launcher variables such as `LOCAL_RANK`, `SLURM_LOCALID`, `OMPI_COMM_WORLD_LOCAL_RANK`, and `MV2_COMM_WORLD_LOCAL_RANK` are also recognized.
+
+If no local rank environment variable is found, non-MPI multi-process launches fall back to assigning devices from `NCCL_TESTS_COMM_RANK` or launcher rank modulo the number of visible per-process GPU slots. This assumes compatible block placement; supply a local rank explicitly for cyclic or irregular placement.
+
+NOTE: `NCCL_TESTS_SPLIT` and `-p,--parallel_init` are currently only supported with MPI launches.
+
+For non-MPI launches, `-I,--per_iter_timing` reports the maximum iteration time across all ranks; separate per-process timing rows require MPI.
+
+For non-MPI launches, `-J,--output_file` creates a JSON file only on process rank zero. Device metadata is local to rank zero, not gathered across processes; startup device reports from other processes remain available on stdout.
+
+When `NCCL_COMM_ID` is set, non-MPI builds can also derive the process rank and process count from common launcher variables: `SLURM_PROCID` with `SLURM_NTASKS` or `SLURM_NPROCS`, `PMI_RANK` with `PMI_SIZE`, `PMIX_RANK` with `PMIX_SIZE`, `OMPI_COMM_WORLD_RANK` with `OMPI_COMM_WORLD_SIZE`, `MV2_COMM_WORLD_RANK` with `MV2_COMM_WORLD_SIZE`, or `RANK` with `WORLD_SIZE`. Explicit `NCCL_TESTS_COMM_RANK` and `NCCL_TESTS_COMM_NRANKS` take precedence.
 
 ### Performance
 
@@ -110,6 +131,8 @@ Collective perf tests support the same set of arguments :
 NCCL tests allow to partition the set of GPUs into smaller sets, each executing the same operation in parallel.
 To split the GPUs, NCCL will compute a "color" for each rank, based on the `NCCL_TESTS_SPLIT` environment variable, then all ranks
 with the same color will end up in the same group. The resulting group is printed next to each GPU at the beginning of the test.
+
+NOTE: This split mode is currently supported only for MPI launches.
 
 `NCCL_TESTS_SPLIT` takes the following syntax: `<operation><value>`. Operation can be `AND`, `OR`, `MOD` or `DIV`. The `&`, `|`, `%`, and `/` symbols are also supported. The value can be either decimal, hexadecimal (prefixed by `0x`) or binary (prefixed by `0b`).
 
