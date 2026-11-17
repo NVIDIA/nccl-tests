@@ -34,15 +34,19 @@ This will generate test binaries with names such as `all_reduce_perf_mpi`.
 
 ## Usage
 
-NCCL tests can run on multiple processes, multiple threads, and multiple CUDA devices per thread. With MPI, the number of processes is managed by MPI and is therefore not passed to the tests as an argument. With a non-MPI launch, set `NCCL_TESTS_COMM_NRANKS` and `NCCL_TESTS_COMM_RANK` instead. The total number of ranks (=CUDA devices) will be equal to `(number of processes)*(number of threads)*(number of GPUs per thread)`.
+NCCL tests can run on multiple processes, multiple threads, and multiple CUDA devices per thread. With MPI, the number of processes is managed by MPI and is therefore not passed to the tests as an argument. `NCCL_COMM_ID` is required for non-MPI multi-process launches; supply process count and rank through `NCCL_TESTS_COMM_NRANKS` and `NCCL_TESTS_COMM_RANK`, or recognized launcher variables. The total number of ranks (=CUDA devices) will be equal to `(number of processes)*(number of threads)*(number of GPUs per thread)`.
 
 ### Quick examples
+
+#### Single process (single node only)
 
 Run on single node with 8 GPUs (`-g 8`), scanning from 8 Bytes to 128MiB (Mebibytes), doubling between each test (`-f 2`) :
 
 ```shell
 $ ./build/all_reduce_perf -b 8 -e 128M -f 2 -g 8
 ```
+
+#### Multi-process with MPI
 
 Run 64 MPI processes on nodes with 8 GPUs each, for a total of 64 GPUs spread across 8 nodes.
 Scanning from 8 Bytes to 8GiB (Gibibytes), doubling between each test (`-f 2`).
@@ -52,7 +56,7 @@ Scanning from 8 Bytes to 8GiB (Gibibytes), doubling between each test (`-f 2`).
 $ mpirun -np 64 -N 8 ./build/all_reduce_perf -b 8 -e 8G -f 2 -g 1
 ```
 
-### MPI-free launches
+#### Multi-process without MPI
 
 Non-MPI builds can also be launched as multiple processes by setting the same NCCL bootstrap ID and one process rank per process:
 
