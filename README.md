@@ -120,7 +120,7 @@ Collective perf tests support the same set of arguments :
   * `-w,--warmup_iters <warmup iteration count>` number of warmup iterations (not timed). Default : 1.
   * `-m,--agg_iters <aggregation count>` number of operations to aggregate together in each iteration. Default : 1.
   * `-N,--run_cycles <cycle count>` run & print each cycle. Default : 1; 0=infinite.
-  * `-a,--average <0/1/2/3>` Report performance as an average across all ranks (MPI=1 only). <0=Rank0,1=Avg,2=Min,3=Max>. Default : 1.
+  * `-a,--average <0/1/2/3>` Report performance as an average across all ranks. <0=Rank0,1=Avg,2=Min,3=Max>. Default : 1.
   * `-I,--per_iter_timing <0/1>` collect per-iteration CUDA event timings and print summary columns.
     `i_p99` uses nearest-rank percentile and may equal `i_max` with fewer than 100 samples.
     Incompatible with CUDA graph capture (`-G`). Default : 0.
