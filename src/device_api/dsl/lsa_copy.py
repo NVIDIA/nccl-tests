@@ -55,60 +55,59 @@ def lsa_copy_kernel(
     cta, _, _ = cute.arch.block_idx()
     tidx, _, _ = cute.arch.thread_idx()
     if cutlass.const_expr(coop_scope == COOP_SCOPE_THREAD):
-        coop = nccl_cute.thread()
+        coop = nccl_cute.Coop.thread()
     elif cutlass.const_expr(coop_scope == COOP_SCOPE_WARP):
-        coop = nccl_cute.warp()
+        coop = nccl_cute.Coop.warp()
     else:
-        coop = nccl_cute.cta()
+        coop = nccl_cute.Coop.cta()
     peer_lsa = 1 - dev_comm.lsa_rank
     # Destination index 0 maps to lsa_rank - peer_team.rank == peer_lsa.
     peer_team = nccl_cute.Team(
-        nRanks=cutlass.Int32(1),
+        n_ranks=cutlass.Int32(1),
         rank=dev_comm.lsa_rank - peer_lsa,
         stride=cutlass.Int32(1),
     )
     bytes_per_cta = size_bytes // CTAS
-    payload = cute.make_layout(bytes_per_cta)
     offset = cta * bytes_per_cta
-    src = window.tensor(cutlass.Uint8, payload, offset=offset)
-    dst = window.tensor(cutlass.Uint8, payload, offset=size_bytes + offset)
+    src = window.local_pointer(cutlass.Uint8, byte_offset=offset)
+    dst = nccl_cute.SymmetricPointer(window, cutlass.Uint8, byte_offset=size_bytes + offset)
 
     if cutlass.const_expr(benchmark == "pingpong"):
-        if tidx < coop.size:
+        if tidx < coop.num_threads:
             # Rank 0 writes the peer's second region and rank 1 writes the
             # third, so validation can check each direction separately.
-            peer_dst = window.tensor(
+            peer_dst = nccl_cute.SymmetricPointer(
+                window,
                 cutlass.Uint8,
-                payload,
-                offset=(1 + dev_comm.rank) * size_bytes + offset,
+                byte_offset=(1 + dev_comm.rank) * size_bytes + offset,
             )
-            barrier = nccl_cute.lsa_default(coop, dev_comm, index=cta)
-            barrier.sync(coop, nccl_cute.MemoryOrder.ACQ_REL)
+            barrier = nccl_cute.LsaBarrierSession.lsa(coop, dev_comm, index=cta)
+            barrier.sync(order=nccl_cute.MemoryOrder.ACQ_REL)
             for _ in range(ITERS):
                 for turn in range(2):
                     if dev_comm.rank == turn:
                         nccl_cute.lsa_copy(
-                            coop, src, window, peer_dst, bytes_per_cta, team=peer_team
+                            coop, src, peer_dst, bytes_per_cta, team=peer_team
                         )
                     # The receiver waits here for the sender's copy, so ping
                     # and pong never overlap.
-                    barrier.sync(coop, nccl_cute.MemoryOrder.ACQ_REL)
+                    barrier.sync(order=nccl_cute.MemoryOrder.ACQ_REL)
             # Preserve the barrier epoch across validation, warmup and timing.
-            barrier.destroy()
+            barrier.close()
     elif cutlass.const_expr(benchmark == "ping"):
-        if tidx < coop.size:
+        if tidx < coop.num_threads:
             for _ in range(ITERS):
                 nccl_cute.lsa_copy(
-                    coop, src, window, dst, bytes_per_cta, team=peer_team
+                    coop, src, dst, bytes_per_cta, team=peer_team
                 )
                 # Fence on every issuing thread before the next copy.
                 cute.arch.fence_acq_rel_sys()
                 coop.sync()
     elif cutlass.const_expr(benchmark == "bandwidth"):
-        if tidx < coop.size:
+        if tidx < coop.num_threads:
             for _ in range(ITERS):
                 nccl_cute.lsa_copy(
-                    coop, src, window, dst, bytes_per_cta, team=peer_team
+                    coop, src, dst, bytes_per_cta, team=peer_team
                 )
             cute.arch.fence_acq_rel_sys()
             coop.sync()

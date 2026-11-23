@@ -10,8 +10,8 @@ bandwidth reports bytes sent from rank 0 to rank 1 in GB/s.
 These scripts run directly from source and require Linux, MPI, CuPy, NCCL4Py
 with CuTe device API support, and the matching NCCL host library and device
 bitcode. For a standalone environment, install the requirements for the CUDA
-major version in use. They include `nccl4py[cu12]>=0.6.0` or
-`nccl4py[cu13]>=0.6.0` and the corresponding packaged NCCL runtime. From the
+major version in use. They include `nccl4py[cu12]>=0.7.0rc1,<0.8` or
+`nccl4py[cu13]>=0.7.0rc1,<0.8` and the corresponding packaged NCCL runtime. From the
 repository root:
 
 ```shell
@@ -19,7 +19,7 @@ python -m pip install -r src/device_api/dsl/requirements-cu13.txt
 # For CUDA 12, use requirements-cu12.txt instead.
 ```
 
-Both scripts require NCCL4Py 0.6.0 or newer. The loaded NCCL library version
+Both scripts require NCCL4Py 0.7. The loaded NCCL library version
 must exactly match the NCCL version the NCCL4Py bindings were generated from,
 as reported by `nccl.core.show_versions()`. Separately, the library must meet
 the benchmark feature minimum: NCCL 2.30.7 for GIN put and NCCL 2.32.3 for

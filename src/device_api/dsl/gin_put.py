@@ -51,7 +51,6 @@ GIN_TYPES = {
     "gpi": nccl.NcclGinType.GPI,
     "efa-gda": nccl.NcclGinType.EFA_GDA,
 }
-SIGNAL_OP_INC = 0
 
 
 @cute.kernel
@@ -64,11 +63,11 @@ def gin_put_ping_kernel(
     cta, _, _ = cute.arch.block_idx()
     tidx, _, _ = cute.arch.thread_idx()
     if cutlass.const_expr(coop_scope == COOP_SCOPE_THREAD):
-        coop = nccl_cute.thread()
+        coop = nccl_cute.Coop.thread()
     elif cutlass.const_expr(coop_scope == COOP_SCOPE_WARP):
-        coop = nccl_cute.warp()
+        coop = nccl_cute.Coop.warp()
     else:
-        coop = nccl_cute.cta()
+        coop = nccl_cute.Coop.cta()
     world = dev_comm.team_world
     context = cta % cutlass.Int32(dev_comm.gin_context_count)
     gin = dev_comm.gin(
@@ -76,22 +75,17 @@ def gin_put_ping_kernel(
         resource_sharing_mode=nccl_cute.GinResourceSharingMode.GPU,
     )
     bytes_per_cta = size_bytes // CTAS
-    payload = cute.make_layout(bytes_per_cta)
-    buffer = window.tensor(
-        cutlass.Uint8, payload, offset=cta * bytes_per_cta
-    )
+    buffer = nccl_cute.SymmetricPointer(window, cutlass.Uint8, cta * bytes_per_cta)
 
-    if tidx < coop.size:
+    if tidx < coop.num_threads:
         for _ in range(ITERS):
             gin.put(
+                coop,
                 world,
                 1,
-                window,
                 buffer,
-                window,
                 buffer,
-                coop,
-                is_strong=False,
+                bytes_per_cta,
                 given_release=nccl_cute.ThreadScope.THREAD,
                 required_release=nccl_cute.ThreadScope.THREAD,
             )
@@ -108,11 +102,11 @@ def gin_put_pingpong_kernel(
     cta, _, _ = cute.arch.block_idx()
     tidx, _, _ = cute.arch.thread_idx()
     if cutlass.const_expr(coop_scope == COOP_SCOPE_THREAD):
-        coop = nccl_cute.thread()
+        coop = nccl_cute.Coop.thread()
     elif cutlass.const_expr(coop_scope == COOP_SCOPE_WARP):
-        coop = nccl_cute.warp()
+        coop = nccl_cute.Coop.warp()
     else:
-        coop = nccl_cute.cta()
+        coop = nccl_cute.Coop.cta()
     world = dev_comm.team_world
     context = cta % cutlass.Int32(dev_comm.gin_context_count)
     signal_id = cta
@@ -121,56 +115,43 @@ def gin_put_pingpong_kernel(
         resource_sharing_mode=nccl_cute.GinResourceSharingMode.GPU,
     )
     bytes_per_cta = size_bytes // CTAS
-    payload = cute.make_layout(bytes_per_cta)
     send_offset = cta * bytes_per_cta
-    send = window.tensor(cutlass.Uint8, payload, offset=send_offset)
-    recv = window.tensor(
-        cutlass.Uint8, payload, offset=size_bytes + send_offset
-    )
+    send = nccl_cute.SymmetricPointer(window, cutlass.Uint8, send_offset)
+    recv = nccl_cute.SymmetricPointer(window, cutlass.Uint8, size_bytes + send_offset)
 
-    if tidx < coop.size:
+    if tidx < coop.num_threads:
         for iteration in range(ITERS):
             expected = iteration + 1
             if dev_comm.rank == 0:
                 gin.put(
+                    coop,
                     world,
                     1,
-                    window,
                     recv,
-                    window,
                     send,
-                    coop,
-                    is_strong=False,
-                    is_signal=True,
-                    signal_id=signal_id,
-                    signal_op=SIGNAL_OP_INC,
-                    signal_op_arg=1,
+                    bytes_per_cta,
+                    remote_action=nccl_cute.GinSignalInc(signal_id, strong=False),
                     given_release=nccl_cute.ThreadScope.THREAD,
                     required_release=nccl_cute.ThreadScope.THREAD,
                 )
-                gin.wait_signal(coop, signal=signal_id, least=expected)
+                gin.wait_signal(coop, signal_id=signal_id, least=expected)
             else:
-                gin.wait_signal(coop, signal=signal_id, least=expected)
+                gin.wait_signal(coop, signal_id=signal_id, least=expected)
                 gin.put(
+                    coop,
                     world,
                     0,
-                    window,
                     recv,
-                    window,
                     send,
-                    coop,
-                    is_strong=False,
-                    is_signal=True,
-                    signal_id=signal_id,
-                    signal_op=SIGNAL_OP_INC,
-                    signal_op_arg=1,
+                    bytes_per_cta,
+                    remote_action=nccl_cute.GinSignalInc(signal_id, strong=False),
                     given_release=nccl_cute.ThreadScope.THREAD,
                     required_release=nccl_cute.ThreadScope.THREAD,
                 )
         gin.flush(coop)
         coop.sync()
         if tidx == 0:
-            gin.reset_signal(signal=signal_id)
+            gin.reset_signal(signal_id=signal_id)
         coop.sync()
 
 
@@ -184,11 +165,11 @@ def gin_put_bandwidth_kernel(
     cta, _, _ = cute.arch.block_idx()
     tidx, _, _ = cute.arch.thread_idx()
     if cutlass.const_expr(coop_scope == COOP_SCOPE_THREAD):
-        coop = nccl_cute.thread()
+        coop = nccl_cute.Coop.thread()
     elif cutlass.const_expr(coop_scope == COOP_SCOPE_WARP):
-        coop = nccl_cute.warp()
+        coop = nccl_cute.Coop.warp()
     else:
-        coop = nccl_cute.cta()
+        coop = nccl_cute.Coop.cta()
     world = dev_comm.team_world
     context = cta % cutlass.Int32(dev_comm.gin_context_count)
     gin = dev_comm.gin(
@@ -196,20 +177,17 @@ def gin_put_bandwidth_kernel(
         resource_sharing_mode=nccl_cute.GinResourceSharingMode.GPU,
     )
     bytes_per_cta = size_bytes // CTAS
-    payload = cute.make_layout(bytes_per_cta)
-    buffer = window.tensor(cutlass.Uint8, payload, offset=cta * bytes_per_cta)
+    buffer = nccl_cute.SymmetricPointer(window, cutlass.Uint8, cta * bytes_per_cta)
 
-    if tidx < coop.size:
+    if tidx < coop.num_threads:
         for _ in range(ITERS):
             gin.put(
+                coop,
                 world,
                 1,
-                window,
                 buffer,
-                window,
                 buffer,
-                coop,
-                is_strong=False,
+                bytes_per_cta,
                 given_release=nccl_cute.ThreadScope.THREAD,
                 required_release=nccl_cute.ThreadScope.THREAD,
             )
@@ -442,6 +420,7 @@ def main() -> int:
         elif args.gin_backend is not None:
             available = props.available_gin_types
             if available is None:
+                # Before NCCL 2.31, a communicator has only one GIN backend.
                 available = {props.gin_type}
             if GIN_TYPES[args.gin_backend] not in available:
                 names = ", ".join(
@@ -452,6 +431,7 @@ def main() -> int:
                     f"requested GIN backend '{args.gin_backend}' is unavailable "
                     f"(available: {names or 'none'})"
                 )
+        # Every rank must agree to skip before entering any collective setup.
         skip_reasons = comm.allgather(skip_reason)
         if any(skip_reasons):
             if rank == 0:
