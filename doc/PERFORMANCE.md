@@ -141,5 +141,9 @@ To obtain a bus bandwidth which should be independent of the number of ranks _n_
 * Broadcast : 1
 * Reduce : 1
 * AlltoAll: (_n_-1)/_n_
+* AlltoAllv: instead of a fixed factor, the largest number of bytes any rank sends to or receives from *other* ranks,
+  divided by the time. This is 1 x algbw with the default distance-weighted pattern (`NCCL_TESTS_ALLTOALLV_SPREAD=1.0`,
+  nothing is sent to self), (_n_-1)/_n_ x algbw with a uniform pattern (spread 0.0), and excludes the diagonal of a
+  traffic matrix.
 
 The bus bandwidth should reflect the speed of the hardware bottleneck : NVLink, PCI, QPI, or network.
