@@ -88,7 +88,8 @@
  * and the maximum time across ranks. This approach is most representative of
  * collective performance in imbalanced workloads. Use the -a 3 option to report
  * max time across ranks rather than the default average time, which can be skewed
- * by inactive ranks.
+ * by inactive ranks. For bus bandwidth, exclude the bytes each rank sends to
+ * itself before taking the maximum across ranks.
  *
  * Optional per-rank bandwidth summary:
  *   Set NCCL_TESTS_ALLTOALLV_PRINT_SUMMARY=1 to print detailed per-rank statistics
@@ -370,35 +371,47 @@ static inline size_t AlltoAllvGetPeerBytesDistanceWeighted(int i, int j, int nra
   return (size_t)bytes & ~(size_t)15;
 }
 
-static void AlltoAllvComputeMaxCounts(size_t *maxSendCount, size_t *maxRecvCount, size_t eltSize, int nranks, size_t total_bytes) {
+struct AlltoAllvBytes {
+  size_t send, recv, remote;
+};
+
+static AlltoAllvBytes AlltoAllvRankBytes(int rank, int nranks, size_t total_bytes) {
+  size_t send = 0, recv = 0, self;
   if (alltoallv_use_generated_pattern) {
-    // Generated patterns are symmetric & balanced: compute one rank's total (O(N))
-    size_t rank_total = 0;
-    for (int j = 0; j < nranks; j++) {
-      rank_total += AlltoAllvGetPeerBytesDistanceWeighted(0, j, nranks, total_bytes) / eltSize;
-    }
-    *maxSendCount = *maxRecvCount = rank_total;
+    // Each row and column is a cyclic shift of the first row.
+    for (int peer = 0; peer < nranks; peer++)
+      send += AlltoAllvGetPeerBytesDistanceWeighted(0, peer, nranks, total_bytes);
+    recv = send;
+    self = AlltoAllvGetPeerBytesDistanceWeighted(0, 0, nranks, total_bytes);
   } else {
-    // File-based patterns: scan all ranks for max (O(N²))
-    size_t max_s = 0, max_r = 0;
-    for (int i = 0; i < nranks; i++) {
-      size_t rank_s = 0, rank_r = 0;
-      for (int j = 0; j < nranks; j++) {
-        rank_s += AlltoAllvGetPeerBytesFromMatrix(i, j) / eltSize;
-        rank_r += AlltoAllvGetPeerBytesFromMatrix(j, i) / eltSize;
-      }
-      max_s = MAX(max_s, rank_s);
-      max_r = MAX(max_r, rank_r);
+    for (int peer = 0; peer < nranks; peer++) {
+      send += AlltoAllvGetPeerBytesFromMatrix(rank, peer);
+      recv += AlltoAllvGetPeerBytesFromMatrix(peer, rank);
     }
-    *maxSendCount = max_s;
-    *maxRecvCount = max_r;
+    self = AlltoAllvGetPeerBytesFromMatrix(rank, rank);
   }
+  return {send, recv, MAX(send, recv) - self};
+}
+
+static AlltoAllvBytes AlltoAllvMaxBytes(int nranks, size_t total_bytes) {
+  AlltoAllvBytes peak = AlltoAllvRankBytes(0, nranks, total_bytes);
+  if (!alltoallv_use_generated_pattern) {
+    for (int rank = 1; rank < nranks; rank++) {
+      AlltoAllvBytes bytes = AlltoAllvRankBytes(rank, nranks, total_bytes);
+      peak.send = MAX(peak.send, bytes.send);
+      peak.recv = MAX(peak.recv, bytes.recv);
+      peak.remote = MAX(peak.remote, bytes.remote);
+    }
+  }
+  return peak;
 }
 
 void AlltoAllvGetCollByteCount(size_t *sendcount, size_t *recvcount, size_t *paramcount, size_t *sendInplaceOffset, size_t *recvInplaceOffset, size_t count, size_t eltSize, int nranks) {
   *paramcount = alltoallv_use_generated_pattern ? (count / nranks) & ~(16/eltSize - 1) : 0;
   size_t total_bytes = (*paramcount) * nranks * eltSize;
-  AlltoAllvComputeMaxCounts(sendcount, recvcount, eltSize, nranks, total_bytes);
+  AlltoAllvBytes bytes = AlltoAllvMaxBytes(nranks, total_bytes);
+  *sendcount = bytes.send / eltSize;
+  *recvcount = bytes.recv / eltSize;
   *sendInplaceOffset = 0;
   *recvInplaceOffset = 0;
 }
@@ -474,37 +487,20 @@ static void AlltoAllvPrintRankBandwidths(int nranks, size_t total_bytes, double 
   }
 
   for (int rank = 0; rank < nranks; rank++) {
-    size_t rank_send_bytes = 0, rank_recv_bytes = 0;
-    for (int peer = 0; peer < nranks; peer++) {
-      if (alltoallv_use_generated_pattern) {
-        rank_send_bytes += AlltoAllvGetPeerBytesDistanceWeighted(rank, peer, nranks, total_bytes);
-        rank_recv_bytes += AlltoAllvGetPeerBytesDistanceWeighted(peer, rank, nranks, total_bytes);
-      } else {
-        rank_send_bytes += AlltoAllvGetPeerBytesFromMatrix(rank, peer);
-        rank_recv_bytes += AlltoAllvGetPeerBytesFromMatrix(peer, rank);
-      }
-    }
-
-    size_t rank_max_bytes = MAX(rank_send_bytes, rank_recv_bytes);
-    double rank_alg_bw = (double)rank_max_bytes / 1.0E9 / sec;
-    double factor = ((double)(nranks-1))/((double)(nranks));
-    double rank_bus_bw = rank_alg_bw * factor;
+    AlltoAllvBytes bytes = AlltoAllvRankBytes(rank, nranks, total_bytes);
+    double rank_alg_bw = (double)MAX(bytes.send, bytes.recv) / 1.0E9 / sec;
+    double rank_bus_bw = (double)bytes.remote / 1.0E9 / sec;
 
     printf("#   rank=%d send_bytes=%zu recv_bytes=%zu alg_bw=%.2f bus_bw=%.2f\n",
-          rank, rank_send_bytes, rank_recv_bytes, rank_alg_bw, rank_bus_bw);
+          rank, bytes.send, bytes.recv, rank_alg_bw, rank_bus_bw);
   }
 }
 
 void AlltoAllvGetBw(size_t count, size_t typesize, double sec, double* algBw, double* busBw, int nranks) {
   size_t total_bytes = count * nranks * typesize;
-  size_t max_sendcount, max_recvcount;
-  AlltoAllvComputeMaxCounts(&max_sendcount, &max_recvcount, typesize, nranks, total_bytes);
-  size_t max_bytes = MAX(max_sendcount, max_recvcount) * typesize;
-  double baseBw = (double)max_bytes / 1.0E9 / sec;
-
-  *algBw = baseBw;
-  double factor = ((double)(nranks-1))/((double)(nranks));
-  *busBw = baseBw * factor;
+  AlltoAllvBytes bytes = AlltoAllvMaxBytes(nranks, total_bytes);
+  *algBw = (double)MAX(bytes.send, bytes.recv) / 1.0E9 / sec;
+  *busBw = (double)bytes.remote / 1.0E9 / sec;
 
   if (alltoallv_print_summary && is_main_thread) {
     // print per-rank bandwidth summary (rank 0 computes and prints all ranks)
