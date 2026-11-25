@@ -142,4 +142,6 @@ To obtain a bus bandwidth which should be independent of the number of ranks _n_
 * Reduce : 1
 * AlltoAll: (_n_-1)/_n_
 
+For AlltoAllv, each rank can send a different number of bytes to each peer. The test counts the bytes each rank sends to other ranks and the bytes it receives from them. Bus bandwidth is the largest of those counts across all ranks divided by the elapsed time. A diagonal traffic matrix therefore reports zero bus bandwidth.
+
 The bus bandwidth should reflect the speed of the hardware bottleneck : NVLink, PCI, QPI, or network.
